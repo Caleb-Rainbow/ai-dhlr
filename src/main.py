@@ -213,7 +213,8 @@ class FireSafetySystem:
             app,
             host=config.api.host,
             port=config.api.port,
-            log_level="info"
+            log_level="info",
+            log_config=None
         )
 
 

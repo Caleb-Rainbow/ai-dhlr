@@ -152,104 +152,103 @@ class RKNNEngine(InferenceEngine):
     
     def _postprocess(self, outputs: List[np.ndarray], img_h: int, img_w: int) -> List[Detection]:
         """
-        后处理RKNN输出
-        
-        Args:
-            outputs: RKNN推理输出（6个张量）
-            img_h: 原图高度
-            img_w: 原图宽度
-        
-        Returns:
-            检测结果列表
+        针对 6 张量输出优化的向量化后处理
+        解决 OpenCV 兼容性问题并修复坐标偏移
         """
-        detect_results = []
-        
-        # 展平输出
-        output = []
-        for i in range(len(outputs)):
-            output.append(outputs[i].reshape((-1)))
-        
-        # 计算缩放比例
+        all_boxes = []
+        all_scores = []
+        all_class_ids = []
+
         scale_h = img_h / self.INPUT_HEIGHT
         scale_w = img_w / self.INPUT_WIDTH
-        
-        grid_index = -2
-        
-        for head_idx in range(self.HEAD_NUM):
-            cls = output[head_idx * 2 + 0]  # 分类输出
-            reg = output[head_idx * 2 + 1]  # 回归输出
+
+        for i in range(self.HEAD_NUM):
+            stride = self.STRIDES[i]
+            # 你的模型输出顺序是：head0_cls, head0_reg, head1_cls, head1_reg...
+            # 形状通常是 (1, classes, h, w) 和 (1, 64, h, w)
+            cls_tensor = outputs[i * 2]
+            reg_tensor = outputs[i * 2 + 1]
             
-            map_h = self.MAP_SIZES[head_idx][0]
-            map_w = self.MAP_SIZES[head_idx][1]
-            stride = self.STRIDES[head_idx]
+            # 1. 展平并转置
+            # (1, 80, 80, 80) -> (80, 6400) -> (6400, 80)
+            cls = cls_tensor.reshape(self._class_num, -1).transpose(1, 0)
+            # (1, 64, 80, 80) -> (64, 6400) -> (6400, 64)
+            reg = reg_tensor.reshape(64, -1).transpose(1, 0)
             
-            for h in range(map_h):
-                for w in range(map_w):
-                    grid_index += 2
-                    
-                    # 找最大类别分数
-                    cls_max = -float('inf')
-                    cls_index = 0
-                    
-                    if self._class_num == 1:
-                        cls_max = self._sigmoid(cls[0 * map_h * map_w + h * map_w + w])
-                        cls_index = 0
-                    else:
-                        for cl in range(self._class_num):
-                            cls_val = cls[cl * map_h * map_w + h * map_w + w]
-                            if cls_val > cls_max:
-                                cls_max = cls_val
-                                cls_index = cl
-                        cls_max = self._sigmoid(cls_max)
-                    
-                    # 过滤低置信度
-                    if cls_max <= self._confidence_threshold:
-                        continue
-                    
-                    # DFL解码边界框
-                    regdfl = []
-                    for lc in range(4):
-                        sfsum = 0
-                        locval = 0
-                        
-                        # Softmax
-                        for df in range(16):
-                            idx = ((lc * 16) + df) * map_h * map_w + h * map_w + w
-                            temp = exp(reg[idx])
-                            reg[idx] = temp
-                            sfsum += temp
-                        
-                        # 计算期望值
-                        for df in range(16):
-                            idx = ((lc * 16) + df) * map_h * map_w + h * map_w + w
-                            sfval = reg[idx] / sfsum
-                            locval += sfval * df
-                        regdfl.append(locval)
-                    
-                    # 还原坐标
-                    x1 = (self._meshgrid[grid_index + 0] - regdfl[0]) * stride
-                    y1 = (self._meshgrid[grid_index + 1] - regdfl[1]) * stride
-                    x2 = (self._meshgrid[grid_index + 0] + regdfl[2]) * stride
-                    y2 = (self._meshgrid[grid_index + 1] + regdfl[3]) * stride
-                    
-                    # 缩放到原图尺寸
-                    xmin = max(0, int(x1 * scale_w))
-                    ymin = max(0, int(y1 * scale_h))
-                    xmax = min(img_w, int(x2 * scale_w))
-                    ymax = min(img_h, int(y2 * scale_h))
-                    
-                    cx = (xmin + xmax) // 2
-                    cy = (ymin + ymax) // 2
-                    
-                    detect_results.append(Detection(
-                        class_id=cls_index,
-                        class_name=self.CLASSES[cls_index] if cls_index < len(self.CLASSES) else str(cls_index),
-                        confidence=cls_max,
-                        bbox=(xmin, ymin, xmax, ymax),
-                        center=(cx, cy)
-                    ))
-        
-        # NMS
+            # 2. 批量 Sigmoid (RKNN 导出的 YOLO 通常输出是原始 Logits)
+            # 使用 clip 防止 exp 溢出
+            cls = 1 / (1 + np.exp(-np.clip(cls, -88, 88)))
+            
+            # 3. 筛选置信度
+            max_scores = np.max(cls, axis=1)
+            keep_idx = max_scores > self._confidence_threshold
+            
+            if not np.any(keep_idx):
+                continue
+                
+            cls = cls[keep_idx]
+            reg = reg[keep_idx]
+            max_scores = max_scores[keep_idx]
+            class_ids = np.argmax(cls, axis=1)
+            
+            # 4. 生成当前层级的网格坐标
+            map_h, map_w = self.MAP_SIZES[i]
+            grid_y, grid_x = np.mgrid[:map_h, :map_w]
+            grid_coords = np.stack((grid_x, grid_y), axis=-1).reshape(-1, 2) + 0.5
+            grid_coords = grid_coords[keep_idx]
+            
+            # 5. DFL 解码 (Softmax + 加权求和)
+            reg_dfl = reg.reshape(-1, 4, 16)
+            # 减去最大值防止 Softmax 溢出
+            reg_exp = np.exp(reg_dfl - np.max(reg_dfl, axis=2, keepdims=True))
+            reg_softmax = reg_exp / np.sum(reg_exp, axis=2, keepdims=True)
+            
+            weights = np.arange(16)
+            dist = np.sum(reg_softmax * weights, axis=2) # (N, 4)
+            
+            # 6. 还原为 XYXY 坐标
+            # x1 = (grid_x - left) * stride
+            pb_x1 = (grid_coords[:, 0] - dist[:, 0]) * stride
+            pb_y1 = (grid_coords[:, 1] - dist[:, 1]) * stride
+            pb_x2 = (grid_coords[:, 0] + dist[:, 2]) * stride
+            pb_y2 = (grid_coords[:, 1] + dist[:, 3]) * stride
+            
+            all_boxes.append(np.stack([pb_x1 * scale_w, pb_y1 * scale_h, pb_x2 * scale_w, pb_y2 * scale_h], axis=1))
+            all_scores.append(max_scores)
+            all_class_ids.append(class_ids)
+
+        if not all_boxes:
+            return []
+
+        # 合并结果
+        boxes = np.concatenate(all_boxes, axis=0)
+        scores = np.concatenate(all_scores, axis=0)
+        class_ids = np.concatenate(all_class_ids, axis=0)
+
+        # 7. 构造 Detection 对象并强制转换为 Python 原生类型
+        detect_results = []
+        for i in range(len(boxes)):
+            # 核心修复点：使用 .item() 或 int() 转换 Numpy 标量
+            x1 = int(round(float(boxes[i][0])))
+            y1 = int(round(float(boxes[i][1])))
+            x2 = int(round(float(boxes[i][2])))
+            y2 = int(round(float(boxes[i][3])))
+            
+            # 裁剪到图像范围内
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(img_w, x2), min(img_h, y2)
+            
+            conf = float(scores[i])
+            cls_id = int(class_ids[i])
+
+            detect_results.append(Detection(
+                class_id=cls_id,
+                class_name=self.CLASSES[cls_id] if cls_id < len(self.CLASSES) else str(cls_id),
+                confidence=conf,
+                bbox=(x1, y1, x2, y2),
+                center=((x1 + x2) // 2, (y1 + y2) // 2) # 这里现在是原生 int
+            ))
+
         return self._nms(detect_results)
     
     def _nms(self, detections: List[Detection]) -> List[Detection]:

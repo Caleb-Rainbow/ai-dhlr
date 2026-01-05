@@ -4,16 +4,6 @@ api:
   host: 0.0.0.0
   port: 8000
 cameras:
-- device: 0
-  fps: 30
-  height: 480
-  id: cam_0
-  name: 主摄像头
-  password: null
-  rtsp_url: null
-  type: usb
-  username: null
-  width: 640
 - device: null
   fps: 30
   height: 480
@@ -24,6 +14,26 @@ cameras:
   type: rtsp
   username: admin
   width: 640
+- device: 10
+  fps: 30
+  height: 480
+  id: cam_0
+  name: 主摄像头
+  password: null
+  rtsp_url: null
+  type: usb
+  username: null
+  width: 640
+- device: 12
+  fps: 30
+  height: 480
+  id: '3'
+  name: usb摄像头3
+  password: null
+  rtsp_url: null
+  type: usb
+  username: null
+  width: 640
 detection:
   no_person_threshold: 3
   person_present_threshold: 2
@@ -31,8 +41,8 @@ gpio:
   simulated: true
 inference:
   confidence_threshold: 0.5
-  engine: pytorch
-  model_path: yolo11n.pt
+  engine: rknn
+  model_path: yolov11n-sim.rknn
   person_class_id: 0
 logging:
   level: INFO
@@ -90,3 +100,16 @@ zones:
     - 0.6647673314339981
   - - 0.532051282051282
     - 0.402659069325736
+- camera_id: '3'
+  enabled: true
+  id: zone_4
+  name: 4号灶台
+  roi:
+  - - 0.1
+    - 0.1
+  - - 0.9
+    - 0.1
+  - - 0.9
+    - 0.9
+  - - 0.1
+    - 0.9
