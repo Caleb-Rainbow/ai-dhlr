@@ -234,13 +234,13 @@ body {
 .zone-cards {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
 }
 
 .zone-card {
     background: var(--bg-card);
     border-radius: var(--border-radius);
-    padding: 16px;
+    padding: 10px 12px;
     box-shadow: var(--shadow-md);
     transition: all 0.3s;
 }
@@ -253,21 +253,21 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
 .zone-name {
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 600;
 }
 
 .zone-status {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
+    gap: 4px;
+    padding: 3px 8px;
     border-radius: 20px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
 }
 
@@ -313,40 +313,40 @@ body {
 .zone-card-body {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    gap: 6px;
 }
 
 .zone-info-item {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 .zone-info-label {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
     text-transform: uppercase;
 }
 
 .zone-info-value {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
 }
 
 .zone-card-actions {
     display: flex;
-    gap: 8px;
-    margin-top: 16px;
-    padding-top: 12px;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .countdown {
-    font-size: 24px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--warning);
     text-align: center;
-    margin: 12px 0;
+    margin: 6px 0;
 }
 
 .countdown.danger {
@@ -502,51 +502,52 @@ body {
 .zone-config-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
 }
 
 .zone-config-card {
     background: var(--bg-card);
     border-radius: var(--border-radius);
-    padding: 16px;
+    padding: 10px 12px;
 }
 
 .zone-config-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
 .zone-config-name {
     font-weight: 600;
-    font-size: 16px;
+    font-size: 14px;
 }
 
 .zone-config-body {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-    font-size: 13px;
+    gap: 6px;
+    font-size: 12px;
     color: var(--text-secondary);
 }
 
 .zone-config-actions {
     display: flex;
-    gap: 8px;
-    margin-top: 12px;
-    padding-top: 12px;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* ROI预览容器 */
+/* ROI预览容器 - 紧凑版 */
 .roi-preview-container {
     position: relative;
     background: #000;
     border-radius: var(--border-radius-sm);
     overflow: hidden;
-    margin: 12px 0;
-    aspect-ratio: 4/3;
+    margin: 8px 0;
+    aspect-ratio: 16/9;
+    max-height: 150px;
 }
 
 .roi-preview-container img {
@@ -1148,100 +1149,84 @@ body {
     }
 }
 
-/* 日志页面优化 */
-.logs-page {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - var(--header-height) - var(--nav-height) - 40px);
+/* 日志页面优化 - 强制覆盖 */
+.page.logs-page {
+    display: flex !important;
+    flex-direction: column !important;
+    height: calc(100vh - var(--header-height) - var(--nav-height) - 40px) !important;
+    overflow: hidden !important;
 }
 
 .logs-page .page-header {
-    flex-shrink: 0;
-    flex-wrap: nowrap;
-    gap: 8px;
+    flex-shrink: 0 !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    align-items: center !important;
+    margin-bottom: 12px !important;
 }
 
 .logs-page .page-header h2 {
-    white-space: nowrap;
-    font-size: 18px;
+    white-space: nowrap !important;
+    font-size: 16px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
 }
 
-.header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
+.logs-page .header-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-shrink: 0 !important;
+    flex-wrap: nowrap !important;
 }
 
-.header-actions select {
-    padding: 6px 10px;
-    border-radius: var(--border-radius-sm);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--gray-600);
-    font-size: 12px;
-    max-width: 150px;
+.logs-page .header-actions select {
+    padding: 4px 8px !important;
+    border-radius: 6px !important;
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--gray-600) !important;
+    font-size: 11px !important;
+    max-width: 120px !important;
+    min-width: 80px !important;
 }
 
-.header-actions .btn {
-    padding: 6px 12px;
-    font-size: 12px;
-    white-space: nowrap;
-    flex: none;
+.logs-page .header-actions .btn {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+    flex: none !important;
 }
 
-.log-content-section {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
+.logs-page .log-content-section {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
 }
 
-.log-content-section h3 {
-    flex-shrink: 0;
-    font-size: 14px;
-    margin-bottom: 8px;
+.logs-page .log-content-section h3 {
+    flex-shrink: 0 !important;
+    font-size: 13px !important;
+    margin: 0 0 8px 0 !important;
 }
 
-.log-viewer {
-    flex: 1;
-    background: var(--bg-secondary);
-    border-radius: var(--border-radius-sm);
-    overflow: auto;
-    min-height: 0;
+.logs-page .log-viewer {
+    flex: 1 !important;
+    background: var(--bg-secondary) !important;
+    border-radius: 8px !important;
+    overflow: auto !important;
+    min-height: 0 !important;
 }
 
-.log-viewer pre {
-    margin: 0;
-    padding: 12px;
-    font-size: 11px;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    word-break: break-all;
-}
-
-/* 灶台卡片紧凑化 */
-.zone-card {
-    padding: 12px;
-}
-
-.zone-card-header {
-    margin-bottom: 8px;
-}
-
-.zone-card-body {
-    gap: 8px;
-}
-
-.zone-card-actions {
-    margin-top: 10px;
-    padding-top: 8px;
-}
-
-.zone-card-actions .btn {
-    padding: 8px 12px;
-    font-size: 13px;
+.logs-page .log-viewer pre {
+    margin: 0 !important;
+    padding: 10px !important;
+    font-size: 10px !important;
+    line-height: 1.4 !important;
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
 }
 
 /* TTS 测试面板 */
