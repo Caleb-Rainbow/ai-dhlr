@@ -1150,11 +1150,24 @@ body {
 }
 
 /* 日志页面优化 - 强制覆盖 */
+/* 日志页面优化 - 强制覆盖 - 使用 fixed 定位撑满中间 */
 .page.logs-page {
     display: flex !important;
     flex-direction: column !important;
-    height: 100% !important;
+    position: fixed !important;
+    top: var(--header-height) !important;
+    bottom: var(--nav-height) !important;
+    left: 0 !important;
+    right: 0 !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 480px !important;
+    /* 保持与 app 同宽 */
+    height: auto !important;
+    padding: 12px !important;
     overflow: hidden !important;
+    z-index: 50 !important;
+    background: var(--bg-primary) !important;
 }
 
 .logs-page .page-header {
