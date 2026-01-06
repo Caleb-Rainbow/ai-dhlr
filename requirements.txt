@@ -10,7 +10,7 @@ opencv-python>=4.9.0
 numpy>=1.24.0
 
 # YOLO推理
-ultralytics>=8.1.0
+#ultralytics>=8.1.0
 
 # 配置管理
 pyyaml>=6.0
