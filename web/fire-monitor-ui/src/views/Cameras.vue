@@ -76,14 +76,26 @@ const openEditModal = async (cam: CameraType) => {
   }
 };
 
+const generateUniqueId = () => {
+  // 生成基于时间戳和随机数的唯一ID
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 1000);
+  return `cam_${timestamp}_${random}`;
+};
+
 const submitForm = async () => {
-  if (!form.value.name || (!isEditing.value && !form.value.id)) return;
+  if (!form.value.name) return;
   
   try {
     if (isEditing.value) {
       await ws.request('update_camera', { camera_id: form.value.id, ...form.value });
     } else {
-      await ws.request('create_camera', form.value);
+      // 自动生成唯一ID
+      const cameraData = {
+        ...form.value,
+        id: generateUniqueId()
+      };
+      await ws.request('create_camera', cameraData);
     }
     showModal.value = false;
     await loadCameras();
@@ -229,10 +241,6 @@ onUnmounted(() => {
     <!-- Add/Edit Modal -->
     <Modal :title="isEditing ? '编辑摄像头' : '添加摄像头'" :is-open="showModal" @close="showModal = false">
         <div class="space-y-4">
-            <div v-if="!isEditing" class="space-y-1">
-                <label class="text-xs text-text-muted">摄像头ID</label>
-                <input v-model="form.id" type="text" placeholder="如: cam_1" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            </div>
             <div class="space-y-1">
                 <label class="text-xs text-text-muted">名称</label>
                 <input v-model="form.name" type="text" placeholder="如: 厨房摄像头1" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">

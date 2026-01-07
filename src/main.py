@@ -6,6 +6,7 @@ import sys
 import signal
 import threading
 import time
+import base64
 from pathlib import Path
 import cv2
 
@@ -26,7 +27,7 @@ from src.zone.models import Zone
 from src.output.voice import voice_player
 from src.output.gpio import gpio_controller
 from src.api.server import create_app
-from src.api.websocket import sync_broadcast_state_change
+from src.api.websocket import sync_broadcast_state_change, sync_broadcast_alarm_event
 
 
 class FireSafetySystem:
@@ -140,27 +141,33 @@ class FireSafetySystem:
                 print(f"系统初始化失败: {e}")
             return False
     
-    def _on_warning(self, zone: Zone):
+    def _on_warning(self, zone: Zone, frame = None):
         """预警回调（第一阶段）- 加入播报队列"""
         config = get_config()
         self._logger.warning(f"[预警] {zone.name} 无人看管超过 {config.alarm.warning_time} 秒")
-        # 添加到播报列表
         self._add_to_broadcast_queue(zone.id, zone.name, "warning")
+        
+        image_base64 = self._frame_to_base64(frame) if frame is not None else None
+        sync_broadcast_alarm_event(zone.id, zone.name, "warning", image_base64)
     
-    def _on_alarm(self, zone: Zone):
+    def _on_alarm(self, zone: Zone, frame = None):
         """报警回调（第二阶段）- 更新播报内容"""
         config = get_config()
         self._logger.warning(f"[报警] {zone.name} 无人看管超过 {config.alarm.alarm_time} 秒")
-        # 更新播报类型
         self._add_to_broadcast_queue(zone.id, zone.name, "alarm")
+        
+        image_base64 = self._frame_to_base64(frame) if frame is not None else None
+        sync_broadcast_alarm_event(zone.id, zone.name, "alarm", image_base64)
     
-    def _on_cutoff(self, zone: Zone):
+    def _on_cutoff(self, zone: Zone, frame = None):
         """切电回调（第三阶段）- 执行切电并更新播报内容"""
         config = get_config()
         self._logger.warning(f"[切电] {zone.name} 无人看管超过 {config.alarm.action_time} 秒，执行切电")
         gpio_controller.cutoff(zone.id)
-        # 更新播报类型（继续循环播报直到复位）
         self._add_to_broadcast_queue(zone.id, zone.name, "action")
+        
+        image_base64 = self._frame_to_base64(frame) if frame is not None else None
+        sync_broadcast_alarm_event(zone.id, zone.name, "cutoff", image_base64)
     
     def _on_state_change(self, event: StateChangeEvent):
         """状态变化回调 - 根据状态决定是否停止播报"""
@@ -201,6 +208,17 @@ class FireSafetySystem:
             if zone_id in self._broadcast_stop_flags:
                 self._broadcast_stop_flags[zone_id]["active"] = False
                 self._logger.info(f"[{zone_id}] 已标记停止播报")
+    
+    def _frame_to_base64(self, frame) -> str:
+        """将图像帧转换为Base64编码"""
+        if frame is None:
+            return None
+        try:
+            _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            return base64.b64encode(jpeg.tobytes()).decode('utf-8')
+        except Exception as e:
+            self._logger.error(f"图像Base64编码失败: {e}")
+            return None
     
     def _ensure_broadcast_manager_running(self):
         """确保播报管理线程在运行"""

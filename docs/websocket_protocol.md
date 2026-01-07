@@ -92,8 +92,47 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
     "type": "state_change",
     "data": {
         "zone_id": "zone_1",
+        "zone_name": "灶台1",
         "old_state": "active_no_person",
-        "new_state": "warning"
+        "new_state": "warning",
+        "timestamp": 1704614400000,
+        "message": "状态变化: active_no_person -> warning"
+    }
+}
+```
+
+**报警事件（预警/报警/切电）**
+```json
+{
+    "type": "alarm_event",
+    "data": {
+        "zone_id": "zone_1",
+        "zone_name": "灶台1",
+        "alarm_type": "warning",
+        "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD...",
+        "message": "灶台 灶台1 触发预警"
+    }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| type | string | 是 | 固定为 "alarm_event" |
+| data | object | 是 | 报警事件数据 |
+| data.zone_id | string | 是 | 灶台ID |
+| data.zone_name | string | 是 | 灶台名称 |
+| data.alarm_type | string | 是 | 报警类型：warning（预警）、alarm（报警）、cutoff（切电） |
+| data.image | string | 否 | 抓拍图片Base64编码（JPEG格式），格式为 `data:image/jpeg;base64,...` |
+| data.message | string | 否 | 事件消息描述 |
+
+**网络状态**
+```json
+{
+    "type": "network_status",
+    "data": {
+        "local_connected": true,
+        "remote_connected": false,
+        "remote_server": "wss://vis.example.com/dhlr/socket"
     }
 }
 ```

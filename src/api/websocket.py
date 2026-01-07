@@ -236,17 +236,111 @@ async def broadcast_network_status(network_status: dict):
     await message_dispatcher.broadcast_to_all(message)
 
 
+async def broadcast_alarm_event(zone_id: str, zone_name: str, alarm_type: str, 
+                                image_base64: str = None, message: str = None):
+    """
+    广播报警事件（预警、报警、切电）
+    
+    Args:
+        zone_id: 灶台ID
+        zone_name: 灶台名称
+        alarm_type: 报警类型 "warning" | "alarm" | "cutoff"
+        image_base64: 抓拍图片Base64编码
+        message: 事件消息
+    """
+    try:
+        image_data = f"data:image/jpeg;base64,{image_base64}" if image_base64 else None
+        message = {
+            "type": "alarm_event",
+            "data": {
+                "zone_id": zone_id,
+                "zone_name": zone_name,
+                "alarm_type": alarm_type,
+                "image": image_data,
+                "message": message or f"{zone_name} 触发{_get_alarm_type_name(alarm_type)}"
+            }
+        }
+        await message_dispatcher.broadcast_to_all(message)
+    except Exception as e:
+        logger.error(f"报警事件广播失败: {e}", exc_info=True)
+
+
+def _get_alarm_type_name(alarm_type: str) -> str:
+    """获取报警类型中文名称"""
+    names = {
+        "warning": "预警",
+        "alarm": "报警",
+        "cutoff": "切电"
+    }
+    return names.get(alarm_type, alarm_type)
+
+
+def sync_broadcast_alarm_event(zone_id: str, zone_name: str, alarm_type: str, 
+                                image_base64: str = None, message: str = None):
+    """
+    同步版本的报警事件广播
+    用于从非异步上下文调用
+    """
+    try:
+        # 获取或创建事件循环
+        loop = None
+        try:
+            # 尝试获取主事件循环
+            loop = asyncio.get_event_loop()
+            if loop and loop.is_running():
+                # 使用当前运行的事件循环
+                asyncio.run_coroutine_threadsafe(
+                    broadcast_alarm_event(zone_id, zone_name, alarm_type, image_base64, message),
+                    loop
+                )
+                return
+        except (RuntimeError, AssertionError):
+            # 当前线程没有事件循环或事件循环已关闭
+            pass
+        
+        # 创建新的事件循环
+        new_loop = asyncio.new_event_loop()
+        
+        try:
+            # 在新的事件循环上运行
+            new_loop.run_until_complete(broadcast_alarm_event(zone_id, zone_name, alarm_type, image_base64, message))
+        finally:
+            # 关闭新创建的事件循环
+            new_loop.close()
+    except Exception as e:
+        logger.error(f"同步广播报警事件失败: {e}", exc_info=True)
+
+
 def sync_broadcast_state_change(event_data: dict):
     """
     同步版本的状态变化广播
     用于从非异步上下文调用
     """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(broadcast_state_change(event_data))
-        else:
-            loop.run_until_complete(broadcast_state_change(event_data))
-    except RuntimeError:
-        # 没有事件循环时忽略
-        pass
+        # 获取或创建事件循环
+        loop = None
+        try:
+            # 尝试获取主事件循环
+            loop = asyncio.get_event_loop()
+            if loop and loop.is_running():
+                # 使用当前运行的事件循环
+                asyncio.run_coroutine_threadsafe(
+                    broadcast_state_change(event_data),
+                    loop
+                )
+                return
+        except (RuntimeError, AssertionError):
+            # 当前线程没有事件循环或事件循环已关闭
+            pass
+        
+        # 创建新的事件循环
+        new_loop = asyncio.new_event_loop()
+        
+        try:
+            # 在新的事件循环上运行
+            new_loop.run_until_complete(broadcast_state_change(event_data))
+        finally:
+            # 关闭新创建的事件循环
+            new_loop.close()
+    except Exception as e:
+        logger.error(f"同步广播状态变化事件失败: {e}", exc_info=True)

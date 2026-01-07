@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { CookingPot, Trash2, Pencil, Plus } from 'lucide-vue-next';
 import { ws } from '../api/ws';
-import { api, ApiError } from '../api';
 import type { ZoneConfig, Camera } from '../types';
 import Modal from '../components/Modal.vue';
 import Skeleton from '../components/Skeleton.vue';

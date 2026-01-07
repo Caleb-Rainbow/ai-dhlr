@@ -124,29 +124,38 @@ class ZoneStateMachine:
                 if no_person_duration >= action_time:
                     # 阶段3：超过切电时间
                     if old_state != ZoneState.CUTOFF:
+                        self._logger.info(f"无人时间超过切电时间 ({action_time}秒)，切换到CUTOFF状态")
                         self._transition_to(ZoneState.CUTOFF)
                         # 保存截图
                         if current_frame is not None:
                             self._save_cutoff_snapshot(current_frame)
                         # 触发切电回调
                         if self._on_cutoff:
-                            self._on_cutoff(self.zone)
+                            self._on_cutoff(self.zone, current_frame)
                 
                 elif no_person_duration >= alarm_time:
                     # 阶段2：超过报警时间
                     if old_state not in [ZoneState.ALARM, ZoneState.CUTOFF]:
+                        self._logger.info(f"无人时间超过报警时间 ({alarm_time}秒)，切换到ALARM状态")
                         self._transition_to(ZoneState.ALARM)
+                        # 保存报警截图
+                        if current_frame is not None:
+                            self._save_alarm_snapshot(current_frame)
                         # 触发报警回调
                         if self._on_alarm:
-                            self._on_alarm(self.zone)
+                            self._on_alarm(self.zone, current_frame)
                 
                 elif no_person_duration >= warning_time:
                     # 阶段1：超过预警时间
                     if old_state not in [ZoneState.WARNING, ZoneState.ALARM, ZoneState.CUTOFF]:
+                        self._logger.info(f"无人时间超过预警时间 ({warning_time}秒)，切换到WARNING状态")
                         self._transition_to(ZoneState.WARNING)
+                        # 保存预警截图
+                        if current_frame is not None:
+                            self._save_warning_snapshot(current_frame)
                         # 触发预警回调
                         if self._on_warning:
-                            self._on_warning(self.zone)
+                            self._on_warning(self.zone, current_frame)
                 
                 else:
                     # 计时中
@@ -189,6 +198,20 @@ class ZoneStateMachine:
         if path:
             self.zone.last_snapshot_path = path
             event_logger.log_cutoff(self.zone.id, f"无人看管超时，已切电。截图: {path}")
+    
+    def _save_warning_snapshot(self, frame: np.ndarray):
+        """保存预警截图"""
+        path = event_logger.save_snapshot(self.zone.id, frame, "warning")
+        if path:
+            self.zone.last_snapshot_path = path
+            event_logger.log_warning(self.zone.id, f"无人看管即将超时。截图: {path}")
+    
+    def _save_alarm_snapshot(self, frame: np.ndarray):
+        """保存报警截图"""
+        path = event_logger.save_snapshot(self.zone.id, frame, "alarm")
+        if path:
+            self.zone.last_snapshot_path = path
+            event_logger.log_warning(self.zone.id, f"无人看管已超时报警。截图: {path}")
     
     def reset(self) -> bool:
         """
