@@ -47,6 +47,7 @@ class ZoneStateMachine:
         
         # 回调函数
         self._on_warning: Optional[Callable[[Zone], None]] = None
+        self._on_alarm: Optional[Callable[[Zone], None]] = None
         self._on_cutoff: Optional[Callable[[Zone], None]] = None
         self._on_state_change: Optional[Callable[[StateChangeEvent], None]] = None
         
@@ -56,10 +57,12 @@ class ZoneStateMachine:
     
     def set_callbacks(self, 
                       on_warning: Optional[Callable[[Zone], None]] = None,
+                      on_alarm: Optional[Callable[[Zone], None]] = None,
                       on_cutoff: Optional[Callable[[Zone], None]] = None,
                       on_state_change: Optional[Callable[[StateChangeEvent], None]] = None):
         """设置回调函数"""
         self._on_warning = on_warning
+        self._on_alarm = on_alarm
         self._on_cutoff = on_cutoff
         self._on_state_change = on_state_change
     
@@ -67,12 +70,19 @@ class ZoneStateMachine:
                current_frame: Optional[np.ndarray] = None) -> ZoneState:
         """
         更新状态机
+        
+        三阶段报警逻辑：
+        1. WARNING (预警): warning_time 秒后触发
+        2. ALARM (报警): alarm_time 秒后触发
+        3. CUTOFF (切电): action_time 秒后触发
         """
         with self._lock:
-            # 获取全局配置
-            safety_config = get_config().safety
-            warning_timeout = safety_config.warning_timeout
-            cutoff_timeout = safety_config.cutoff_timeout
+            # 获取全局配置 - 使用三阶段报警配置
+            config = get_config()
+            alarm_config = config.alarm
+            warning_time = alarm_config.warning_time
+            alarm_time = alarm_config.alarm_time
+            action_time = alarm_config.action_time
             
             current_time = time.time()
             dt = current_time - self._last_update_time
@@ -106,12 +116,13 @@ class ZoneStateMachine:
                 no_person_duration = current_time - self._no_person_start_time
                 self.zone.no_person_duration = no_person_duration
                 
-                # 计算倒计时
-                self.zone.warning_remaining = max(0, warning_timeout - no_person_duration)
-                self.zone.cutoff_remaining = max(0, cutoff_timeout - no_person_duration)
+                # 计算倒计时（使用三阶段时间）
+                self.zone.warning_remaining = max(0, warning_time - no_person_duration)
+                self.zone.alarm_remaining = max(0, alarm_time - no_person_duration)
+                self.zone.cutoff_remaining = max(0, action_time - no_person_duration)
                 
-                if no_person_duration >= cutoff_timeout:
-                    # 超过切电时间
+                if no_person_duration >= action_time:
+                    # 阶段3：超过切电时间
                     if old_state != ZoneState.CUTOFF:
                         self._transition_to(ZoneState.CUTOFF)
                         # 保存截图
@@ -121,9 +132,17 @@ class ZoneStateMachine:
                         if self._on_cutoff:
                             self._on_cutoff(self.zone)
                 
-                elif no_person_duration >= warning_timeout:
-                    # 超过预警时间
-                    if old_state not in [ZoneState.WARNING, ZoneState.CUTOFF]:
+                elif no_person_duration >= alarm_time:
+                    # 阶段2：超过报警时间
+                    if old_state not in [ZoneState.ALARM, ZoneState.CUTOFF]:
+                        self._transition_to(ZoneState.ALARM)
+                        # 触发报警回调
+                        if self._on_alarm:
+                            self._on_alarm(self.zone)
+                
+                elif no_person_duration >= warning_time:
+                    # 阶段1：超过预警时间
+                    if old_state not in [ZoneState.WARNING, ZoneState.ALARM, ZoneState.CUTOFF]:
                         self._transition_to(ZoneState.WARNING)
                         # 触发预警回调
                         if self._on_warning:
@@ -131,7 +150,7 @@ class ZoneStateMachine:
                 
                 else:
                     # 计时中
-                    if old_state not in [ZoneState.ACTIVE_NO_PERSON, ZoneState.WARNING, ZoneState.CUTOFF]:
+                    if old_state not in [ZoneState.ACTIVE_NO_PERSON, ZoneState.WARNING, ZoneState.ALARM, ZoneState.CUTOFF]:
                         self._transition_to(ZoneState.ACTIVE_NO_PERSON)
             
             return self.zone.state
@@ -235,11 +254,12 @@ class ZoneManager:
     
     def add_zone(self, config: ZoneConfig, 
                  on_warning: Callable = None,
+                 on_alarm: Callable = None,
                  on_cutoff: Callable = None,
                  on_state_change: Callable = None) -> ZoneStateMachine:
         """添加灶台"""
         sm = ZoneStateMachine(config)
-        sm.set_callbacks(on_warning, on_cutoff, on_state_change)
+        sm.set_callbacks(on_warning, on_alarm, on_cutoff, on_state_change)
         self._zones[config.id] = sm
         self._fire_states[config.id] = False  # 默认关火
         self._logger.info(f"添加灶台: {config.id} ({config.name})")
@@ -286,11 +306,12 @@ class ZoneManager:
     
     def initialize_from_config(self, zones: List[ZoneConfig],
                               on_warning: Callable = None,
+                              on_alarm: Callable = None,
                               on_cutoff: Callable = None,
                               on_state_change: Callable = None):
         """从配置初始化"""
         for config in zones:
-            self.add_zone(config, on_warning, on_cutoff, on_state_change)
+            self.add_zone(config, on_warning, on_alarm, on_cutoff, on_state_change)
         self._logger.info(f"从配置加载了 {len(zones)} 个灶台")
 
 

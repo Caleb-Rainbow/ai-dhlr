@@ -292,6 +292,12 @@ body {
     animation: pulse 1s infinite;
 }
 
+.zone-status.alarm {
+    background: rgba(231, 76, 60, 0.25);
+    color: var(--danger);
+    animation: pulse 0.8s infinite;
+}
+
 .zone-status.cutoff {
     background: rgba(231, 76, 60, 0.3);
     color: var(--danger);
@@ -422,6 +428,77 @@ body {
 /* 快捷操作 */
 .quick-actions {
     margin-top: 24px;
+}
+
+/* Floating Action Button (Material 3 Style) */
+.fab {
+    position: fixed;
+    right: 20px;
+    bottom: calc(var(--nav-height) + 20px);
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 110;
+    /* Ensure it's above other elements */
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: none;
+    outline: none;
+    padding: 0;
+    animation: fabScaleIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes fabScaleIn {
+    from {
+        transform: scale(0) rotate(-45deg);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1) rotate(0);
+        opacity: 1;
+    }
+}
+
+.fab::before,
+.fab::after {
+    content: '';
+    position: absolute;
+    background: white;
+    border-radius: 2px;
+}
+
+.fab::before {
+    width: 2px;
+    height: 24px;
+}
+
+.fab::after {
+    width: 24px;
+    height: 2px;
+}
+
+.fab:hover {
+    background: var(--primary-light);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+    transform: translateY(-2px) scale(1.05);
+}
+
+.fab:active {
+    transform: scale(0.95) translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+@media (min-width: 768px) {
+    .fab {
+        right: calc(50% - 240px + 20px);
+    }
 }
 
 .quick-actions h3 {
@@ -841,6 +918,41 @@ body {
     margin: 0;
 }
 
+/* 时间配置行 - 紧凑三列布局 */
+.time-config-row {
+    display: flex;
+    gap: 8px;
+}
+
+.time-config-item {
+    flex: 1;
+}
+
+.time-config-item label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-align: center;
+}
+
+.time-config-item input {
+    width: 100%;
+    padding: 10px 6px;
+    background: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    font-size: 14px;
+    text-align: center;
+    transition: border-color 0.2s;
+}
+
+.time-config-item input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
 /* 模态框 */
 .modal-overlay {
     position: fixed;
@@ -1155,6 +1267,7 @@ body {
     display: flex !important;
     flex-direction: column !important;
     position: fixed !important;
+    /* 1. 这里的 top 和 bottom 决定了它的实际可用高度 */
     top: var(--header-height) !important;
     bottom: var(--nav-height) !important;
     left: 0 !important;
@@ -1162,10 +1275,14 @@ body {
     margin: 0 auto !important;
     width: 100% !important;
     max-width: 480px !important;
-    /* 保持与 app 同宽 */
+
+    /* 2. 关键修改：删除 height: 100vh 或改为 auto */
+    /* 因为 top/bottom 已经把高度撑开了，设置 100vh 反而会破坏布局 */
     height: auto !important;
+
     padding: 12px !important;
     overflow: hidden !important;
+    /* 确保自身不滚动，让 log-viewer 滚动 */
     z-index: 50 !important;
     background: var(--bg-primary) !important;
 }
@@ -1222,16 +1339,27 @@ body {
     align-items: center !important;
 }
 
+/* 2. 中间的 section 已经很完美了，但确保它能收缩 */
 .logs-page .log-content-section {
     flex: 1 !important;
     display: flex !important;
     flex-direction: column !important;
     min-height: 0 !important;
+    /* 允许高度收缩到小于内容高度 */
     overflow: hidden !important;
     background: var(--bg-secondary);
-    /* 增加背景色确保视觉边界 */
     border-radius: 8px;
     padding: 8px;
+}
+
+/* 3. 日志查看器 */
+.logs-page .log-viewer {
+    flex: 1 !important;
+    overflow: auto !important;
+    /* 这里会产生内部滚动条 */
+    min-height: 0 !important;
+    max-height: max-content;
+    background: transparent !important;
 }
 
 .logs-page .log-content-section h3 {
@@ -1239,16 +1367,10 @@ body {
     /* 隐藏"日志内容"小标题，节省空间且 redundant */
 }
 
-.logs-page .log-viewer {
-    flex: 1 !important;
-    background: transparent !important;
-    /* 背景色移到父容器 */
-    overflow: auto !important;
-    min-height: 0 !important;
-    padding: 0 !important;
-}
 
 .logs-page .log-viewer pre {
+    display: block !important;
+    /* 确保它作为块级元素填满父级 */
     margin: 0 !important;
     padding: 4px !important;
     font-size: 11px !important;
@@ -1288,4 +1410,59 @@ body {
 
 .tts-test-panel .btn {
     flex: none;
+}
+
+/* 灶台配置徽章容器 */
+.zone-config-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* TTS状态徽章 */
+.tts-status-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: rgba(158, 158, 158, 0.2);
+    color: var(--gray-400);
+    white-space: nowrap;
+}
+
+.tts-status-badge.tts-none {
+    background: rgba(158, 158, 158, 0.2);
+    color: var(--gray-400);
+}
+
+.tts-status-badge.tts-queued {
+    background: rgba(52, 152, 219, 0.2);
+    color: var(--secondary);
+}
+
+.tts-status-badge.tts-synthesizing {
+    background: rgba(243, 156, 18, 0.2);
+    color: var(--warning);
+    animation: pulse 1s infinite;
+}
+
+.tts-status-badge.tts-completed {
+    background: rgba(39, 174, 96, 0.2);
+    color: var(--success);
+}
+
+.tts-status-badge.tts-failed {
+    background: rgba(231, 76, 60, 0.2);
+    color: var(--danger);
+}
+
+/* 设置页面表单样式优化 */
+.settings-page .form-group input[type="text"] {
+    width: 100%;
+}
+
+.settings-page .form-hint {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
 }

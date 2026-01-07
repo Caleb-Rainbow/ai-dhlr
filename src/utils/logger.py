@@ -11,6 +11,50 @@ import cv2
 import numpy as np
 
 
+class DailyFileHandler(logging.FileHandler):
+    """
+    按天自动轮转的日志处理器
+    日志文件名格式: {prefix}_{YYYY-MM-DD}.log
+    当日期变化时自动切换到新的日志文件
+    """
+    
+    def __init__(self, log_dir: Path, prefix: str = "fire_safety", encoding: str = 'utf-8'):
+        self.log_dir = log_dir
+        self.prefix = prefix
+        self._encoding = encoding
+        self._current_date = datetime.date.today()
+        
+        # 初始化时使用当天日期的文件
+        log_file = self._get_log_filename()
+        super().__init__(log_file, encoding=encoding)
+    
+    def _get_log_filename(self) -> str:
+        """获取当前日期对应的日志文件名"""
+        date_str = self._current_date.strftime("%Y-%m-%d")
+        return str(self.log_dir / f"{self.prefix}_{date_str}.log")
+    
+    def _check_and_rotate(self):
+        """检查是否需要切换到新的日志文件"""
+        today = datetime.date.today()
+        if today != self._current_date:
+            # 日期变了，切换到新文件
+            self._current_date = today
+            
+            # 关闭当前文件
+            if self.stream:
+                self.stream.close()
+                self.stream = None
+            
+            # 更新文件名并重新打开
+            self.baseFilename = self._get_log_filename()
+            self.stream = self._open()
+    
+    def emit(self, record):
+        """写入日志前检查是否需要轮转"""
+        self._check_and_rotate()
+        super().emit(record)
+
+
 class EventLogger:
     """事件日志记录器"""
     
@@ -59,9 +103,9 @@ class EventLogger:
         console_handler.setFormatter(console_format)
         self._logger.addHandler(console_handler)
         
-        # 文件handler
-        log_file = self._log_dir / f"fire_safety_{datetime.date.today()}.log"
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        # 文件handler - 使用 DailyFileHandler 实现日志按天自动轮转
+        # 日志文件名格式: fire_safety_2026-01-07.log
+        file_handler = DailyFileHandler(self._log_dir, prefix="fire_safety", encoding='utf-8')
         file_handler.setLevel(log_level)
         file_format = logging.Formatter(
             '%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s',

@@ -121,15 +121,14 @@
         <div class="page cameras-page">
             <div class="page-header">
                 <h2>摄像头管理</h2>
-                <button class="btn btn-primary btn-sm" onclick="App.showAddCameraModal()">
-                    ➕ 添加
-                </button>
             </div>
 
             <div class="camera-list" id="camera-list">
                 <!-- 摄像头列表动态加载 -->
             </div>
         </div>
+
+        <button class="fab" onclick="App.showAddCameraModal()" title="添加摄像头"></button>
     </template>
 
     <!-- 灶台配置页面 -->
@@ -137,15 +136,14 @@
         <div class="page zones-page">
             <div class="page-header">
                 <h2>灶台配置</h2>
-                <button class="btn btn-primary btn-sm" onclick="App.showAddZoneModal()">
-                    ➕ 添加
-                </button>
             </div>
 
             <div class="zone-config-list" id="zone-config-list">
                 <!-- 灶台配置列表动态加载 -->
             </div>
         </div>
+
+        <button class="fab" onclick="App.showAddZoneModal()" title="添加灶台"></button>
     </template>
 
     <!-- 日志查看页面 -->
@@ -182,46 +180,68 @@
             </div>
 
             <div class="settings-section">
-                <h3>设备信息</h3>
+                <h3>📱 设备信息</h3>
                 <div class="info-card" id="device-detail-info">
-                    <!-- 设备信息动态加载 -->
+                    <div class="info-row">
+                        <span class="info-label">设备ID</span>
+                        <span class="info-value" id="device-id-value">加载中...</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">系统名称</span>
+                        <span class="info-value" id="system-name-value">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">版本</span>
+                        <span class="info-value" id="system-version-value">-</span>
+                    </div>
                 </div>
             </div>
 
             <div class="settings-section">
-                <h3>全局参数</h3>
+                <h3>⏱️ 报警时间配置</h3>
+                <div class="time-config-row">
+                    <div class="time-config-item">
+                        <label>预警(秒)</label>
+                        <input type="number" id="alarm-warning-time" value="90" min="10" max="600">
+                    </div>
+                    <div class="time-config-item">
+                        <label>报警(秒)</label>
+                        <input type="number" id="alarm-alarm-time" value="180" min="30" max="1200">
+                    </div>
+                    <div class="time-config-item">
+                        <label>切电(秒)</label>
+                        <input type="number" id="alarm-action-time" value="300" min="60" max="1800">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label>播报间隔(秒)</label>
+                    <input type="number" id="alarm-broadcast-interval" value="15" min="5" max="120">
+                    <small class="form-hint" style="padding: 6px 8px; margin-top: 4px;">语音重复播报的时间间隔</small>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>📢 语音内容配置</h3>
                 <div class="form-group">
-                    <label>预警超时时间（秒）</label>
-                    <input type="number" id="global-warning-timeout" value="30" min="5" max="300">
+                    <label>预警语音</label>
+                    <input type="text" id="alarm-warning-message" placeholder="动火区域离人即将超时，请立即回到工作岗位">
+                    <small class="form-hint">播放时会添加"警告，{灶台名称}"前缀</small>
                 </div>
                 <div class="form-group">
-                    <label>切电超时时间（秒）</label>
-                    <input type="number" id="global-cutoff-timeout" value="60" min="10" max="600">
+                    <label>报警语音</label>
+                    <input type="text" id="alarm-alarm-message" placeholder="动火区域离人超时，请立即回到工作岗位">
                 </div>
-                <button class="btn btn-primary" onclick="App.saveGlobalSettings()">
-                    💾 保存设置
+                <div class="form-group">
+                    <label>切电语音</label>
+                    <input type="text" id="alarm-action-message" placeholder="动火区域离人超时，已自动切断炉灶电源，请立即现场处理">
+                    <small class="form-hint">播放时会添加"警告，警告，{灶台名称}"前缀</small>
+                </div>
+                <button class="btn btn-primary" onclick="App.saveAlarmSettings()">
+                    💾 保存报警设置
                 </button>
             </div>
 
-            <!-- TTS 测试面板 -->
-            <div class="tts-test-panel">
-                <h3>🔊 语音测试</h3>
-                <div class="input-group">
-                    <input type="text" id="tts-test-text" placeholder="输入测试文本（可选）">
-                    <button class="btn btn-secondary" onclick="App.testTTS()">
-                        播放测试
-                    </button>
-                </div>
-            </div>
 
-            <div class="settings-section">
-                <h3>系统操作</h3>
-                <div class="action-buttons">
-                    <button class="btn btn-warning" onclick="App.restartSystem()">
-                        🔄 重启系统
-                    </button>
-                </div>
-            </div>
         </div>
     </template>
 

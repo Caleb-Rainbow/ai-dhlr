@@ -12,6 +12,7 @@ class ZoneState(Enum):
     ACTIVE_WITH_PERSON = "active_with_person"  # 有人动火
     ACTIVE_NO_PERSON = "active_no_person"      # 无人动火（计时中）
     WARNING = "warning"                # 预警中
+    ALARM = "alarm"                    # 报警中（新增）
     CUTOFF = "cutoff"                  # 已切电
 
 
@@ -29,8 +30,9 @@ class Zone:
     is_fire_on: bool = False           # 是否开火
     has_person: bool = False           # 是否有人
     no_person_duration: float = 0.0    # 无人持续时间（秒）
-    warning_remaining: float = 0.0     # 预警倒计时剩余（秒）
-    cutoff_remaining: float = 0.0      # 切电倒计时剩余（秒）
+    warning_remaining: float = 0.0     # 到预警倒计时剩余（秒）
+    alarm_remaining: float = 0.0       # 到报警倒计时剩余（秒）
+    cutoff_remaining: float = 0.0      # 到切电倒计时剩余（秒）
     last_snapshot_path: Optional[str] = None  # 最后截图路径
     
     def to_dict(self) -> dict:
@@ -46,6 +48,7 @@ class Zone:
             "has_person": self.has_person,
             "no_person_duration": round(self.no_person_duration, 1),
             "warning_remaining": round(self.warning_remaining, 1),
+            "alarm_remaining": round(self.alarm_remaining, 1),
             "cutoff_remaining": round(self.cutoff_remaining, 1),
             "last_snapshot_path": self.last_snapshot_path
         }
@@ -57,6 +60,7 @@ class Zone:
             ZoneState.ACTIVE_WITH_PERSON: "有人看管",
             ZoneState.ACTIVE_NO_PERSON: "无人看管",
             ZoneState.WARNING: "预警中",
+            ZoneState.ALARM: "报警中",
             ZoneState.CUTOFF: "已切电"
         }
         return status_texts.get(self.state, "未知")

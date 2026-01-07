@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
 
-from .routes import cameras, zones, status, control, settings, voice
+from .routes import cameras, zones, status, control, settings
 from .websocket import ws_manager, broadcast_status_update
 from ..zone.state_machine import zone_manager
 from ..utils.logger import get_logger
@@ -48,7 +48,22 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI服务启动")
     _status_broadcast_task = asyncio.create_task(status_broadcast_loop())
     
-
+    # 启动网络监测
+    try:
+        from ..utils.network_monitor import network_monitor
+        await network_monitor.start_async(interval=10.0)
+    except Exception as e:
+        logger.warning(f"网络监测启动失败: {e}")
+    
+    # 启动远程 WebSocket 客户端（如果配置了）
+    try:
+        from ..utils.config import config_manager
+        if config_manager.config.remote.enabled:
+            from .websocket_client import remote_ws_client
+            asyncio.create_task(remote_ws_client.start())
+            logger.info("远程 WebSocket 客户端已启动")
+    except Exception as e:
+        logger.warning(f"远程 WebSocket 客户端启动失败: {e}")
     
     # 确保目录存在
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,12 +72,29 @@ async def lifespan(app: FastAPI):
     
     # 关闭时
     logger.info("FastAPI服务关闭")
+    
+    # 停止状态广播
     if _status_broadcast_task:
         _status_broadcast_task.cancel()
         try:
             await _status_broadcast_task
         except asyncio.CancelledError:
             pass
+    
+    # 停止网络监测
+    try:
+        from ..utils.network_monitor import network_monitor
+        await network_monitor.stop()
+    except Exception:
+        pass
+    
+    # 停止远程 WebSocket 客户端
+    try:
+        from .websocket_client import remote_ws_client
+        await remote_ws_client.stop()
+    except Exception:
+        pass
+
 
 
 def create_app() -> FastAPI:
@@ -89,7 +121,6 @@ def create_app() -> FastAPI:
     app.include_router(status.router)
     app.include_router(control.router)
     app.include_router(settings.router)
-    app.include_router(voice.router)
     
     # WebSocket端点
     @app.websocket("/ws/status")
@@ -97,10 +128,19 @@ def create_app() -> FastAPI:
         await ws_manager.connect(websocket)
         try:
             while True:
-                # 保持连接，等待客户端消息
+                # 接收客户端消息
                 data = await websocket.receive_text()
-                # 可以处理客户端发来的消息
                 logger.debug(f"收到WebSocket消息: {data}")
+                
+                # 解析并处理消息
+                try:
+                    import json
+                    message = json.loads(data)
+                    await ws_manager.handle_message(websocket, message)
+                except json.JSONDecodeError:
+                    logger.warning(f"无效的JSON消息: {data}")
+                except Exception as e:
+                    logger.error(f"处理消息失败: {e}")
         except WebSocketDisconnect:
             await ws_manager.disconnect(websocket)
         except Exception as e:

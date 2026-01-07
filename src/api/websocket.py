@@ -1,19 +1,21 @@
 """
-WebSocket状态推送
-实时推送灶台状态变化给客户端
+WebSocket 消息分发中心
+管理本地和远程 WebSocket 连接，实现消息路由和分发
 """
 import asyncio
 import json
-from typing import Set, Dict, Any
+import time
+from typing import Set, Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
 from ..utils.logger import get_logger
+from ..utils.config import config_manager
 
 logger = get_logger()
 
 
-class ConnectionManager:
-    """WebSocket连接管理器"""
+class LocalConnectionManager:
+    """本地 WebSocket 连接管理器"""
     
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -24,16 +26,16 @@ class ConnectionManager:
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
-        logger.info(f"WebSocket客户端已连接，当前连接数: {len(self.active_connections)}")
+        logger.info(f"本地WebSocket客户端已连接，当前连接数: {len(self.active_connections)}")
     
     async def disconnect(self, websocket: WebSocket):
         """断开连接"""
         async with self._lock:
             self.active_connections.discard(websocket)
-        logger.info(f"WebSocket客户端已断开，当前连接数: {len(self.active_connections)}")
+        logger.info(f"本地WebSocket客户端已断开，当前连接数: {len(self.active_connections)}")
     
     async def broadcast(self, message: Dict[str, Any]):
-        """广播消息给所有客户端"""
+        """广播消息给所有本地客户端"""
         if not self.active_connections:
             return
         
@@ -45,7 +47,7 @@ class ConnectionManager:
                 try:
                     await connection.send_text(json_message)
                 except Exception as e:
-                    logger.warning(f"发送WebSocket消息失败: {e}")
+                    logger.warning(f"发送本地WebSocket消息失败: {e}")
                     disconnected.add(connection)
             
             # 移除断开的连接
@@ -58,28 +60,180 @@ class ConnectionManager:
             await websocket.send_text(json_message)
         except Exception as e:
             logger.error(f"发送个人消息失败: {e}")
+    
+    async def handle_message(self, websocket: WebSocket, message: dict) -> Optional[dict]:
+        """
+        处理客户端消息
+        
+        Args:
+            websocket: 客户端连接
+            message: 解析后的消息
+            
+        Returns:
+            响应消息（如果有）
+        """
+        msg_type = message.get('type', '')
+        
+        if msg_type == 'request':
+            # 请求-响应模式
+            from .ws_handler import ws_handler
+            response = await ws_handler.handle_request(message)
+            await self.send_personal(websocket, response)
+            return response
+        elif msg_type == 'ping':
+            # 心跳响应
+            await self.send_personal(websocket, {'type': 'pong', 'timestamp': int(time.time() * 1000)})
+            return None
+        else:
+            # 其他消息类型，记录日志
+            logger.debug(f"收到未知类型消息: {msg_type}")
+            return None
+    
+    @property
+    def connection_count(self) -> int:
+        return len(self.active_connections)
 
 
-# 全局连接管理器
-ws_manager = ConnectionManager()
+class MessageDispatcher:
+    """
+    消息分发中心
+    统一管理本地和远程 WebSocket 连接，负责消息路由
+    """
+    
+    def __init__(self):
+        self.local_manager = LocalConnectionManager()
+        self._remote_client = None  # 延迟导入，避免循环依赖
+        self._lock = asyncio.Lock()
+    
+    @property
+    def remote_client(self):
+        """获取远程客户端（延迟导入）"""
+        if self._remote_client is None:
+            try:
+                from .websocket_client import remote_ws_client
+                self._remote_client = remote_ws_client
+            except ImportError:
+                pass
+        return self._remote_client
+    
+    async def connect_local(self, websocket: WebSocket):
+        """接受本地连接"""
+        await self.local_manager.connect(websocket)
+    
+    async def disconnect_local(self, websocket: WebSocket):
+        """断开本地连接"""
+        await self.local_manager.disconnect(websocket)
+    
+    async def broadcast_to_all(self, message: Dict[str, Any]):
+        """广播消息到所有连接（本地+远程）"""
+        # 添加时间戳
+        if 'timestamp' not in message:
+            message['timestamp'] = int(time.time() * 1000)
+        
+        # 添加设备ID
+        if 'device_id' not in message:
+            message['device_id'] = config_manager.config.system.device_id
+        
+        # 广播到本地
+        await self.local_manager.broadcast(message)
+        
+        # 发送到远程
+        if self.remote_client and self.remote_client.is_connected:
+            await self.remote_client.send(message)
+    
+    async def broadcast_to_local(self, message: Dict[str, Any]):
+        """仅广播到本地客户端"""
+        await self.local_manager.broadcast(message)
+    
+    async def send_to_remote(self, message: Dict[str, Any]):
+        """仅发送到远程服务器"""
+        if self.remote_client and self.remote_client.is_connected:
+            # 添加设备标识
+            if 'device_id' not in message:
+                message['device_id'] = config_manager.config.system.device_id
+            if 'timestamp' not in message:
+                message['timestamp'] = int(time.time() * 1000)
+            
+            await self.remote_client.send(message)
+    
+    async def dispatch(self, message: Dict[str, Any], source: str = "local"):
+        """
+        分发消息
+        根据消息来源和类型决定路由
+        
+        Args:
+            message: 消息内容
+            source: 消息来源 "local" | "remote"
+        """
+        msg_type = message.get('type', '')
+        msg_id = message.get('msg_id', '')
+        target = message.get('target', 'all')  # "local" | "remote" | "all"
+        
+        logger.debug(f"分发消息: type={msg_type}, source={source}, target={target}")
+        
+        if source == "remote":
+            # 来自远程服务器的消息，转发给本地客户端
+            await self.local_manager.broadcast(message)
+        elif source == "local":
+            # 来自本地客户端的消息
+            if target == "remote":
+                await self.send_to_remote(message)
+            elif target == "all":
+                await self.broadcast_to_all(message)
+            else:
+                # 仅本地
+                await self.local_manager.broadcast(message)
+    
+    def get_status(self) -> Dict[str, Any]:
+        """获取连接状态"""
+        remote_status = {}
+        if self.remote_client:
+            state = self.remote_client.state
+            remote_status = {
+                "is_connected": state.is_connected,
+                "is_connecting": state.is_connecting,
+                "last_error": state.last_error,
+                "reconnect_attempts": state.reconnect_attempts
+            }
+        
+        return {
+            "local_connections": self.local_manager.connection_count,
+            "remote": remote_status
+        }
+
+
+# 全局消息分发中心
+message_dispatcher = MessageDispatcher()
+
+# 兼容旧API
+ws_manager = message_dispatcher.local_manager
 
 
 async def broadcast_state_change(event_data: dict):
-    """广播状态变化事件"""
+    """广播状态变化事件（本地+远程）"""
     message = {
         "type": "state_change",
         "data": event_data
     }
-    await ws_manager.broadcast(message)
+    await message_dispatcher.broadcast_to_all(message)
 
 
 async def broadcast_status_update(statuses: list):
-    """广播状态更新"""
+    """广播状态更新（本地+远程）"""
     message = {
         "type": "status_update",
         "data": statuses
     }
-    await ws_manager.broadcast(message)
+    await message_dispatcher.broadcast_to_all(message)
+
+
+async def broadcast_network_status(network_status: dict):
+    """广播网络状态变化"""
+    message = {
+        "type": "network_status",
+        "data": network_status
+    }
+    await message_dispatcher.broadcast_to_all(message)
 
 
 def sync_broadcast_state_change(event_data: dict):

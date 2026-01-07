@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 import threading
 
@@ -26,6 +26,54 @@ class CameraAddRequest(BaseModel):
     width: int = 640
     height: int = 480
     fps: int = 30
+    
+    @field_validator('id')
+    @classmethod
+    def validate_id(cls, v):
+        if not v or not v.strip():
+            raise ValueError('摄像头ID不能为空')
+        # 检查ID格式
+        v = v.strip()
+        if len(v) > 50:
+            raise ValueError('摄像头ID长度不能超过50个字符')
+        return v
+    
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('摄像头名称不能为空')
+        if len(v) > 100:
+            raise ValueError('摄像头名称长度不能超过100个字符')
+        return v.strip()
+    
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, v):
+        if v not in ['usb', 'rtsp']:
+            raise ValueError('摄像头类型必须是 "usb" 或 "rtsp"')
+        return v
+    
+    @field_validator('width')
+    @classmethod
+    def validate_width(cls, v):
+        if v < 160 or v > 4096:
+            raise ValueError('宽度必须在160-4096之间')
+        return v
+    
+    @field_validator('height')
+    @classmethod
+    def validate_height(cls, v):
+        if v < 120 or v > 4096:
+            raise ValueError('高度必须在120-4096之间')
+        return v
+    
+    @field_validator('fps')
+    @classmethod
+    def validate_fps(cls, v):
+        if v < 1 or v > 120:
+            raise ValueError('帧率必须在1-120之间')
+        return v
 
 
 class CameraResponse(BaseModel):
@@ -73,51 +121,102 @@ async def get_usb_devices():
 
 @router.post("", response_model=CameraResponse)
 async def add_camera(request: CameraAddRequest):
-    """添加摄像头
+    """
+    添加摄像头
+    
+    请求参数:
+    - id: 摄像头唯一ID（必填）
+    - name: 摄像头名称（必填）
+    - type: 类型，"usb" 或 "rtsp"（可选，默认rtsp）
+    - device: USB设备索引（USB类型必填）
+    - rtsp_url: RTSP地址（RTSP类型必填）
+    - username/password: RTSP认证信息（可选）
+    - width/height/fps: 分辨率和帧率（可选）
+    
+    可能的错误:
+    - 400: 参数验证失败（ID重复、类型错误等）
+    - 500: 服务器内部错误
     
     注意：RTSP摄像头连接在后台进行，API立即返回。
     通过 /cameras 接口轮询摄像头状态确认连接结果。
     """
-    # 创建配置
-    config = CameraConfig(
-        id=request.id,
-        type=request.type,
-        name=request.name,
-        device=request.device,
-        rtsp_url=request.rtsp_url,
-        username=request.username,
-        password=request.password,
-        width=request.width,
-        height=request.height,
-        fps=request.fps
-    )
-    
-    # 添加到管理器
-    camera = camera_manager.add_camera(config)
-    
-    # 后台线程启动摄像头（避免阻塞 API）
-    def start_camera_async():
-        camera.start()
-    
-    thread = threading.Thread(target=start_camera_async, daemon=True)
-    thread.start()
-    
-    # 保存到配置
-    config_manager.add_camera(config)
-    
-    return CameraResponse(
-        id=camera.id,
-        name=camera.name,
-        type=camera.type,
-        status="connecting",
-        width=config.width,
-        height=config.height,
-        fps=config.fps,
-        device=config.device,
-        rtsp_url=config.rtsp_url,
-        username=config.username,
-        password=config.password
-    )
+    try:
+        # 检查ID是否已存在
+        existing = camera_manager.get_camera(request.id)
+        if existing:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"摄像头ID '{request.id}' 已存在，请使用其他ID"
+            )
+        
+        # 检查名称是否已存在
+        name_lower = request.name.strip().lower()
+        for cam in camera_manager.get_all_cameras():
+            if cam.name.strip().lower() == name_lower:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"摄像头名称 '{request.name}' 已存在，请使用其他名称"
+                )
+        
+        # 验证类型相关参数
+        if request.type == 'usb' and request.device is None:
+            raise HTTPException(
+                status_code=400,
+                detail="USB摄像头必须指定device设备索引"
+            )
+        
+        if request.type == 'rtsp' and not request.rtsp_url:
+            raise HTTPException(
+                status_code=400,
+                detail="RTSP摄像头必须指定rtsp_url地址"
+            )
+        
+        # 创建配置
+        config = CameraConfig(
+            id=request.id,
+            type=request.type,
+            name=request.name,
+            device=request.device,
+            rtsp_url=request.rtsp_url,
+            username=request.username,
+            password=request.password,
+            width=request.width,
+            height=request.height,
+            fps=request.fps
+        )
+        
+        # 添加到管理器
+        camera = camera_manager.add_camera(config)
+        
+        # 后台线程启动摄像头（避免阻塞 API）
+        def start_camera_async():
+            camera.start()
+        
+        thread = threading.Thread(target=start_camera_async, daemon=True)
+        thread.start()
+        
+        # 保存到配置
+        config_manager.add_camera(config)
+        
+        return CameraResponse(
+            id=camera.id,
+            name=camera.name,
+            type=camera.type,
+            status="connecting",
+            width=config.width,
+            height=config.height,
+            fps=config.fps,
+            device=config.device,
+            rtsp_url=config.rtsp_url,
+            username=config.username,
+            password=config.password
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加摄像头失败: {str(e)}")
 
 
 @router.delete("/{camera_id}")
@@ -144,6 +243,15 @@ async def update_camera(camera_id: str, request: CameraAddRequest):
     existing_camera = camera_manager.get_camera(camera_id)
     if not existing_camera:
         raise HTTPException(status_code=404, detail="摄像头不存在")
+    
+    # 检查名称是否与其他摄像头重复（排除自身）
+    name_lower = request.name.strip().lower()
+    for cam in camera_manager.get_all_cameras():
+        if cam.id != camera_id and cam.name.strip().lower() == name_lower:
+            raise HTTPException(
+                status_code=400,
+                detail=f"摄像头名称 '{request.name}' 已存在，请使用其他名称"
+            )
     
     # 1. 停止并移除旧摄像头
     camera_manager.remove_camera(camera_id)

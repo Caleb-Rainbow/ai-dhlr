@@ -23,6 +23,7 @@ class ZoneStatusResponse(BaseModel):
     has_person: bool
     no_person_duration: float
     warning_remaining: float
+    alarm_remaining: float
     cutoff_remaining: float
     warning_timeout: int
     cutoff_timeout: int
@@ -59,6 +60,7 @@ async def get_all_status():
             has_person=s["has_person"],
             no_person_duration=s["no_person_duration"],
             warning_remaining=s["warning_remaining"],
+            alarm_remaining=s.get("alarm_remaining", 0.0),
             cutoff_remaining=s["cutoff_remaining"],
             warning_timeout=safety_config.warning_timeout,
             cutoff_timeout=safety_config.cutoff_timeout,
@@ -88,6 +90,7 @@ async def get_zone_status(zone_id: str):
         has_person=s["has_person"],
         no_person_duration=s["no_person_duration"],
         warning_remaining=s["warning_remaining"],
+        alarm_remaining=s.get("alarm_remaining", 0.0),
         cutoff_remaining=s["cutoff_remaining"],
         warning_timeout=safety_config.warning_timeout,
         cutoff_timeout=safety_config.cutoff_timeout,

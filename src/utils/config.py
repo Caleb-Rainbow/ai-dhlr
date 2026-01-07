@@ -36,9 +36,35 @@ class ZoneConfig:
 
 @dataclass
 class SafetyConfig:
-    """安全/超时配置"""
+    """安全/超时配置（旧版，保留兼容性）"""
     warning_timeout: int = 30  # 预警超时（秒）
     cutoff_timeout: int = 60  # 切电超时（秒）
+
+
+@dataclass
+class AlarmConfig:
+    """报警配置（三阶段）"""
+    # 三阶段时间配置（秒）
+    warning_time: int = 90      # 预警时间
+    alarm_time: int = 180       # 报警时间
+    action_time: int = 300      # 切电时间
+    
+    # 语音播报间隔（秒）
+    broadcast_interval: int = 15  # 重复播报间隔
+    
+    # 三阶段消息配置
+    warning_message: str = "动火区域离人即将超时，请立即回到工作岗位"
+    alarm_message: str = "动火区域离人超时，请立即回到工作岗位"
+    action_message: str = "动火区域离人超时，已自动切断炉灶电源，请立即现场处理"
+
+
+@dataclass
+class TTSConfig:
+    """TTS语音合成配置"""
+    enabled: bool = True
+    engine: str = "kokoro"      # kokoro 或 pyttsx3
+    audio_dir: str = "audio_assets"
+    idle_timeout: int = 60      # 空闲超时销毁时间（秒）
 
 
 @dataclass
@@ -94,6 +120,20 @@ class SystemConfig:
     name: str = "动火离人安全监测系统"
     version: str = "0.1.0"
     debug: bool = True
+    device_id: str = ""  # 设备唯一ID，首次运行时自动生成
+
+
+@dataclass
+class RemoteServerConfig:
+    """远程服务器配置"""
+    enabled: bool = False                    # 是否启用远程连接
+    server_url: str = ""                     # 服务器地址（含协议和可选端口）
+    websocket_path: str = "dhlr/socket"      # WebSocket 路径
+    login_path: str = "/login"               # 登录接口路径
+    username: str = ""                       # 用户名
+    password: str = ""                       # 密码
+    token: str = ""                          # 鉴权 Token
+    token_expires: int = 0                   # Token 过期时间戳
 
 
 @dataclass
@@ -109,6 +149,18 @@ class AppConfig:
     voice: VoiceConfig
     logging: LoggingConfig
     gpio: GpioConfig
+    alarm: AlarmConfig = None      # 三阶段报警配置
+    tts: TTSConfig = None          # TTS配置
+    remote: RemoteServerConfig = None  # 远程服务器配置
+    
+    def __post_init__(self):
+        """初始化可选配置"""
+        if self.alarm is None:
+            self.alarm = AlarmConfig()
+        if self.tts is None:
+            self.tts = TTSConfig()
+        if self.remote is None:
+            self.remote = RemoteServerConfig()
 
 
 class ConfigManager:
@@ -150,7 +202,8 @@ class ConfigManager:
         system = SystemConfig(
             name=system_raw.get('name', '动火离人安全监测系统'),
             version=system_raw.get('version', '0.1.0'),
-            debug=system_raw.get('debug', True)
+            debug=system_raw.get('debug', True),
+            device_id=system_raw.get('device_id', '')
         )
         
         # 解析安全配置
@@ -235,6 +288,40 @@ class ConfigManager:
             simulated=gpio_raw.get('simulated', True)
         )
         
+        # 解析报警配置（三阶段）
+        alarm_raw = raw.get('alarm', {})
+        alarm = AlarmConfig(
+            warning_time=alarm_raw.get('warning_time', 90),
+            alarm_time=alarm_raw.get('alarm_time', 180),
+            action_time=alarm_raw.get('action_time', 300),
+            broadcast_interval=alarm_raw.get('broadcast_interval', 15),
+            warning_message=alarm_raw.get('warning_message', '动火区域离人即将超时，请立即回到工作岗位'),
+            alarm_message=alarm_raw.get('alarm_message', '动火区域离人超时，请立即回到工作岗位'),
+            action_message=alarm_raw.get('action_message', '动火区域离人超时，已自动切断炉灶电源，请立即现场处理')
+        )
+        
+        # 解析TTS配置
+        tts_raw = raw.get('tts', {})
+        tts = TTSConfig(
+            enabled=tts_raw.get('enabled', True),
+            engine=tts_raw.get('engine', 'kokoro'),
+            audio_dir=tts_raw.get('audio_dir', 'audio_assets'),
+            idle_timeout=tts_raw.get('idle_timeout', 60)
+        )
+        
+        # 解析远程服务器配置
+        remote_raw = raw.get('remote', {})
+        remote = RemoteServerConfig(
+            enabled=remote_raw.get('enabled', False),
+            server_url=remote_raw.get('server_url', ''),
+            websocket_path=remote_raw.get('websocket_path', 'dhlr/socket'),
+            login_path=remote_raw.get('login_path', '/login'),
+            username=remote_raw.get('username', ''),
+            password=remote_raw.get('password', ''),
+            token=remote_raw.get('token', ''),
+            token_expires=remote_raw.get('token_expires', 0)
+        )
+        
         return AppConfig(
             system=system,
             safety=safety,
@@ -245,7 +332,10 @@ class ConfigManager:
             api=api,
             voice=voice,
             logging=logging_config,
-            gpio=gpio
+            gpio=gpio,
+            alarm=alarm,
+            tts=tts,
+            remote=remote
         )
     
     @property
@@ -270,7 +360,8 @@ class ConfigManager:
             'system': {
                 'name': config.system.name,
                 'version': config.system.version,
-                'debug': config.system.debug
+                'debug': config.system.debug,
+                'device_id': config.system.device_id
             },
             'safety': {
                 'warning_timeout': config.safety.warning_timeout,
@@ -329,6 +420,31 @@ class ConfigManager:
             },
             'gpio': {
                 'simulated': config.gpio.simulated
+            },
+            'alarm': {
+                'warning_time': config.alarm.warning_time,
+                'alarm_time': config.alarm.alarm_time,
+                'action_time': config.alarm.action_time,
+                'broadcast_interval': config.alarm.broadcast_interval,
+                'warning_message': config.alarm.warning_message,
+                'alarm_message': config.alarm.alarm_message,
+                'action_message': config.alarm.action_message
+            },
+            'tts': {
+                'enabled': config.tts.enabled,
+                'engine': config.tts.engine,
+                'audio_dir': config.tts.audio_dir,
+                'idle_timeout': config.tts.idle_timeout
+            },
+            'remote': {
+                'enabled': config.remote.enabled,
+                'server_url': config.remote.server_url,
+                'websocket_path': config.remote.websocket_path,
+                'login_path': config.remote.login_path,
+                'username': config.remote.username,
+                'password': config.remote.password,
+                'token': config.remote.token,
+                'token_expires': config.remote.token_expires
             }
         }
     

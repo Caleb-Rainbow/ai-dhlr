@@ -38,6 +38,12 @@ class FireSafetySystem:
         self._detection_thread = None
         self._detector: PersonDetector = None
         self._logger = None
+        
+        # 语音循环播报控制
+        self._broadcast_threads: dict = {}  # zone_id -> Thread
+        self._broadcast_stop_flags: dict = {}  # zone_id -> bool (停止标志)
+        self._broadcast_lock = threading.Lock()
+
     
     def initialize(self) -> bool:
         """初始化系统"""
@@ -70,6 +76,7 @@ class FireSafetySystem:
             zone_manager.initialize_from_config(
                 config.zones,
                 on_warning=self._on_warning,
+                on_alarm=self._on_alarm,
                 on_cutoff=self._on_cutoff,
                 on_state_change=self._on_state_change
             )
@@ -81,13 +88,40 @@ class FireSafetySystem:
             # 初始化语音播报
             voice_player.initialize(
                 enabled=config.voice.enabled,
-                engine=config.voice.engine,
-                rate=config.voice.rate,
                 volume=config.voice.volume
             )
             
             # 初始化GPIO控制
             gpio_controller.initialize(simulated=config.gpio.simulated)
+            
+            # 初始化TTS管理器（Kokoro智能生命周期管理）
+            if config.tts.enabled:
+                try:
+                    from src.tts.tts_manager import tts_manager
+                    tts_manager.initialize(
+                        audio_dir=config.tts.audio_dir,
+                        idle_timeout=config.tts.idle_timeout,
+                        warning_message=config.alarm.warning_message,
+                        alarm_message=config.alarm.alarm_message,
+                        action_message=config.alarm.action_message
+                    )
+                    
+                    # 检查已配置灶台的语音文件，如缺失则提交合成任务
+                    for zone_config in config.zones:
+                        if not tts_manager.has_audio_files(zone_config.id):
+                            tts_manager.submit_synthesis_task(zone_config.id, zone_config.name)
+                    
+                    self._logger.info("TTS管理器初始化完成")
+                except Exception as e:
+                    self._logger.warning(f"TTS管理器初始化失败: {e}")
+            
+            # 生成或获取设备ID
+            try:
+                from src.utils.device_id import get_or_create_device_id
+                device_id = get_or_create_device_id(config_manager)
+                self._logger.info(f"设备ID: {device_id}")
+            except Exception as e:
+                self._logger.warning(f"设备ID生成失败: {e}")
             
             # 启动性能监控
             try:
@@ -107,21 +141,36 @@ class FireSafetySystem:
             return False
     
     def _on_warning(self, zone: Zone):
-        """预警回调"""
-        timeout = get_config().safety.warning_timeout
-        self._logger.warning(f"[预警] {zone.name} 无人看管超过 {timeout} 秒")
-        voice_player.speak_warning(zone.name)
+        """预警回调（第一阶段）- 加入播报队列"""
+        config = get_config()
+        self._logger.warning(f"[预警] {zone.name} 无人看管超过 {config.alarm.warning_time} 秒")
+        # 添加到播报列表
+        self._add_to_broadcast_queue(zone.id, zone.name, "warning")
+    
+    def _on_alarm(self, zone: Zone):
+        """报警回调（第二阶段）- 更新播报内容"""
+        config = get_config()
+        self._logger.warning(f"[报警] {zone.name} 无人看管超过 {config.alarm.alarm_time} 秒")
+        # 更新播报类型
+        self._add_to_broadcast_queue(zone.id, zone.name, "alarm")
     
     def _on_cutoff(self, zone: Zone):
-        """切电回调"""
-        timeout = get_config().safety.cutoff_timeout
-        self._logger.warning(f"[切电] {zone.name} 无人看管超过 {timeout} 秒，执行切电")
-        voice_player.speak_cutoff(zone.name)
+        """切电回调（第三阶段）- 执行切电并更新播报内容"""
+        config = get_config()
+        self._logger.warning(f"[切电] {zone.name} 无人看管超过 {config.alarm.action_time} 秒，执行切电")
         gpio_controller.cutoff(zone.id)
+        # 更新播报类型（继续循环播报直到复位）
+        self._add_to_broadcast_queue(zone.id, zone.name, "action")
     
     def _on_state_change(self, event: StateChangeEvent):
-        """状态变化回调"""
+        """状态变化回调 - 根据状态决定是否停止播报"""
         self._logger.info(f"[状态变化] {event.zone_name}: {event.old_state.value} -> {event.new_state.value}")
+        
+        # 判断是否需要停止播报
+        # 停止条件: 变为空闲或有人看管状态
+        stop_states = [ZoneState.IDLE, ZoneState.ACTIVE_WITH_PERSON]
+        if event.new_state in stop_states:
+            self._remove_from_broadcast_queue(event.zone_id)
         
         # 广播状态变化到WebSocket
         sync_broadcast_state_change({
@@ -132,6 +181,146 @@ class FireSafetySystem:
             "timestamp": event.timestamp,
             "message": event.message
         })
+    
+    def _add_to_broadcast_queue(self, zone_id: str, zone_name: str, audio_type: str):
+        """添加或更新灶台到播报队列"""
+        with self._broadcast_lock:
+            self._broadcast_stop_flags[zone_id] = {
+                "zone_name": zone_name,
+                "audio_type": audio_type,
+                "active": True
+            }
+            self._logger.info(f"[{zone_id}] 加入播报队列: {audio_type}")
+            
+            # 确保播报管理线程在运行
+            self._ensure_broadcast_manager_running()
+    
+    def _remove_from_broadcast_queue(self, zone_id: str):
+        """从播报队列移除灶台"""
+        with self._broadcast_lock:
+            if zone_id in self._broadcast_stop_flags:
+                self._broadcast_stop_flags[zone_id]["active"] = False
+                self._logger.info(f"[{zone_id}] 已标记停止播报")
+    
+    def _ensure_broadcast_manager_running(self):
+        """确保播报管理线程在运行"""
+        if self._broadcast_threads.get("_manager") is None or not self._broadcast_threads["_manager"].is_alive():
+            thread = threading.Thread(target=self._broadcast_manager_loop, daemon=True)
+            self._broadcast_threads["_manager"] = thread
+            thread.start()
+            self._logger.info("播报管理器已启动")
+    
+    def _broadcast_manager_loop(self):
+        """播报管理器主循环 - 轮询式播报所有待播报灶台"""
+        self._logger.info("播报管理器开始运行")
+        
+        while self._running:
+            try:
+                config = get_config()
+                interval = config.alarm.broadcast_interval
+                
+                # 获取当前活跃的播报任务列表
+                # 为了保证顺序稳定性，按zone_id排序
+                with self._broadcast_lock:
+                    active_zones = sorted([
+                        (zone_id, info["zone_name"], info["audio_type"])
+                        for zone_id, info in self._broadcast_stop_flags.items()
+                        if isinstance(info, dict) and info.get("active", False)
+                    ], key=lambda x: x[0])
+                
+                if not active_zones:
+                    # 没有需要播报的灶台，等待一小段时间后继续检查
+                    time.sleep(0.5)
+                    continue
+                
+                # 轮流播报每个灶台
+                for zone_id, zone_name, audio_type in active_zones:
+                    # 再次检查是否仍然需要播报（可能已被移除）
+                    audio_type_real = ""
+                    with self._broadcast_lock:
+                        info = self._broadcast_stop_flags.get(zone_id)
+                        if not isinstance(info, dict) or not info.get("active", False):
+                            continue
+                        # 获取最新的播报类型（可能已升级）
+                        audio_type_real = info.get("audio_type", audio_type)
+                        zone_name = info.get("zone_name", zone_name)
+                    
+                    # 记录开始时间
+                    cycle_start_time = time.time()
+
+                    # 1. 执行播报
+                    try:
+                        self._logger.debug(f"[{zone_id}] 播报 {audio_type_real}")
+                        if audio_type_real == "warning":
+                            voice_player.speak_warning(zone_id, zone_name)
+                        elif audio_type_real == "alarm":
+                            voice_player.speak_alarm(zone_id, zone_name)
+                        elif audio_type_real == "action":
+                            voice_player.speak_cutoff(zone_id, zone_name)
+                        
+                        # 短暂休眠确保任务加入队列
+                        time.sleep(0.1)
+                        
+                    except Exception as e:
+                        self._logger.error(f"[{zone_id}] 播报提交失败: {e}")
+                        continue
+
+                    # 2. 等待播放结束 (忙碌等待)
+                    while self._running:
+                        # 检查活跃状态
+                        with self._broadcast_lock:
+                            info = self._broadcast_stop_flags.get(zone_id)
+                            if not isinstance(info, dict) or not info.get("active", False):
+                                break
+
+                        if not voice_player.is_busy:
+                            break
+                        time.sleep(0.1)
+                    
+                    if not self._running:
+                        break
+
+                    # 3. 等待剩余间隔时间 (补齐周期)
+                    # 用户的定义: 间隔 = 两个音频插入的间隔。
+                    # 所以 等待时间 = 设置的间隔 - 实际播放耗时
+                    elapsed = time.time() - cycle_start_time
+                    wait_time = max(0.5, interval - elapsed) # 至少保留0.5秒间隔
+                    
+                    # self._logger.debug(f"[{zone_id}] 播放耗时 {elapsed:.2f}s, 剩余等待 {wait_time:.2f}s")
+                    
+                    wait_count = int(wait_time * 10)
+                    for _ in range(wait_count):
+                        if not self._running:
+                            break
+                        
+                        # 在等待期间也检查活跃状态
+                        with self._broadcast_lock:
+                            info = self._broadcast_stop_flags.get(zone_id)
+                            if not isinstance(info, dict) or not info.get("active", False):
+                                break
+                                
+                        time.sleep(0.1)
+                    
+                    if not self._running:
+                        break
+                        
+            except Exception as e:
+                self._logger.error(f"播报管理器错误: {e}")
+                time.sleep(1)
+        
+        self._logger.info("播报管理器已停止")
+    
+    def _cleanup_broadcast_queue(self):
+        """清理播报队列中已停止的灶台"""
+        with self._broadcast_lock:
+            inactive_zones = [
+                zone_id for zone_id, info in self._broadcast_stop_flags.items()
+                if isinstance(info, dict) and not info.get("active", False)
+            ]
+            for zone_id in inactive_zones:
+                del self._broadcast_stop_flags[zone_id]
+                self._logger.debug(f"[{zone_id}] 已从播报队列移除")
+
     
     def _detection_loop(self):
         """检测循环"""
@@ -192,6 +381,12 @@ class FireSafetySystem:
         if self._detection_thread:
             self._detection_thread.join(timeout=2.0)
         
+        # 停止所有播报（标记为非活跃）
+        with self._broadcast_lock:
+            for zone_id, info in self._broadcast_stop_flags.items():
+                if isinstance(info, dict):
+                    info["active"] = False
+        
         # 停止各组件
         voice_player.stop()
         camera_manager.stop_all()
@@ -227,6 +422,7 @@ def get_zone_callbacks():
     if _system:
         return {
             "on_warning": _system._on_warning,
+            "on_alarm": _system._on_alarm,
             "on_cutoff": _system._on_cutoff,
             "on_state_change": _system._on_state_change
         }

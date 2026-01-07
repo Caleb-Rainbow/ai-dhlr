@@ -10,6 +10,11 @@ const App = {
     ws: null,
     wsReconnectTimer: null,
 
+    // 摄像头刷新定时器
+    cameraRefreshTimer: null,
+    // TTS状态刷新定时器
+    ttsRefreshTimer: null,
+
     // 当前页面
     currentPage: 'dashboard',
 
@@ -81,6 +86,16 @@ const App = {
      */
     navigateTo(page) {
         this.currentPage = page;
+
+        // 清理定时器
+        if (this.cameraRefreshTimer) {
+            clearInterval(this.cameraRefreshTimer);
+            this.cameraRefreshTimer = null;
+        }
+        if (this.ttsRefreshTimer) {
+            clearInterval(this.ttsRefreshTimer);
+            this.ttsRefreshTimer = null;
+        }
 
         // 更新导航状态
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -181,13 +196,29 @@ const App = {
             'active_with_person': '有人看管',
             'active_no_person': '无人看管',
             'warning': '⚠️ 预警中',
+            'alarm': '🚨 报警中',
             'cutoff': '🔴 已切电'
         };
 
         const statusClass = zone.state;
-        const showCountdown = zone.state === 'active_no_person' || zone.state === 'warning';
-        const countdownValue = zone.state === 'warning' ? zone.cutoff_remaining : zone.warning_remaining;
-        const countdownDanger = zone.state === 'warning';
+
+        // 三阶段倒计时逻辑
+        const showCountdown = ['active_no_person', 'warning', 'alarm'].includes(zone.state);
+        let countdownValue = 0;
+        let countdownDanger = false;
+
+        if (zone.state === 'active_no_person') {
+            // 无人看管阶段：显示到预警的剩余时间
+            countdownValue = zone.warning_remaining;
+        } else if (zone.state === 'warning') {
+            // 预警阶段：显示到报警的剩余时间
+            countdownValue = zone.alarm_remaining;
+            countdownDanger = true;
+        } else if (zone.state === 'alarm') {
+            // 报警阶段：显示到切电的剩余时间
+            countdownValue = zone.cutoff_remaining;
+            countdownDanger = true;
+        }
 
         return `
             <div class="zone-card">
@@ -573,6 +604,12 @@ const App = {
 
     async initZones() {
         await this.loadZones();
+
+        // 启动TTS状态轮询
+        this.loadTTSStatus(); // 立即加载一次
+        this.ttsRefreshTimer = setInterval(() => {
+            this.loadTTSStatus();
+        }, 3000); // 每3秒刷新一次
     },
 
     async loadZones() {
@@ -603,10 +640,13 @@ const App = {
             <div class="zone-config-card ${zone.enabled ? '' : 'disabled'}">
                 <div class="zone-config-header">
                     <span class="zone-config-name">${zone.name}</span>
-                    <label class="toggle-switch">
-                        <input type="checkbox" ${zone.enabled ? 'checked' : ''} onchange="App.toggleZoneEnabled('${zone.id}', this.checked)">
-                        <span class="toggle-slider"></span>
-                    </label>
+                    <div class="zone-config-badges">
+                        <span class="tts-status-badge" id="tts-status-${zone.id}" title="语音合成状态">🔊 --</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${zone.enabled ? 'checked' : ''} onchange="App.toggleZoneEnabled('${zone.id}', this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
                 </div>
                 
                 <!-- ROI预览画布 -->
@@ -629,7 +669,60 @@ const App = {
 
         // 加载ROI预览图
         this.loadRoiPreviews();
+
+        // 加载TTS状态
+        this.loadTTSStatus();
     },
+
+    /**
+     * 加载所有灶台的TTS合成状态
+     */
+    async loadTTSStatus() {
+        try {
+            const data = await this.api('/settings/tts/status');
+
+            for (const [zoneId, status] of Object.entries(data.synthesis_status)) {
+                this.updateZoneTTSBadge(zoneId, status);
+            }
+
+            // 对于没有状态记录的灶台，检查是否有音频文件
+            for (const zone of this.zones) {
+                if (!data.synthesis_status[zone.id]) {
+                    // 单独查询这个灶台的状态
+                    try {
+                        const zoneStatus = await this.api(`/settings/tts/zone/${zone.id}/status`);
+                        this.updateZoneTTSBadge(zone.id, zoneStatus.status);
+                    } catch (e) {
+                        this.updateZoneTTSBadge(zone.id, 'none');
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('加载TTS状态失败', e);
+        }
+    },
+
+    /**
+     * 更新灶台TTS状态徽章
+     */
+    updateZoneTTSBadge(zoneId, status) {
+        const badge = document.getElementById(`tts-status-${zoneId}`);
+        if (!badge) return;
+
+        const statusMap = {
+            'none': { text: '未合成', class: 'tts-none' },
+            'queued': { text: '队列中', class: 'tts-queued' },
+            'synthesizing': { text: '合成中', class: 'tts-synthesizing' },
+            'completed': { text: '已合成', class: 'tts-completed' },
+            'failed': { text: '失败', class: 'tts-failed' }
+        };
+
+        const info = statusMap[status] || statusMap['none'];
+        badge.textContent = `🔊 ${info.text}`;
+        badge.className = `tts-status-badge ${info.class}`;
+    },
+
+
 
     /**
      * 切换灶台启用状态
@@ -1018,130 +1111,118 @@ const App = {
 
     // ==================== 设置 ====================
 
-    /**
-     * 测试 TTS 语音播报
-     */
-    async testTTS() {
-        const textInput = document.getElementById('tts-test-text');
-        const text = textInput ? textInput.value.trim() : '';
 
-        try {
-            const result = await this.api('/voice/test', 'POST', {
-                text: text || null
-            });
-
-            if (result.success) {
-                this.toast('语音测试已发送', 'success');
-            } else {
-                this.toast(result.message || '语音测试失败', 'error');
-            }
-        } catch (e) {
-            this.toast('语音测试失败: ' + e.message, 'error');
-        }
-    },
 
     async initSettings() {
-        await this.loadDeviceDetailInfo();
-        this.loadGlobalSettings();
+        await this.loadSystemInfo();
+        await this.loadAlarmSettings();
     },
 
     /**
-     * 加载全局设置到表单
+     * 加载系统信息（包含设备ID）
      */
-    async loadGlobalSettings() {
+    async loadSystemInfo() {
         try {
-            const settings = await this.api('/settings/safety');
-            this.globalSettings.warningTimeout = settings.warning_timeout;
-            this.globalSettings.cutoffTimeout = settings.cutoff_timeout;
+            const info = await this.api('/settings/system');
 
-            // 填充表单
-            const warningInput = document.getElementById('global-warning-timeout');
-            const cutoffInput = document.getElementById('global-cutoff-timeout');
-
-            if (warningInput) warningInput.value = settings.warning_timeout;
-            if (cutoffInput) cutoffInput.value = settings.cutoff_timeout;
-        } catch (e) {
-            console.error('加载全局设置失败', e);
-            this.toast('加载设置失败', 'error');
-        }
-    },
-
-    async loadDeviceDetailInfo() {
-        try {
-            const info = await this.api('/device');
-            const container = document.getElementById('device-detail-info');
-            if (container) {
-                container.innerHTML = `
-                    <div class="info-row">
-                        <span class="info-label">系统名称</span>
-                        <span class="info-value">${info.name}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">版本</span>
-                        <span class="info-value">${info.version}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">运行时间</span>
-                        <span class="info-value">${this.formatUptime(info.uptime)}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">平台</span>
-                        <span class="info-value">${info.platform}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Python版本</span>
-                        <span class="info-value">${info.python_version}</span>
-                    </div>
-                `;
+            // 更新设备ID
+            const deviceIdEl = document.getElementById('device-id-value');
+            if (deviceIdEl) {
+                deviceIdEl.textContent = info.device_id || '未生成';
+                deviceIdEl.style.fontFamily = 'monospace';
             }
+
+            // 更新系统名称
+            const nameEl = document.getElementById('system-name-value');
+            if (nameEl) nameEl.textContent = info.name;
+
+            // 更新版本
+            const versionEl = document.getElementById('system-version-value');
+            if (versionEl) versionEl.textContent = info.version;
+
         } catch (e) {
-            console.error('加载设备信息失败', e);
+            console.error('加载系统信息失败', e);
         }
     },
 
-    formatUptime(seconds) {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        return `${hours}小时 ${minutes}分钟`;
+    /**
+     * 加载报警设置
+     */
+    async loadAlarmSettings() {
+        try {
+            const settings = await this.api('/settings/alarm');
+
+            // 填充时间配置
+            const warningTimeEl = document.getElementById('alarm-warning-time');
+            const alarmTimeEl = document.getElementById('alarm-alarm-time');
+            const actionTimeEl = document.getElementById('alarm-action-time');
+            const broadcastIntervalEl = document.getElementById('alarm-broadcast-interval');
+
+            if (warningTimeEl) warningTimeEl.value = settings.warning_time;
+            if (alarmTimeEl) alarmTimeEl.value = settings.alarm_time;
+            if (actionTimeEl) actionTimeEl.value = settings.action_time;
+            if (broadcastIntervalEl) broadcastIntervalEl.value = settings.broadcast_interval;
+
+            // 填充消息配置
+            const warningMsgEl = document.getElementById('alarm-warning-message');
+            const alarmMsgEl = document.getElementById('alarm-alarm-message');
+            const actionMsgEl = document.getElementById('alarm-action-message');
+
+            if (warningMsgEl) warningMsgEl.value = settings.warning_message;
+            if (alarmMsgEl) alarmMsgEl.value = settings.alarm_message;
+            if (actionMsgEl) actionMsgEl.value = settings.action_message;
+
+        } catch (e) {
+            console.error('加载报警设置失败', e);
+            this.toast('加载报警设置失败', 'error');
+        }
     },
 
-    async saveGlobalSettings() {
-        const warningTimeout = parseInt(document.getElementById('global-warning-timeout')?.value) || 30;
-        const cutoffTimeout = parseInt(document.getElementById('global-cutoff-timeout')?.value) || 60;
+    /**
+     * 保存报警设置
+     */
+    async saveAlarmSettings() {
+        const warningTime = parseInt(document.getElementById('alarm-warning-time')?.value) || 90;
+        const alarmTime = parseInt(document.getElementById('alarm-alarm-time')?.value) || 180;
+        const actionTime = parseInt(document.getElementById('alarm-action-time')?.value) || 300;
+        const broadcastInterval = parseInt(document.getElementById('alarm-broadcast-interval')?.value) || 15;
 
-        // 验证
-        if (warningTimeout < 5 || warningTimeout > 300) {
-            this.toast('预警超时时间需在5-300秒之间', 'warning');
+        const warningMessage = document.getElementById('alarm-warning-message')?.value.trim() || '';
+        const alarmMessage = document.getElementById('alarm-alarm-message')?.value.trim() || '';
+        const actionMessage = document.getElementById('alarm-action-message')?.value.trim() || '';
+
+        // 验证时间顺序
+        if (warningTime >= alarmTime) {
+            this.toast('预警时间需小于报警时间', 'warning');
             return;
         }
-        if (cutoffTimeout < 10 || cutoffTimeout > 600) {
-            this.toast('切电超时时间需在10-600秒之间', 'warning');
+        if (alarmTime >= actionTime) {
+            this.toast('报警时间需小于切电时间', 'warning');
             return;
         }
-        if (cutoffTimeout <= warningTimeout) {
-            this.toast('切电超时时间需大于预警超时时间', 'warning');
+        if (broadcastInterval < 5) {
+            this.toast('播报间隔不能小于5秒', 'warning');
             return;
         }
 
         try {
-            // 保存到后端
-            await this.api('/settings/safety', 'POST', {
-                warning_timeout: warningTimeout,
-                cutoff_timeout: cutoffTimeout
+            await this.api('/settings/alarm', 'POST', {
+                warning_time: warningTime,
+                alarm_time: alarmTime,
+                action_time: actionTime,
+                broadcast_interval: broadcastInterval,
+                warning_message: warningMessage,
+                alarm_message: alarmMessage,
+                action_message: actionMessage
             });
 
-            this.globalSettings = { warningTimeout, cutoffTimeout };
-            this.toast(`全局设置已保存：预警${warningTimeout}秒，切电${cutoffTimeout}秒`, 'success');
+            this.toast(`报警设置已保存`, 'success');
         } catch (e) {
             this.toast('保存设置失败: ' + e.message, 'error');
         }
     },
 
-    restartSystem() {
-        if (confirm('确定要重启系统吗?')) {
-            this.toast('重启命令已发送', 'info');
-        }
-    },
+
 
     // ==================== WebSocket ====================
 
