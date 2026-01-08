@@ -29,3 +29,6 @@ misaki[zh]>=0.4.0
 
 #音频播放
 pygame>=2.6.1
+
+#串口通讯
+async-pyserial>=0.2.4

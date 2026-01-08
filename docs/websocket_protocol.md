@@ -163,11 +163,14 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 |--------|------|------|
 | `get_zones` | 获取所有灶台配置 | 无 |
 | `get_zone` | 获取单个灶台 | `zone_id` |
-| `create_zone` | 创建灶台 | `name`, `camera_id`, `roi?`, `enabled?` |
-| `update_zone` | 更新灶台 | `zone_id`, `name?`, `camera_id?`, `roi?`, `enabled?` |
+| `create_zone` | 创建灶台 | `name`, `camera_id`, `roi?`, `enabled?`, `serial_index?`, `fire_current_threshold?` |
+| `update_zone` | 更新灶台 | `zone_id`, `name?`, `camera_id?`, `roi?`, `enabled?`, `serial_index?`, `fire_current_threshold?`, `regenerate_voice?` |
 | `delete_zone` | 删除灶台 | `zone_id` |
 | `reset_zone` | 重置灶台状态 | `zone_id` |
 | `toggle_fire` | 模拟火焰开关 | `zone_id`, `is_on` |
+
+**`update_zone` 特殊参数说明：**
+- `regenerate_voice`: 布尔值，当灶台名称变化时设为 `true`，后端会自动重新合成该灶台的所有语音文件（预警、报警、切电、巡检等）
 
 ### 摄像头操作
 
@@ -202,6 +205,46 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 |--------|------|------|
 | `get_log_files` | 获取日志文件列表 | 无 |
 | `get_log_content` | 读取日志内容 | `filename?`, `lines?` |
+
+### 串口通讯
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open}` |
+| `update_serial_config` | 更新串口配置 | `enabled?`, `port?`, `baudrate?`, `poll_interval?` | `{message}` |
+| `get_currents` | 获取所有分区电流值 | 无 | `{currents: {zone_id: value, ...}}` |
+| `get_lora_config` | 获取LoRa配置 | 无 | `{id, channel}` |
+| `set_lora_config` | 设置LoRa配置 | `id?`, `channel?` | `{message}` |
+
+
+### 巡检操作
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `start_patrol` | 开始巡检模式 | 无 | `{success, message}` |
+| `stop_patrol` | 退出巡检模式 | 无 | `{success, message}` |
+| `patrol_self_check` | 设备自检 | 无 | `{success, message}` |
+| `patrol_alarm_demo` | 报警演示 | 无 | `{success, message}` |
+| `patrol_force_warning` | 强制预警（所有区） | 无 | `{success, message}` |
+| `patrol_force_alarm` | 强制报警（所有区） | 无 | `{success, message}` |
+| `patrol_force_cutoff` | 强制切电（所有区） | 无 | `{success, message}` |
+| `get_patrol_status` | 获取巡检状态 | 无 | 巡检状态对象 |
+
+**巡检事件推送**
+```json
+{
+    "type": "patrol_event",
+    "event_type": "status_update",
+    "timestamp": 1704614400000,
+    "data": {
+        "is_active": true,
+        "current_step": "self_check_person",
+        "progress": 50,
+        "message": "正在检测灶台1有人状态...",
+        "results": [...]
+    }
+}
+```
 
 ---
 

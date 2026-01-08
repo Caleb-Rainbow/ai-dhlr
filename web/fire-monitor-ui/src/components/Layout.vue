@@ -5,7 +5,8 @@ import {
   Camera, 
   CookingPot, 
   ClipboardList, 
-  Settings 
+  Settings,
+  SearchCheck
 } from 'lucide-vue-next';
 
 
@@ -14,6 +15,7 @@ const navItems = [
   { name: 'dashboard', label: '监控', path: '/', icon: BarChart2 },
   { name: 'cameras', label: '摄像头', path: '/cameras', icon: Camera },
   { name: 'zones', label: '灶台', path: '/zones', icon: CookingPot },
+  { name: 'patrol', label: '巡检', path: '/patrol', icon: SearchCheck },
   { name: 'logs', label: '日志', path: '/logs', icon: ClipboardList },
   { name: 'settings', label: '设置', path: '/settings', icon: Settings },
 ];

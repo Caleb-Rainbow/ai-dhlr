@@ -48,6 +48,9 @@ export interface ZoneConfig {
     camera_id: string;
     enabled: boolean;
     roi: number[][]; // [[x,y], [x,y], ...]
+    serial_index?: number;  // 串口分区索引
+    fire_current_threshold?: number;  // 动火电流阈值
+    current_value?: number;  // 实时电流值
 }
 
 export interface LogFile {
@@ -86,4 +89,17 @@ export interface RemoteServerConfig {
     is_connecting: boolean;
     last_error: string;
     reconnect_attempts: number;
+}
+
+export interface SerialConfig {
+    enabled: boolean;
+    port: string;
+    baudrate: number;
+    poll_interval: number;
+    is_open: boolean;
+}
+
+export interface LoraConfig {
+    id: number;
+    channel: number;
 }

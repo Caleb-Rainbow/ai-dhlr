@@ -131,6 +131,28 @@ class FireSafetySystem:
             except ImportError:
                 self._logger.warning("性能监控模块不可用")
             
+            # 初始化串口管理器
+            try:
+                from src.serial_port.serial_manager import serial_manager
+                serial_manager.initialize(
+                    enabled=config.serial.enabled,
+                    port=config.serial.port,
+                    baudrate=config.serial.baudrate,
+                    poll_interval=config.serial.poll_interval
+                )
+                
+                # 注册所有灶台到串口管理器
+                for zone_config in config.zones:
+                    serial_manager.register_zone(
+                        zone_config.id,
+                        zone_config.serial_index,
+                        zone_config.fire_current_threshold
+                    )
+                
+                self._logger.info("串口管理器初始化完成")
+            except Exception as e:
+                self._logger.warning(f"串口管理器初始化失败: {e}")
+            
             self._logger.info("系统初始化完成")
             return True
             
@@ -163,7 +185,17 @@ class FireSafetySystem:
         """切电回调（第三阶段）- 执行切电并更新播报内容"""
         config = get_config()
         self._logger.warning(f"[切电] {zone.name} 无人看管超过 {config.alarm.action_time} 秒，执行切电")
+        
+        # 使用GPIO控制器执行切电（兼容模拟模式）
         gpio_controller.cutoff(zone.id)
+        
+        # 使用串口管理器执行切电（实际硬件）
+        try:
+            from src.serial_port.serial_manager import serial_manager
+            serial_manager.cutoff(zone.id)
+        except Exception as e:
+            self._logger.warning(f"串口切电失败: {e}")
+        
         self._add_to_broadcast_queue(zone.id, zone.name, "action")
         
         image_base64 = self._frame_to_base64(frame) if frame is not None else None
@@ -344,6 +376,14 @@ class FireSafetySystem:
         """检测循环"""
         self._logger.info("检测循环已启动")
         
+        # 获取串口管理器引用
+        serial_mgr = None
+        try:
+            from src.serial_port.serial_manager import serial_manager
+            serial_mgr = serial_manager
+        except Exception:
+            pass
+        
         while self._running:
             try:
                 # 遍历所有灶台
@@ -367,8 +407,16 @@ class FireSafetySystem:
                         sm.zone.roi
                     )
                     
-                    # 更新状态机
-                    zone_manager.update_zone(sm.zone.id, has_person, frame)
+                    # 从串口管理器获取动火状态（如果可用）
+                    is_fire_on = False
+                    if serial_mgr:
+                        is_fire_on = serial_mgr.is_fire_on(sm.zone.id)
+                    else:
+                        # 回退到模拟GPIO状态
+                        is_fire_on = zone_manager._fire_states.get(sm.zone.id, False)
+                    
+                    # 更新状态机（传递动火状态）
+                    sm.update(has_person, is_fire_on, frame)
                 
                 # 控制检测频率
                 time.sleep(0.1)  # ~10 FPS

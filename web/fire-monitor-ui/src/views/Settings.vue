@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
-import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig } from '../types';
+import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig } from '../types';
 import { Save, Info, Volume2, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
@@ -40,6 +40,24 @@ const remoteConfig = ref<RemoteServerConfig>({
     reconnect_attempts: 0
 });
 
+// 串口配置
+const serialConfig = ref<SerialConfig>({
+    enabled: true,
+    port: '/dev/ttyS3',
+    baudrate: 9600,
+    poll_interval: 1.0,
+    is_open: false
+});
+
+// LoRa配置
+const loraConfig = ref<LoraConfig>({
+    id: 0,
+    channel: 0
+});
+
+// LoRa设置状态
+const settingLora = ref(false);
+
 // 编辑用的本地状态
 const remoteForm = ref({
     server_url: '',
@@ -57,6 +75,7 @@ const verifyResult = ref<{ success: boolean; message: string } | null>(null);
 const showPassword = ref(false);
 const saveSuccess = ref(false);
 const saveError = ref('');
+const showSaveButton = ref(false);
 
 // Theme management
 const { theme, toggleTheme } = useTheme();
@@ -105,6 +124,14 @@ const loadData = async () => {
     finally {
         loading.value = false;
     }
+    
+    // 加载串口和LoRa配置
+    try {
+        const serial = await ws.request<SerialConfig>('get_serial_config').catch(() => serialConfig.value);
+        serialConfig.value = serial;
+        const lora = await ws.request<LoraConfig>('get_lora_config').catch(() => loraConfig.value);
+        loraConfig.value = lora;
+    } catch (e) { console.error('Failed to load serial config', e); }
 };
 
 // 刷新网络状态
@@ -171,6 +198,8 @@ const saveSettings = async () => {
     try {
         await ws.request('update_settings', { category: 'alarm', settings: alarmSettings.value });
         await saveRemoteConfig();
+        // 保存串口配置
+        await ws.request('update_serial_config', serialConfig.value);
         saveSuccess.value = true;
         // 3秒后自动隐藏成功提示
         setTimeout(() => {
@@ -186,11 +215,31 @@ const saveSettings = async () => {
     finally { saving.value = false; }
 };
 
+// 设置LoRa配置（编号和信道）
+const setLoraConfig = async () => {
+    settingLora.value = true;
+    try {
+        await ws.request('set_lora_config', { 
+            id: loraConfig.value.id, 
+            channel: loraConfig.value.channel 
+        });
+        alert('LoRa配置设置成功');
+    } catch (e: any) {
+        alert('LoRa配置设置失败: ' + (e.message || e));
+    } finally {
+        settingLora.value = false;
+    }
+};
+
 // 定时刷新网络和远程状态
 let refreshInterval: number | null = null;
 onMounted(async () => {
     await ws.connect();
     loadData();
+    // 延迟显示保存按钮，触发进入动画
+    setTimeout(() => {
+        showSaveButton.value = true;
+    }, 300);
     refreshInterval = window.setInterval(async () => {
         try {
             networkStatus.value = await ws.request<NetworkStatus>('get_network');
@@ -364,6 +413,100 @@ onUnmounted(() => {
        </div>
     </div>
 
+    <!-- Serial Port Config - 串口配置 -->
+    <div v-if="!loading" class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+           <Server class="w-4 h-4" /> 串口配置
+           <span v-if="serialConfig.is_open" class="text-xs text-success ml-auto">已连接</span>
+           <span v-else class="text-xs text-red-400 ml-auto">未连接</span>
+       </h3>
+       
+       <div class="space-y-4">
+         <!-- 启用开关 -->
+         <div class="flex items-center justify-between p-4 rounded-2xl" style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+           <div class="flex items-center gap-3">
+             <div class="w-10 h-10 rounded-xl flex items-center justify-center" 
+                  :class="serialConfig.enabled ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'">
+               <Server class="w-5 h-5" />
+             </div>
+             <div>
+               <div class="font-medium text-text-primary">启用串口</div>
+               <div class="text-xs text-text-muted">{{ serialConfig.enabled ? '已启用' : '已禁用' }}</div>
+             </div>
+           </div>
+           <label class="relative inline-flex items-center cursor-pointer">
+             <input type="checkbox" v-model="serialConfig.enabled" class="sr-only peer">
+             <div class="w-12 h-6 rounded-full peer transition-colors duration-300"
+                  :class="serialConfig.enabled ? 'bg-success' : 'bg-gray-500'">
+               <div class="absolute top-[2px] w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300"
+                    :class="serialConfig.enabled ? 'left-[26px]' : 'left-[2px]'"></div>
+             </div>
+           </label>
+         </div>
+
+         <!-- 串口路径 -->
+         <div class="space-y-1">
+           <label class="text-xs text-text-muted ml-1">串口路径</label>
+           <input v-model="serialConfig.port" type="text" 
+                  placeholder="/dev/ttyS3"
+                  class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
+                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+         </div>
+
+         <!-- 波特率和轮询间隔 -->
+         <div class="grid grid-cols-2 gap-3">
+           <div class="space-y-1">
+             <label class="text-xs text-text-muted ml-1">波特率</label>
+             <select v-model.number="serialConfig.baudrate" 
+                     class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary"
+                     style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+               <option value="9600">9600</option>
+               <option value="19200">19200</option>
+               <option value="38400">38400</option>
+               <option value="115200">115200</option>
+             </select>
+           </div>
+           <div class="space-y-1">
+             <label class="text-xs text-text-muted ml-1">轮询间隔 (秒)</label>
+             <input v-model.number="serialConfig.poll_interval" type="number" step="0.1" min="0.1"
+                    class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
+                    style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+           </div>
+         </div>
+       </div>
+    </div>
+
+    <!-- LoRa Config - LoRa配置 -->
+    <div v-if="!loading" class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+           <Wifi class="w-4 h-4" /> LoRa 配置
+       </h3>
+       
+       <!-- 两个输入框一行 -->
+       <div class="grid grid-cols-2 gap-3">
+         <div class="space-y-1">
+           <label class="text-xs text-text-muted ml-1">LoRa 编号</label>
+           <input v-model.number="loraConfig.id" type="number" min="0"
+                  class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
+                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+         </div>
+         <div class="space-y-1">
+           <label class="text-xs text-text-muted ml-1">LoRa 信道</label>
+           <input v-model.number="loraConfig.channel" type="number" min="0"
+                  class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
+                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+         </div>
+       </div>
+       
+       <!-- 设置按钮单独一行 -->
+       <button @click="setLoraConfig" :disabled="settingLora"
+               class="w-full py-3 bg-primary hover:bg-primary-light text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+         <Loader v-if="settingLora" class="w-4 h-4 animate-spin" />
+         <span>{{ settingLora ? '设置中...' : '应用 LoRa 配置' }}</span>
+       </button>
+    </div>
+
+
     <!-- Theme Settings -->
     <div class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
        <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
@@ -511,13 +654,15 @@ onUnmounted(() => {
     <!-- 悬浮保存按钮容器 - 限制在内容区域内 -->
     <div class="fixed inset-0 pointer-events-none z-50 max-w-md mx-auto">
       <!-- 悬浮保存按钮 -->
-      <button @click="saveSettings" 
-         class="pointer-events-auto absolute bottom-20 right-4 px-5 py-3 bg-primary hover:bg-primary-light text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-primary/30 transition-all active:scale-95 disabled:opacity-50 hover:scale-105"
-         :disabled="saving">
-         <Loader v-if="saving" class="w-5 h-5 animate-spin" />
-         <Save v-else class="w-5 h-5" />
-         <span>{{ saving ? '保存中...' : '保存配置' }}</span>
-      </button>
+      <Transition name="save-btn">
+        <button v-if="showSaveButton" @click="saveSettings" 
+           class="pointer-events-auto absolute bottom-20 right-4 px-5 py-3 bg-primary hover:bg-primary-light text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-primary/30 transition-all active:scale-95 disabled:opacity-50 hover:scale-105"
+           :disabled="saving">
+           <Loader v-if="saving" class="w-5 h-5 animate-spin" />
+           <Save v-else class="w-5 h-5" />
+           <span>{{ saving ? '保存中...' : '保存配置' }}</span>
+        </button>
+      </Transition>
 
       <!-- 保存成功提示 Toast -->
       <Transition name="toast">
@@ -539,3 +684,42 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 保存按钮进入动画 */
+.save-btn-enter-active {
+  animation: save-btn-bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.save-btn-leave-active {
+  animation: save-btn-bounce-out 0.3s ease-in forwards;
+}
+
+@keyframes save-btn-bounce-in {
+  0% {
+    opacity: 0;
+    transform: translateX(100px) scale(0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-10px) scale(1.1);
+  }
+  70% {
+    transform: translateX(5px) scale(0.95);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes save-btn-bounce-out {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100px) scale(0.3);
+  }
+}
+</style>

@@ -90,6 +90,23 @@ class WSHandler:
             # 日志相关
             "get_log_files": self._get_log_files,
             "get_log_content": self._get_log_content,
+            
+            # 串口相关
+            "get_serial_config": self._get_serial_config,
+            "update_serial_config": self._update_serial_config,
+            "get_currents": self._get_currents,
+            "get_lora_config": self._get_lora_config,
+            "set_lora_config": self._set_lora_config,
+            
+            # 巡检相关
+            "start_patrol": self._start_patrol,
+            "stop_patrol": self._stop_patrol,
+            "patrol_self_check": self._patrol_self_check,
+            "patrol_alarm_demo": self._patrol_alarm_demo,
+            "patrol_force_warning": self._patrol_force_warning,
+            "patrol_force_alarm": self._patrol_force_alarm,
+            "patrol_force_cutoff": self._patrol_force_cutoff,
+            "get_patrol_status": self._get_patrol_status,
         }
     
     async def handle_request(self, message: dict) -> dict:
@@ -126,16 +143,33 @@ class WSHandler:
         """获取所有灶台"""
         from ..zone.state_machine import zone_manager
         zones = zone_manager.get_all_zones()
-        return [
-            {
+        
+        # 获取电流值
+        currents = {}
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            currents = serial_manager.get_all_currents()
+        except Exception:
+            pass
+        
+        result = []
+        for z in zones:
+            zone_data = {
                 "id": z.zone.id,
                 "name": z.zone.name,
                 "camera_id": z.zone.camera_id,
                 "roi": [list(p) for p in z.zone.roi],
                 "enabled": z.zone.enabled
             }
-            for z in zones
-        ]
+            # 从配置获取serial_index和fire_current_threshold
+            for cfg in config_manager.config.zones:
+                if cfg.id == z.zone.id:
+                    zone_data["serial_index"] = cfg.serial_index
+                    zone_data["fire_current_threshold"] = cfg.fire_current_threshold
+                    zone_data["current_value"] = currents.get(z.zone.id, 0)
+                    break
+            result.append(zone_data)
+        return result
     
     async def _get_zone(self, params: dict) -> dict:
         """获取单个灶台"""
@@ -163,6 +197,8 @@ class WSHandler:
         camera_id = params.get("camera_id")
         roi = params.get("roi", [])
         enabled = params.get("enabled", True)
+        serial_index = params.get("serial_index", 0)
+        fire_current_threshold = params.get("fire_current_threshold", 100)
         
         if not name:
             raise ValueError("灶台名称不能为空")
@@ -190,7 +226,9 @@ class WSHandler:
             name=name,
             camera_id=camera_id,
             roi=[tuple(p) for p in roi] if roi else [],
-            enabled=enabled
+            enabled=enabled,
+            serial_index=serial_index,
+            fire_current_threshold=fire_current_threshold
         )
         
         # 添加到配置
@@ -206,12 +244,21 @@ class WSHandler:
         zone_manager.add_zone(config, **callbacks)
         config_manager.save()
         
+        # 注册到串口管理器
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            serial_manager.register_zone(zone_id, serial_index, fire_current_threshold)
+        except Exception:
+            pass
+        
         return {
             "id": zone_id,
             "name": name,
             "camera_id": camera_id,
             "roi": roi,
-            "enabled": enabled
+            "enabled": enabled,
+            "serial_index": serial_index,
+            "fire_current_threshold": fire_current_threshold
         }
     
     async def _update_zone(self, params: dict) -> dict:
@@ -246,9 +293,35 @@ class WSHandler:
                     cfg.roi = [tuple(p) for p in params["roi"]]
                 if "enabled" in params:
                     cfg.enabled = params["enabled"]
+                if "serial_index" in params:
+                    cfg.serial_index = params["serial_index"]
+                if "fire_current_threshold" in params:
+                    cfg.fire_current_threshold = params["fire_current_threshold"]
+                
+                # 更新串口管理器
+                try:
+                    from ..serial_port.serial_manager import serial_manager
+                    serial_manager.update_zone_config(
+                        zone_id,
+                        serial_index=params.get("serial_index"),
+                        fire_threshold=params.get("fire_current_threshold")
+                    )
+                except Exception:
+                    pass
                 break
         
         config_manager.save()
+        
+        # 如果名称变化，重新合成语音文件
+        new_name = params.get("name")
+        regenerate_voice = params.get("regenerate_voice", False)
+        if new_name and regenerate_voice:
+            try:
+                from ..tts.tts_manager import tts_manager
+                tts_manager.submit_synthesis_task(zone_id, new_name)
+                logger.info(f"灶台 {zone_id} 名称变化，已提交语音合成任务")
+            except Exception as e:
+                logger.warning(f"提交语音合成任务失败: {e}")
         
         return {"id": zone_id, "message": "更新成功"}
     
@@ -757,7 +830,147 @@ class WSHandler:
                 "content": content,
                 "total_lines": len(all_lines)
             }
+    
+    # ==================== 串口处理器 ====================
+    
+    async def _get_serial_config(self, params: dict) -> dict:
+        """获取串口配置"""
+        config = config_manager.config.serial
+        
+        is_open = False
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            is_open = serial_manager._helper.is_open if serial_manager._helper else False
+        except Exception:
+            pass
+        
+        return {
+            "enabled": config.enabled,
+            "port": config.port,
+            "baudrate": config.baudrate,
+            "poll_interval": config.poll_interval,
+            "is_open": is_open
+        }
+    
+    async def _update_serial_config(self, params: dict) -> dict:
+        """更新串口配置"""
+        config = config_manager.config.serial
+        
+        if "enabled" in params:
+            config.enabled = params["enabled"]
+        if "port" in params:
+            config.port = params["port"]
+        if "baudrate" in params:
+            config.baudrate = params["baudrate"]
+        if "poll_interval" in params:
+            config.poll_interval = params["poll_interval"]
+        
+        config_manager.save()
+        
+        # 更新串口管理器
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            serial_manager.update_serial_config(
+                enabled=params.get("enabled"),
+                port=params.get("port"),
+                baudrate=params.get("baudrate"),
+                poll_interval=params.get("poll_interval")
+            )
+        except Exception as e:
+            return {"message": f"配置已保存，但串口更新失败: {e}"}
+        
+        return {"message": "串口配置已更新"}
+    
+    async def _get_currents(self, params: dict) -> dict:
+        """获取所有分区电流值"""
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            currents = serial_manager.get_all_currents()
+            return {"currents": currents}
+        except Exception as e:
+            return {"currents": {}, "error": str(e)}
+    
+    async def _get_lora_config(self, params: dict) -> dict:
+        """获取LoRa配置"""
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            return serial_manager.get_lora_config()
+        except Exception as e:
+            return {"id": 0, "channel": 0, "error": str(e)}
+    
+    async def _set_lora_config(self, params: dict) -> dict:
+        """设置LoRa配置（编号和信道）"""
+        lora_id = params.get("id")
+        channel = params.get("channel")
+        
+        if lora_id is None and channel is None:
+            raise ValueError("缺少 id 或 channel 参数")
+        
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            messages = []
+            
+            # 设置编号
+            if lora_id is not None:
+                if serial_manager.set_lora_id(int(lora_id)):
+                    messages.append(f"编号已设置为 {lora_id}")
+                else:
+                    raise ValueError("设置编号失败，串口可能未连接")
+            
+            # 设置信道
+            if channel is not None:
+                if serial_manager.set_lora_channel(int(channel)):
+                    messages.append(f"信道已设置为 {channel}")
+                else:
+                    raise ValueError("设置信道失败，串口可能未连接")
+            
+            return {"message": "LoRa配置已更新: " + ", ".join(messages)}
+        except Exception as e:
+            raise ValueError(f"设置LoRa配置失败: {e}")
+    
+    # ==================== 巡检处理器 ====================
+    
+    async def _start_patrol(self, params: dict) -> dict:
+        """开始巡检模式"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.start_patrol()
+    
+    async def _stop_patrol(self, params: dict) -> dict:
+        """退出巡检模式"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.stop_patrol()
+    
+    async def _patrol_self_check(self, params: dict) -> dict:
+        """设备自检"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.device_self_check()
+    
+    async def _patrol_alarm_demo(self, params: dict) -> dict:
+        """报警演示"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.alarm_demo()
+    
+    async def _patrol_force_warning(self, params: dict) -> dict:
+        """强制预警（所有区）"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.force_warning_all()
+    
+    async def _patrol_force_alarm(self, params: dict) -> dict:
+        """强制报警（所有区）"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.force_alarm_all()
+    
+    async def _patrol_force_cutoff(self, params: dict) -> dict:
+        """强制切电（所有区）"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.force_cutoff_all()
+    
+    async def _get_patrol_status(self, params: dict) -> dict:
+        """获取巡检状态"""
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.get_state()
 
 
 # 全局处理器实例
 ws_handler = WSHandler()
+

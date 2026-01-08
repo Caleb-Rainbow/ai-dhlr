@@ -344,3 +344,47 @@ def sync_broadcast_state_change(event_data: dict):
             new_loop.close()
     except Exception as e:
         logger.error(f"同步广播状态变化事件失败: {e}", exc_info=True)
+
+
+async def broadcast_patrol_event(event_type: str, data: dict):
+    """
+    广播巡检事件
+    
+    Args:
+        event_type: 事件类型 "status_update" | "result" | "error"
+        data: 事件数据
+    """
+    message = {
+        "type": "patrol_event",
+        "event_type": event_type,
+        "data": data
+    }
+    await message_dispatcher.broadcast_to_all(message)
+
+
+def sync_broadcast_patrol_event(event_type: str, data: dict):
+    """
+    同步版本的巡检事件广播
+    用于从非异步上下文调用
+    """
+    try:
+        # 获取或创建事件循环
+        loop = None
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    broadcast_patrol_event(event_type, data),
+                    loop
+                )
+                return
+        except (RuntimeError, AssertionError):
+            pass
+        
+        new_loop = asyncio.new_event_loop()
+        try:
+            new_loop.run_until_complete(broadcast_patrol_event(event_type, data))
+        finally:
+            new_loop.close()
+    except Exception as e:
+        logger.error(f"同步广播巡检事件失败: {e}", exc_info=True)

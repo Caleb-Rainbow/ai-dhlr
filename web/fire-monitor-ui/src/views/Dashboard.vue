@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { RefreshCcw, RotateCcw, Activity, Flame, User, Cpu, Zap } from 'lucide-vue-next';
+import { RefreshCcw, Activity, Flame, User, Cpu, Zap } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneStatus, DeviceInfo, PerformanceStats } from '../types';
 import Sparkline from '../components/Sparkline.vue';
@@ -55,25 +55,7 @@ const refreshPerformance = async () => {
   } catch (e) { console.error(e); }
 };
 
-const resetZone = async (id: string) => {
-  await ws.request('reset_zone', { zone_id: id });
-  await refreshStatus();
-};
-
-const toggleFire = async (id: string, isOn: boolean) => {
-  // 保持兼容，暂时使用 HTTP
-  const { api } = await import('../api');
-  await api(`/control/fire/${id}`, 'POST', { is_on: isOn });
-  await refreshStatus();
-};
-
-const resetAll = async () => {
-  if(!confirm('确定要复位所有灶台吗？')) return;
-  for (const zone of zones.value) {
-    await ws.request('reset_zone', { zone_id: zone.id });
-  }
-  await refreshStatus();
-};
+// 注意: toggleFire、resetZone 和 resetAll 已移除，动火状态现在通过串口电流值判断
 
 onMounted(async () => {
   // 连接 WebSocket
@@ -117,9 +99,6 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="flex gap-2">
-          <button @click="resetAll" class="glass-button p-2.5 rounded-xl text-amber-500/90 active:scale-90 transition-transform">
-            <RotateCcw class="w-4 h-4" />
-          </button>
           <button @click="refreshStatus" class="glass-button p-2.5 rounded-xl text-text-secondary active:scale-90 transition-transform">
             <RefreshCcw class="w-4 h-4" />
           </button>
@@ -205,22 +184,15 @@ onUnmounted(() => {
                  </Transition>
               </div>
 
-              <!-- Actions -->
-              <div class="grid grid-cols-2 gap-3">
-                <button @click="toggleFire(zone.id, !zone.is_fire_on)" 
-                  class="glass-button py-2.5 rounded-xl text-xs font-medium transition-all press-effect"
-                  :class="zone.is_fire_on ? 'text-text-muted hover:text-white' : 'text-emerald-500 hover:bg-emerald-500/10'">
-                  {{ zone.is_fire_on ? '模拟关火' : '模拟开火' }}
-                </button>
-                <button @click="resetZone(zone.id)" 
-                  class="relative overflow-hidden rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed press-effect"
-                  :class="['alarm', 'cutoff'].includes(zone.state) 
-                    ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30 hover:bg-amber-400' 
-                    : 'glass-button text-text-secondary hover:text-white'">
-                  <span class="relative z-10 flex items-center justify-center gap-1.5">
-                    <RotateCcw class="w-3.5 h-3.5" /> 复位
+              <!-- Actions / Current Display -->
+              <div class="flex items-center justify-between">
+                <!-- 电流值显示 -->
+                <div class="text-xs text-text-muted flex items-center gap-1">
+                  <Zap class="w-3 h-3 text-amber-400" />
+                  <span class="font-mono text-amber-400">
+                    {{ zone.is_fire_on ? ((zone as any).current_value ? ((zone as any).current_value / 100).toFixed(2) : '?.??') : '0.00' }}A
                   </span>
-                </button>
+                </div>
               </div>
             </div>
           </div>

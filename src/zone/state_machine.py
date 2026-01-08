@@ -99,9 +99,13 @@ class ZoneStateMachine:
                 self._reset_timers()
             
             elif self.zone.state == ZoneState.CUTOFF:
-                # 切电状态：忽略人员检测，只能通过硬件复位（关火）退出
-                # 保持 CUTOFF 状态不变
-                pass
+                # 切电状态复位逻辑
+                # 条件1: 检测到人自动复位
+                if has_person:
+                    self._trigger_cutoff_reset("检测到人员回场")
+                # 条件2: 切电后10秒电流值大于阈值自动复位（通过串口管理器判断）
+                elif self._check_current_reset():
+                    self._trigger_cutoff_reset("电流值恢复正常")
             
             elif has_person:
                 # 开火 + 有人 -> 有人动火
@@ -191,6 +195,50 @@ class ZoneStateMachine:
         self.zone.no_person_duration = 0.0
         self.zone.warning_remaining = 0.0
         self.zone.cutoff_remaining = 0.0
+    
+    def _check_current_reset(self) -> bool:
+        """
+        检查是否可以通过电流值复位
+        
+        条件：切电后10秒 且 电流值大于阈值
+        """
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            return serial_manager.can_reset_by_current(self.zone.id)
+        except Exception:
+            return False
+    
+    def _trigger_cutoff_reset(self, reason: str):
+        """
+        触发切电复位
+        
+        Args:
+            reason: 复位原因
+        """
+        old_state = self.zone.state
+        self._reset_timers()
+        self.zone.state = ZoneState.IDLE
+        
+        # 清除串口管理器中的切电状态
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            serial_manager.clear_cutoff_state(self.zone.id)
+        except Exception:
+            pass
+        
+        event_logger.log_reset(self.zone.id, f"自动复位: {reason}")
+        self._logger.info(f"[{self.zone.id}] 自动复位: {reason}")
+        
+        if self._on_state_change:
+            event = StateChangeEvent(
+                zone_id=self.zone.id,
+                zone_name=self.zone.name,
+                old_state=old_state,
+                new_state=ZoneState.IDLE,
+                timestamp=time.time(),
+                message=f"自动复位: {reason}"
+            )
+            self._on_state_change(event)
     
     def _save_cutoff_snapshot(self, frame: np.ndarray):
         """保存切电截图"""

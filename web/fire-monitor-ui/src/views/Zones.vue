@@ -11,12 +11,16 @@ const cameras = ref<Camera[]>([]);
 const loading = ref(true);
 
 const showAddModal = ref(false);
-const showRoiModal = ref(false);
+const showEditModal = ref(false);
 
-const addForm = ref({ name: '', camera_id: '' });
+const addForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100 });
+
+// Edit Zone State
+const currentEditZone = ref<ZoneConfig | null>(null);
+const editForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100 });
+const originalZoneName = ref(''); // 用于检测名称是否变化
 
 // ROI Editor State
-const currentRoiZone = ref<ZoneConfig | null>(null);
 const roiCanvas = ref<HTMLCanvasElement | null>(null);
 const roiPoints = ref<number[][]>([]);
 const roiImage = ref('');
@@ -68,7 +72,7 @@ const submitAdd = async () => {
     try {
         await ws.request('create_zone', addForm.value);
         showAddModal.value = false;
-        addForm.value = { name: '', camera_id: '' };
+        addForm.value = { name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100 };
         await loadData();
     } catch(e: unknown) {
         const msg = e instanceof Error ? e.message : '添加失败';
@@ -76,11 +80,18 @@ const submitAdd = async () => {
     }
 };
 
-// ROI Logic
-const openRoiEditor = (zone: ZoneConfig) => {
-    currentRoiZone.value = zone;
+// Edit Zone Logic
+const openEditZone = (zone: ZoneConfig) => {
+    currentEditZone.value = zone;
+    editForm.value = {
+        name: zone.name,
+        camera_id: zone.camera_id,
+        serial_index: zone.serial_index || 0,
+        fire_current_threshold: zone.fire_current_threshold || 100
+    };
+    originalZoneName.value = zone.name; // 保存原始名称用于比较
     roiPoints.value = zone.roi || [];
-    showRoiModal.value = true;
+    showEditModal.value = true;
     
     // 先设置图片URL，然后等待模态框渲染后初始化canvas
     const imageUrl = `/cameras/${zone.camera_id}/preview?t=${Date.now()}`;
@@ -98,6 +109,22 @@ const openRoiEditor = (zone: ZoneConfig) => {
     };
     img.onerror = () => {
         console.error('Failed to load camera preview image');
+    };
+};
+
+// 当摄像头变化时刷新预览
+const onCameraChange = () => {
+    if (!editForm.value.camera_id) return;
+    
+    const imageUrl = `/cameras/${editForm.value.camera_id}/preview?t=${Date.now()}`;
+    roiImage.value = imageUrl;
+    roiPoints.value = []; // 切换摄像头时清空ROI
+    
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = imageUrl;
+    img.onload = () => {
+        initCanvas(img);
     };
 };
 
@@ -236,11 +263,31 @@ const clearRoi = () => {
     }
 };
 
-const saveRoi = async () => {
-    if(!currentRoiZone.value) return;
+const saveEditZone = async () => {
+    if(!currentEditZone.value) return;
+    if(!editForm.value.name) {
+        alert('灶台名称不能为空');
+        return;
+    }
+    if(!editForm.value.camera_id) {
+        alert('请选择关联摄像头');
+        return;
+    }
+    
     try {
-        await ws.request('update_zone', { zone_id: currentRoiZone.value.id, roi: roiPoints.value });
-        showRoiModal.value = false;
+        // 检测名称是否变化
+        const nameChanged = editForm.value.name !== originalZoneName.value;
+        
+        await ws.request('update_zone', { 
+            zone_id: currentEditZone.value.id, 
+            name: editForm.value.name,
+            camera_id: editForm.value.camera_id,
+            serial_index: editForm.value.serial_index,
+            fire_current_threshold: editForm.value.fire_current_threshold,
+            roi: roiPoints.value,
+            regenerate_voice: nameChanged // 告诉后端是否需要重新合成语音
+        });
+        showEditModal.value = false;
         await loadData();
     } catch(e) { 
         const msg = e instanceof Error ? e.message : '保存失败';
@@ -282,30 +329,30 @@ onMounted(loadData);
                <div class="w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-red-500/20 text-orange-400 border border-white/5">
                   <CookingPot class="w-6 h-6" />
                </div>
-               <div>
-                  <h3 class="font-bold text-text-primary tracking-wide text-lg">{{ zone.name }}</h3>
-                  <div class="flex items-center gap-2 mt-1">
-                     <span class="text-xs text-text-muted font-mono uppercase px-1.5 py-0.5 rounded" style="background: var(--theme-bg-input);">{{ zone.id }}</span>
-                     <span class="w-1 h-1 rounded-full bg-text-muted"></span>
-                     <span class="text-xs text-text-muted">{{ zone.camera_id }}</span>
-                  </div>
-               </div>
-            </div>
+                <div>
+                   <div class="flex items-center gap-3">
+                      <h3 class="font-bold text-text-primary tracking-wide text-lg">{{ zone.name }}</h3>
+                      <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="zone.enabled" class="sr-only peer" @change="toggleZone(zone)">
+                        <div class="w-8 h-4 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
+                      </label>
+                      <Transition name="pop" mode="out-in">
+                        <span :key="zone.enabled ? 'active' : 'disabled'" class="text-[9px] font-bold uppercase tracking-wider" :class="zone.enabled ? 'text-emerald-500' : 'text-text-muted'">
+                           {{ zone.enabled ? 'ON' : 'OFF' }}
+                        </span>
+                      </Transition>
+                   </div>
+                   <div class="flex items-center gap-2 mt-1">
+                      <span class="text-xs text-text-muted">{{ zone.camera_id }}</span>
+                      <span class="w-1 h-1 rounded-full bg-text-muted"></span>
+                      <span class="text-xs text-amber-400">阈值: {{ ((zone.fire_current_threshold || 100) / 100).toFixed(2) }}A</span>
+                   </div>
+                </div>
+             </div>
 
-            <div class="flex items-center gap-2">
-               <div class="mr-4 flex flex-col items-end">
-                 <Transition name="pop" mode="out-in">
-                   <span :key="zone.enabled ? 'active' : 'disabled'" class="text-[10px] font-bold uppercase tracking-wider mb-1" :class="zone.enabled ? 'text-emerald-500' : 'text-text-muted'">
-                      {{ zone.enabled ? 'ACTIVE' : 'DISABLED' }}
-                   </span>
-                 </Transition>
-                 <label class="relative inline-flex items-center cursor-pointer">
-                   <input type="checkbox" v-model="zone.enabled" class="sr-only peer" @change="toggleZone(zone)">
-                   <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                 </label>
-               </div>
+             <div class="flex items-center gap-2">
                
-               <button @click="openRoiEditor(zone)" class="p-2.5 rounded-xl text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-all border border-amber-500/30 press-effect" style="background: rgba(245, 158, 11, 0.1);" title="编辑区域">
+               <button @click="openEditZone(zone)" class="p-2.5 rounded-xl text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-all border border-amber-500/30 press-effect" style="background: rgba(245, 158, 11, 0.1);" title="编辑灶台">
                   <Pencil class="w-4 h-4" />
                </button>
                <button @click="deleteZone(zone.id)" class="p-2.5 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all border border-red-500/30 press-effect" style="background: rgba(239, 68, 68, 0.1);" title="删除">
@@ -345,26 +392,74 @@ onMounted(loadData);
                     <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">▼</div>
                 </div>
             </div>
+            <div class="space-y-1">
+                <label class="text-xs text-text-muted">串口分区索引</label>
+                <input v-model.number="addForm.serial_index" type="number" min="0" placeholder="从0开始" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                <p class="text-xs text-text-muted mt-1">对应硬件接线顺序，索引0对应地址0x01</p>
+            </div>
+            <div class="space-y-1">
+                <label class="text-xs text-text-muted">动火电流阈值</label>
+                <input v-model.number="addForm.fire_current_threshold" type="number" min="0" placeholder="如: 145" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                <p class="text-xs text-text-muted mt-1">145 表示 1.45A，实时电流超过此值则判定为动火</p>
+            </div>
             <button @click="submitAdd" class="w-full py-3 bg-primary rounded-xl font-bold mt-4 hover:bg-primary-dark shadow-lg shadow-primary/20 transition-all active:scale-95 press-effect">
                 添加
             </button>
         </div>
     </Modal>
 
-    <!-- ROI Editor Modal -->
-    <Modal title="编辑 ROI 区域" :is-open="showRoiModal" @close="showRoiModal = false">
+    <!-- Edit Zone Modal -->
+    <Modal title="编辑灶台" :is-open="showEditModal" @close="showEditModal = false">
         <div class="space-y-4">
-            <div class="relative bg-black rounded-xl overflow-hidden select-none touch-none border border-white/10 aspect-video flex items-center justify-center">
-                <Transition name="fade">
-                  <div v-if="!roiImage" class="text-text-muted text-xs animate-pulse">加载画面中...</div>
-                </Transition>
-                <canvas ref="roiCanvas" @click="onCanvasClick" class="max-w-full max-h-full block cursor-crosshair"></canvas>
+            <!-- 名称 -->
+            <div class="space-y-1">
+                <label class="text-xs text-text-muted">名称</label>
+                <input v-model="editForm.name" type="text" placeholder="如: 1号灶台" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                <p v-if="editForm.name !== originalZoneName" class="text-xs text-amber-400 flex items-center gap-1">
+                    <span>⚠️</span> 名称已修改，保存后将重新合成语音文件
+                </p>
             </div>
-            <p class="text-xs text-text-muted text-center py-2 rounded-lg" style="background: var(--theme-bg-input);">点击画面添加顶点，形成封闭区域</p>
-            <div class="flex gap-3">
-                <button @click="clearRoi" class="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all text-text-primary press-effect" style="background: var(--theme-bg-input);">清除</button>
-                <button @click="saveRoi" class="flex-1 py-2.5 bg-primary hover:bg-primary-light rounded-xl text-sm font-bold shadow-lg shadow-primary/20 transition-all press-effect">保存</button>
+            <!-- 关联摄像头 -->
+            <div class="space-y-1">
+                <label class="text-xs text-text-muted">关联摄像头</label>
+                <div class="relative">
+                    <select v-model="editForm.camera_id" @change="onCameraChange" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                        <option v-for="cam in cameras" :key="cam.id" :value="cam.id" class="theme-select-option">{{ cam.name }}</option>
+                    </select>
+                    <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">▼</div>
+                </div>
             </div>
+            <!-- 串口索引和电流阈值 -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                    <label class="text-xs text-text-muted">串口索引</label>
+                    <input v-model.number="editForm.serial_index" type="number" min="0" placeholder="0" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-xs text-text-muted">电流阈值</label>
+                    <input v-model.number="editForm.fire_current_threshold" type="number" min="0" placeholder="100" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                </div>
+            </div>
+            <p class="text-xs text-text-muted">串口索引对应硬件接线顺序 (0=0x01)；电流阈值如 145 表示 1.45A</p>
+            
+            <!-- ROI 区域编辑 -->
+            <div class="space-y-2">
+                <label class="text-xs text-text-muted">ROI 区域</label>
+                <div class="relative bg-black rounded-xl overflow-hidden select-none touch-none border border-white/10 aspect-video flex items-center justify-center">
+                    <Transition name="fade">
+                      <div v-if="!roiImage" class="text-text-muted text-xs animate-pulse">加载画面中...</div>
+                    </Transition>
+                    <canvas ref="roiCanvas" @click="onCanvasClick" class="max-w-full max-h-full block cursor-crosshair"></canvas>
+                </div>
+                <div class="flex items-center justify-between">
+                    <p class="text-xs text-text-muted">点击画面添加顶点，形成封闭区域</p>
+                    <button @click="clearRoi" class="text-xs px-3 py-1 rounded-lg text-text-muted hover:text-text-primary transition-all" style="background: var(--theme-bg-input);">清除区域</button>
+                </div>
+            </div>
+            
+            <button @click="saveEditZone" class="w-full py-3 bg-primary rounded-xl font-bold mt-4 hover:bg-primary-dark shadow-lg shadow-primary/20 transition-all active:scale-95 press-effect">
+                保存
+            </button>
         </div>
     </Modal>
   </div>

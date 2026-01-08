@@ -32,6 +32,8 @@ class ZoneConfig:
     camera_id: str
     roi: List[Tuple[float, float]]  # 归一化坐标列表
     enabled: bool = True
+    serial_index: int = 0  # 串口分区索引（从0开始，对应地址0x01+index）
+    fire_current_threshold: int = 100  # 动火电流阈值（100=1.00A）
 
 
 @dataclass
@@ -124,6 +126,15 @@ class SystemConfig:
 
 
 @dataclass
+class SerialConfig:
+    """串口配置"""
+    enabled: bool = True
+    port: str = "/dev/ttyS3"
+    baudrate: int = 9600
+    poll_interval: float = 1.0  # 轮询间隔（秒）
+
+
+@dataclass
 class RemoteServerConfig:
     """远程服务器配置"""
     enabled: bool = False                    # 是否启用远程连接
@@ -152,6 +163,7 @@ class AppConfig:
     alarm: AlarmConfig = None      # 三阶段报警配置
     tts: TTSConfig = None          # TTS配置
     remote: RemoteServerConfig = None  # 远程服务器配置
+    serial: SerialConfig = None    # 串口配置
     
     def __post_init__(self):
         """初始化可选配置"""
@@ -161,6 +173,8 @@ class AppConfig:
             self.tts = TTSConfig()
         if self.remote is None:
             self.remote = RemoteServerConfig()
+        if self.serial is None:
+            self.serial = SerialConfig()
 
 
 class ConfigManager:
@@ -254,7 +268,9 @@ class ConfigManager:
                 name=zone_raw.get('name', zone_raw['id']),
                 camera_id=zone_raw['camera_id'],
                 roi=roi,
-                enabled=zone_raw.get('enabled', True)
+                enabled=zone_raw.get('enabled', True),
+                serial_index=zone_raw.get('serial_index', 0),
+                fire_current_threshold=zone_raw.get('fire_current_threshold', 100)
             ))
         
         # 解析API配置
@@ -322,6 +338,15 @@ class ConfigManager:
             token_expires=remote_raw.get('token_expires', 0)
         )
         
+        # 解析串口配置
+        serial_raw = raw.get('serial', {})
+        serial = SerialConfig(
+            enabled=serial_raw.get('enabled', True),
+            port=serial_raw.get('port', '/dev/ttyS3'),
+            baudrate=serial_raw.get('baudrate', 9600),
+            poll_interval=serial_raw.get('poll_interval', 1.0)
+        )
+        
         return AppConfig(
             system=system,
             safety=safety,
@@ -335,7 +360,8 @@ class ConfigManager:
             gpio=gpio,
             alarm=alarm,
             tts=tts,
-            remote=remote
+            remote=remote,
+            serial=serial
         )
     
     @property
@@ -398,7 +424,9 @@ class ConfigManager:
                     'name': zone.name,
                     'camera_id': zone.camera_id,
                     'roi': [list(point) for point in zone.roi],
-                    'enabled': zone.enabled
+                    'enabled': zone.enabled,
+                    'serial_index': zone.serial_index,
+                    'fire_current_threshold': zone.fire_current_threshold
                 }
                 for zone in config.zones
             ],
@@ -445,6 +473,12 @@ class ConfigManager:
                 'password': config.remote.password,
                 'token': config.remote.token,
                 'token_expires': config.remote.token_expires
+            },
+            'serial': {
+                'enabled': config.serial.enabled,
+                'port': config.serial.port,
+                'baudrate': config.serial.baudrate,
+                'poll_interval': config.serial.poll_interval
             }
         }
     
