@@ -170,9 +170,7 @@ onMounted(async () => {
   
   // 监听巡检事件
   unsubscribePatrol = ws.on('patrol_event', (data: any) => {
-    if (data.data) {
-      patrolState.value = data.data;
-    }
+    patrolState.value = data;
   });
 });
 

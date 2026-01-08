@@ -25,6 +25,11 @@
 - **GPIO控制**：支持模拟和真实GPIO控制
 - **性能监控**：实时监控系统性能
 - **设备管理**：自动生成设备唯一ID
+- **巡检功能**：支持设备自检、报警演示、强制预警等
+- **串口通讯**：支持串口配置和电流检测
+- **LoRa配置**：支持LoRa模块配置和通信
+- **火焰模拟**：支持模拟火焰开关状态
+- **远程链路**：支持与远程服务器的WebSocket通信
 
 ## 系统架构
 
@@ -71,9 +76,11 @@
 - **深度学习**：YOLOv11, PyTorch
 - **边缘推理**：RKNN Toolkit Lite 2
 - **Web服务**：Uvicorn
-- **通信协议**：WebSocket
+- **通信协议**：WebSocket（本地+远程）
 - **配置管理**：PyYAML
 - **日志管理**：自定义日志系统
+- **串口通信**：pyserial
+- **LoRa通信**：支持LoRa模块集成
 
 ### 前端
 - **框架**：Vue 3
@@ -114,6 +121,7 @@ npm install
 ```bash
 mkdir -p config
 # 复制默认配置文件（根据实际情况修改）
+# 配置文件包含系统设置、摄像头配置、区域配置、串口配置、LoRa配置和远程配置等
 ```
 
 #### 5. 启动后端服务
@@ -192,6 +200,21 @@ tts:
 gpio:
   simulated: true
 
+serial:
+  enabled: false
+  port: "COM1"
+  baudrate: 9600
+  poll_interval: 1000
+
+lora:
+  id: ""
+  channel: 0
+
+remote:
+  enabled: false
+  server_url: "wss://vis.example.com/dhlr/socket"
+  token: ""
+
 api:
   host: 0.0.0.0
   port: 8000
@@ -224,6 +247,21 @@ logging:
 - `engine`: `pytorch` 或 `rknn`
 - `model_path`: 模型文件路径
 - `confidence_threshold`: 检测置信度阈值
+
+#### 串口配置
+- `enabled`: 是否启用串口
+- `port`: 串口号
+- `baudrate`: 波特率
+- `poll_interval`: 轮询间隔（毫秒）
+
+#### LoRa配置
+- `id`: LoRa设备ID
+- `channel`: 通信频道
+
+#### 远程配置
+- `enabled`: 是否启用远程链路
+- `server_url`: 远程服务器WebSocket地址
+- `token`: 认证令牌
 
 ## 部署指南
 
@@ -263,7 +301,11 @@ src/
 ├── camera/           # 摄像头管理
 ├── detection/        # 检测引擎
 ├── output/           # 输出控制（GPIO/语音）
+├── patrol/           # 巡检功能
+├── serial_port/      # 串口通信
+├── static/           # 静态文件
 ├── tts/              # 语音合成
+│   └── assets/       # TTS模型资源
 ├── utils/            # 工具类
 ├── zone/             # 区域管理
 ├── main.py           # 主入口
@@ -275,20 +317,39 @@ src/
 - `PersonDetector`：人形检测器，支持PyTorch和RKNN引擎
 - `ZoneManager`：区域状态管理器，处理区域状态变化
 - `CameraManager`：摄像头管理器，管理多个摄像头
+- `SerialManager`：串口管理器，处理串口通信和电流检测
+- `LoRaManager`：LoRa管理器，处理LoRa配置和通信
+- `RemoteManager`：远程管理器，处理与远程服务器的通信
+- `PatrolManager`：巡检管理器，处理设备巡检和演示功能
 
 ### 前端开发
 
 #### 目录结构
 ```
 web/fire-monitor-ui/
-├── src/
-│   ├── api/          # API通信
-│   ├── components/   # Vue组件
-│   ├── views/        # 页面视图
-│   ├── router/       # 路由配置
-│   └── types/        # TypeScript类型定义
+├── .vscode/          # VS Code配置
 ├── public/           # 静态资源
-└── index.html        # 入口HTML
+├── src/
+│   ├── api/          # API通信和WebSocket
+│   ├── assets/       # 静态资源
+│   ├── components/   # Vue组件
+│   ├── composables/  # 组合式函数
+│   ├── router/       # 路由配置
+│   ├── types/        # TypeScript类型定义
+│   ├── views/        # 页面视图
+│   │   ├── Dashboard.vue     # 仪表盘
+│   │   ├── Cameras.vue       # 摄像头管理
+│   │   ├── Zones.vue         # 区域管理
+│   │   ├── Patrol.vue        # 巡检功能
+│   │   ├── Settings.vue      # 系统设置
+│   │   └── Logs.vue          # 日志查看
+│   ├── App.vue       # 根组件
+│   ├── main.ts       # 入口文件
+│   └── style.css     # 全局样式
+├── index.html        # 入口HTML
+├── package.json      # 项目配置
+├── tsconfig.json     # TypeScript配置
+└── vite.config.ts    # Vite配置
 ```
 
 #### 开发命令
@@ -308,7 +369,36 @@ npm run preview
 
 ## WebSocket协议
 
-系统使用WebSocket进行实时通信，详细协议请参考 `docs/websocket_protocol.md`。
+系统使用WebSocket实现全双工实时通讯，支持本地链路（设备本地Web端↔Python后端）和远程链路（Python后端↔远程服务器），两种链路共用同一套协议。
+
+### 连接地址
+
+| 链路类型 | 地址格式 | 示例 |
+|---------|---------|------|
+| 本地链路 | `ws://localhost:{port}/ws/status` | `ws://localhost:8000/ws/status` |
+| 远程链路 | `ws(s)://{server}/{path}` | `wss://vis.example.com/dhlr/socket` |
+
+### 主要功能
+
+- **实时状态更新**：灶台状态、设备性能、网络状态等实时推送
+- **双向通信**：支持客户端请求和服务端主动推送
+- **心跳机制**：保持连接稳定性
+- **事件通知**：状态变化、报警事件、巡检事件等实时通知
+
+### 支持的操作
+
+WebSocket协议支持丰富的操作，包括：
+
+- **灶台管理**：获取、创建、更新、删除灶台配置
+- **摄像头管理**：获取摄像头列表、预览摄像头画面
+- **状态查询**：获取系统状态、性能指标、设备信息
+- **设置管理**：获取和更新系统设置
+- **日志管理**：获取日志文件列表和内容
+- **串口通讯**：获取和更新串口配置、读取电流值
+- **LoRa配置**：获取和设置LoRa参数
+- **巡检操作**：开始/停止巡检、设备自检、报警演示等
+
+详细协议规范请参考 `docs/websocket_protocol.md`。
 
 ## 性能监控
 
@@ -353,6 +443,6 @@ dhlr/
 
 ---
 
-**版本**：0.1.0  
-**更新时间**：2026-01-07  
+**版本**：0.2.0  
+**更新时间**：2026-01-08  
 **版权所有**：动火离人安全监测系统开发团队

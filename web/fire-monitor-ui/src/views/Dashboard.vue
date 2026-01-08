@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { RefreshCcw, Activity, Flame, User, Cpu, Zap } from 'lucide-vue-next';
+import { RefreshCcw, Activity, Flame, User, Cpu, Zap, Maximize2 } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneStatus, DeviceInfo, PerformanceStats } from '../types';
 import Sparkline from '../components/Sparkline.vue';
@@ -21,6 +21,19 @@ let perfTimer: ReturnType<typeof setInterval> | null = null;
 let unsubscribeStatus: (() => void) | null = null;
 
 const enabledZones = computed(() => zones.value.filter(z => z.enabled !== false));
+
+// Fullscreen toggle function
+const toggleFullscreen = () => {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(err => {
+      console.error(`Error attempting to enable fullscreen: ${err.message}`);
+    });
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  }
+};
 
 // Actions
 const fetchDeviceInfo = async () => {
@@ -101,6 +114,9 @@ onUnmounted(() => {
         <div class="flex gap-2">
           <button @click="refreshStatus" class="glass-button p-2.5 rounded-xl text-text-secondary active:scale-90 transition-transform">
             <RefreshCcw class="w-4 h-4" />
+          </button>
+          <button @click="toggleFullscreen" class="glass-button p-2.5 rounded-xl text-text-secondary active:scale-90 transition-transform">
+            <Maximize2 class="w-4 h-4" />
           </button>
         </div>
       </div>
