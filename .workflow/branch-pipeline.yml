@@ -23,7 +23,7 @@ stages:
           - python3 -m pip install --upgrade pip
           - pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
           - pip install --upgrade setuptools wheel
-          - apt-get install build-essential python3-dev
+          - yum install -y gcc gcc-c++ python3-devel
           - pip3 install -r requirements.txt
           - python3 ./src/main.py
         artifacts:
