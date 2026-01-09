@@ -1,0 +1,125 @@
+# =============================================================================
+# 动火离人安全监测系统 (DHLR) - Docker Compose 配置
+# =============================================================================
+# 用途:
+#   - 本地开发: docker-compose up dev
+#   - 生产部署: docker-compose up -d app
+#   - CI测试:   docker-compose run --rm test
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # 生产应用服务
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: dhlr-app:${VERSION:-latest}
+    container_name: dhlr-app
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # 持久化日志和快照
+      - ./logs:/app/logs
+      - ./snapshots:/app/snapshots
+      # 配置文件挂载 (可选)
+      - ./config:/app/config:ro
+      # 音频资源挂载
+      - ./audio_assets:/app/audio_assets:ro
+    environment:
+      - PYTHONPATH=/app/src
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - dhlr-network
+
+  # ---------------------------------------------------------------------------
+  # 开发服务 (包含热重载)
+  # ---------------------------------------------------------------------------
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    image: dhlr-dev:latest
+    container_name: dhlr-dev
+    ports:
+      - "8000:8000"       # API 端口
+      - "5173:5173"       # Vite 开发服务器 (可选)
+      - "5678:5678"       # 调试端口 (debugpy)
+    volumes:
+      # 源码挂载 (热重载)
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./audio_assets:/app/audio_assets
+      - ./tests:/app/tests
+      - ./logs:/app/logs
+      - ./snapshots:/app/snapshots
+    environment:
+      - PYTHONPATH=/app/src
+      - DEBUG=1
+      - TZ=Asia/Shanghai
+    # 使用 uvicorn --reload 进行热重载
+    command: python -m uvicorn src.api.server:create_app --factory --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - dhlr-network
+
+  # ---------------------------------------------------------------------------
+  # CI 测试服务
+  # ---------------------------------------------------------------------------
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: dhlr-test:latest
+    container_name: dhlr-test
+    volumes:
+      # 输出测试覆盖率报告
+      - ./coverage:/app/coverage
+    environment:
+      - PYTHONPATH=/app/src
+      - CI=true
+    command: >
+      sh -c "
+        pytest tests/ 
+          --junitxml=/app/coverage/junit.xml 
+          --cov=src 
+          --cov-report=xml:/app/coverage/coverage.xml 
+          --cov-report=html:/app/coverage/htmlcov 
+          --cov-report=term-missing
+        && echo 'Tests completed successfully!'
+      "
+    networks:
+      - dhlr-network
+
+  # ---------------------------------------------------------------------------
+  # 前端开发服务 (独立运行 Vite 开发服务器)
+  # ---------------------------------------------------------------------------
+  frontend-dev:
+    image: node:20-alpine
+    container_name: dhlr-frontend-dev
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web/fire-monitor-ui:/app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    networks:
+      - dhlr-network
+
+networks:
+  dhlr-network:
+    driver: bridge

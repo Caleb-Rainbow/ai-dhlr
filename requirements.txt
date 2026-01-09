@@ -7,7 +7,7 @@ pydantic>=2.0.0
 
 # 计算机视觉
 opencv-python>=4.9.0
-numpy>=1.24.0,<2.0.0
+numpy>=1.24.0
 
 # YOLO推理
 ultralytics>=8.1.0
