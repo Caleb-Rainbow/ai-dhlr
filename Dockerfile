@@ -37,10 +37,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 安装系统依赖 (OpenCV, 音频处理等)
+# 安装系统依赖 (针对现代 Debian 镜像优化)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # OpenCV 依赖
-    libgl1-mesa-glx \
+    # OpenCV 核心依赖 (用 libgl1 替换 libgl1-mesa-glx)
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -50,7 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     libportaudio2 \
     libsndfile1 \
-    # 调试工具 (可选，生产环境可移除)
+    # 常用工具
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
