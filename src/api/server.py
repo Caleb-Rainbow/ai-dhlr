@@ -1,10 +1,8 @@
 """
 FastAPI主服务
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
 from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
@@ -19,8 +17,7 @@ logger = get_logger()
 # 状态推送任务
 _status_broadcast_task = None
 
-# 静态文件目录
-STATIC_DIR = Path(__file__).parent.parent / "static"
+# 快照目录
 SNAPSHOT_DIR = Path(__file__).parent.parent.parent / "snapshots"
 
 
@@ -146,41 +143,6 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"WebSocket错误: {e}")
             await ws_manager.disconnect(websocket)
-    
-    # 首页 - 返回Web管理界面
-    @app.get("/", response_class=HTMLResponse)
-    async def index():
-        index_file = STATIC_DIR / "index.html"
-        if index_file.exists():
-            return HTMLResponse(content=index_file.read_text(encoding='utf-8'))
-        return HTMLResponse(content="<h1>Web界面未找到</h1>", status_code=404)
-    
-    # 截图访问
-    @app.get("/snapshot/{filename}")
-    async def get_snapshot(filename: str):
-        filepath = SNAPSHOT_DIR / filename
-        if filepath.exists() and filepath.suffix.lower() in ['.jpg', '.jpeg', '.png']:
-            return FileResponse(filepath, media_type="image/jpeg")
-        return Response(content="Not Found", status_code=404)
-    
-    # 健康检查
-    @app.get("/health")
-    async def health():
-        return {"status": "healthy"}
-    
-    # API信息
-    @app.get("/api")
-    async def api_info():
-        return {
-            "name": "动火离人安全监测系统",
-            "version": "0.1.0",
-            "status": "running",
-            "docs": "/docs"
-        }
-    
-    # 挂载静态文件目录（CSS、JS）
-    if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     
     return app
 

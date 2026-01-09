@@ -41,6 +41,7 @@ const navItems = [
         v-for="item in navItems" 
         :key="item.name"
         :to="item.path"
+        replace
         class="flex flex-col items-center gap-1.5 px-4 py-2 text-text-muted transition-all rounded-xl active:scale-90"
         :active-class="item.path === '/' ? '' : '!text-text-primary'"
         :exact-active-class="item.path === '/' ? '!text-text-primary' : ''"
