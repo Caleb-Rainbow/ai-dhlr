@@ -20,15 +20,30 @@ stages:
         displayName: Python 构建
         pythonVersion: '3.11'
         commands:
+          - '# 1. 临时修复：修改 yum 脚本的首行解释器（强制使用 python2）'
+          - sed -i '1s/python/python2/' /usr/bin/yum
+          - sed -i '1s/python/python2/' /usr/libexec/urlgrabber-ext-down
+          - ''
+          - '# 2. 修复 CentOS 8 官方源（vault 归档）'
+          - sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          - sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          - ''
+          - '# 3. 现在执行安装（yum 应该恢复正常了）'
+          - yum install -y gcc gcc-c++ python3-devel mesa-libGL libXext libXrender libSM
+          - ''
+          - '# 4. 升级你的 Python 3 环境下的 pip'
           - python3 -m pip install --upgrade pip
-          - pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-          - pip install --upgrade setuptools wheel
-          - pip3 install -r requirements.txt --prefer-binary
-          - python3 ./src/main.py
+          - ''
+          - '# 5. 关键：强制下载二进制包安装 numpy，防止它再次尝试本地编译（CentOS 8 编译环境复杂）'
+          - 'pip3 install --only-binary=:all: "numpy<2.0.0"'
+          - ''
+          - '# 6. 安装剩余依赖'
+          - pip3 install -r requirements.txt
         artifacts:
           - name: BUILD_ARTIFACT
             path:
               - ./
+        caches: []
         strategy: {}
       - step: publish@general_artifacts
         name: publish_general_artifacts
