@@ -39,7 +39,10 @@ WORKDIR /app
 
 # 安装系统依赖 (针对现代 Debian 镜像优化)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # OpenCV 核心依赖 (用 libgl1 替换 libgl1-mesa-glx)
+    # 编译工具 (修复 async-pyserial 报错的关键)
+    build-essential \
+    python3-dev \
+    # OpenCV 依赖 (使用之前修复过的 libgl1)
     libgl1 \
     libglib2.0-0 \
     libsm6 \
@@ -50,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     libportaudio2 \
     libsndfile1 \
-    # 常用工具
+    # 调试工具
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
