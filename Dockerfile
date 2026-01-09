@@ -25,14 +25,15 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # 阶段 2: Python 基础镜像 (用于开发/测试)
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS python-base
+FROM docker.m.daocloud.io/library/python:3.11-slim AS python-base
 
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 WORKDIR /app
 
