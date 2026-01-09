@@ -23,8 +23,7 @@ stages:
           - python3 -m pip install --upgrade pip
           - pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
           - pip install --upgrade setuptools wheel
-          - yum install -y gcc gcc-c++ python3-devel
-          - 'pip3 install --only-binary=:all: -r requirements.txt'
+          - pip3 install -r requirements.txt --prefer-binary
           - python3 ./src/main.py
         artifacts:
           - name: BUILD_ARTIFACT
