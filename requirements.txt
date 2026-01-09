@@ -7,7 +7,7 @@ pydantic>=2.0.0
 
 # 计算机视觉
 opencv-python>=4.9.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0
 
 # YOLO推理
 ultralytics>=8.1.0
@@ -32,3 +32,7 @@ pygame>=2.6.1
 
 #串口通讯
 async-pyserial>=0.2.4
+
+#测试框架
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
