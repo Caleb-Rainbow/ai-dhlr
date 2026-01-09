@@ -61,20 +61,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # -----------------------------------------------------------------------------
 # 阶段 3: 依赖安装层
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# 阶段 3: 依赖安装层
+# -----------------------------------------------------------------------------
 FROM python-base AS dependencies
 
 WORKDIR /app
 
-# 复制依赖文件
-COPY requirements.txt ./
+# 1. 复制所有依赖相关文件
+COPY requirements.txt .
+# 复制根目录下的 RKNN 离线安装包
+COPY rknn_toolkit_lite2-2.3.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl .
 
-# 创建临时requirements文件 (排除测试依赖和硬件特定依赖)
+# 2. 准备生产环境依赖列表 (排除测试依赖)
 RUN grep -vE "^(pytest|pytest-asyncio)" requirements.txt > requirements-prod.txt || true
 
-# 安装Python依赖
-RUN pip install --upgrade pip && \
-    pip install -r requirements-prod.txt
-
+# 3. 核心优化：根据 CPU 架构按需安装
+RUN ARCH=$(uname -m) && \
+    pip install --upgrade pip && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        echo "检测到 ARM64 架构，正在为 RK3568 构建轻量化镜像..." && \
+        # 排除掉不需要的重型库：torch, torchvision, ultralytics
+        grep -vE "torch|torchvision|ultralytics" requirements-prod.txt > requirements-arm.txt && \
+        pip install --no-cache-dir -r requirements-arm.txt && \
+        # 安装本地 RKNN 运行时
+        pip install rknn_toolkit_lite2-2.3.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl && \
+        # 清理安装包节省空间
+        rm *.whl; \
+    else \
+        echo "检测到 x86_64 架构，安装全量测试依赖..." && \
+        pip install --no-cache-dir -r requirements-prod.txt; \
+    fi
 # -----------------------------------------------------------------------------
 # 阶段 4: 测试阶段 (CI专用)
 # -----------------------------------------------------------------------------
@@ -119,31 +136,5 @@ USER appuser
 # 暴露端口
 EXPOSE 8000
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/status || exit 1
-
 # 启动命令
-CMD ["python", "-m", "src.main"]
-
-# -----------------------------------------------------------------------------
-# 阶段 6: 开发镜像 (可选)
-# -----------------------------------------------------------------------------
-FROM dependencies AS development
-
-WORKDIR /app
-
-# 安装开发/测试依赖
-RUN pip install pytest pytest-asyncio pytest-cov black isort flake8
-
-# 复制所有代码 (开发时使用卷挂载覆盖)
-COPY . .
-
-# 创建必要的目录
-RUN mkdir -p /app/logs /app/snapshots
-
-# 暴露端口 (API + 可能的调试端口)
-EXPOSE 8000 5678
-
-# 开发模式启动命令
 CMD ["python", "-m", "src.main"]

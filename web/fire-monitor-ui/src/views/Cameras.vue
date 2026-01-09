@@ -226,7 +226,7 @@ onUnmounted(() => {
     </Transition>
 
     <!-- Floating Action Button with Animation -->
-    <Teleport to="#portal-target">
+    <Teleport to="#portal-target" defer>
       <Transition name="pop">
         <div v-if="!loading" class="absolute bottom-24 right-6 pointer-events-auto">
             <button @click="openAddModal" class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-blue-600 text-white rounded-2xl flex items-center justify-center shadow-[0_8px_25px_rgba(79,70,229,0.4)] hover:shadow-[0_10px_30px_rgba(79,70,229,0.5)] active:scale-95 transition-all border border-white/10 group hover-glow">

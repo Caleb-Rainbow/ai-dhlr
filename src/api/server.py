@@ -1,8 +1,10 @@
 """
 FastAPI主服务
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
@@ -11,6 +13,9 @@ from .routes import cameras, zones, status, control, settings
 from .websocket import ws_manager, broadcast_status_update
 from ..zone.state_machine import zone_manager
 from ..utils.logger import get_logger
+
+# 前端静态资源目录
+FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent / "web" / "fire-monitor-ui" / "dist"
 
 logger = get_logger()
 
@@ -143,6 +148,36 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"WebSocket错误: {e}")
             await ws_manager.disconnect(websocket)
+    
+    # =========================================================================
+    # 前端静态资源托管
+    # =========================================================================
+    if FRONTEND_DIST_DIR.exists():
+        # 挂载静态资源目录 (JS, CSS, 图片等)
+        assets_dir = FRONTEND_DIST_DIR / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        
+        # SPA 路由回退: 所有非API/WS请求都返回 index.html
+        @app.get("/{full_path:path}")
+        async def serve_spa(request: Request, full_path: str):
+            """单页应用路由回退"""
+            # 如果请求的是具体文件且存在，直接返回
+            file_path = FRONTEND_DIST_DIR / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            
+            # 否则返回 index.html (SPA 路由)
+            index_path = FRONTEND_DIST_DIR / "index.html"
+            if index_path.exists():
+                return FileResponse(index_path)
+            
+            # 前端未构建时的友好提示
+            return {"error": "前端资源未找到，请先运行 npm run build"}
+        
+        logger.info(f"前端静态资源已托管: {FRONTEND_DIST_DIR}")
+    else:
+        logger.warning(f"前端构建目录不存在: {FRONTEND_DIST_DIR}，跳过静态资源托管")
     
     return app
 

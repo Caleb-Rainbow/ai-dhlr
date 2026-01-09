@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { CookingPot, Trash2, Pencil, Plus } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneConfig, Camera } from '../types';
@@ -458,6 +458,32 @@ const saveEditZone = async () => {
 };
 
 onMounted(loadData);
+
+// 清理函数：移除canvas事件监听器
+const cleanupCanvas = () => {
+    const canvas = roiCanvas.value;
+    if (canvas) {
+        canvas.removeEventListener('mousedown', onMouseDown);
+        canvas.removeEventListener('mousemove', onMouseMove);
+        canvas.removeEventListener('mouseup', onMouseUp);
+        canvas.removeEventListener('mouseleave', onMouseUp);
+        canvas.removeEventListener('touchstart', onTouchStart);
+        canvas.removeEventListener('touchmove', onTouchMove);
+        canvas.removeEventListener('touchend', onTouchEnd);
+        canvas.removeEventListener('touchcancel', onTouchEnd);
+    }
+};
+
+// 监听模态框关闭，清理canvas事件
+watch(showEditModal, (isOpen) => {
+    if (!isOpen) {
+        cleanupCanvas();
+    }
+});
+
+onUnmounted(() => {
+    cleanupCanvas();
+});
 </script>
 
 <template>
@@ -527,7 +553,7 @@ onMounted(loadData);
     </Transition>
 
     <!-- Floating Action Button with Animation -->
-    <Teleport to="#portal-target">
+    <Teleport to="#portal-target" defer>
       <Transition name="pop">
         <div v-if="!loading" class="absolute bottom-24 right-6 pointer-events-auto">
             <button @click="showAddModal = true" class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-blue-600 text-white rounded-2xl flex items-center justify-center shadow-[0_8px_25px_rgba(79,70,229,0.4)] hover:shadow-[0_10px_30px_rgba(79,70,229,0.5)] active:scale-95 transition-all border border-white/10 group hover-glow">
