@@ -25,6 +25,10 @@ const roiCanvas = ref<HTMLCanvasElement | null>(null);
 const roiPoints = ref<number[][]>([]);
 const roiImage = ref('');
 
+// Drag State
+const selectedPointIndex = ref<number | null>(null);
+const isDragging = ref(false);
+
 // Actions
 const loadData = async () => {
     try {
@@ -137,6 +141,16 @@ const initCanvas = (preloadedImg?: HTMLImageElement) => {
     const ctx = canvas.getContext('2d');
     if(!ctx) return;
     
+    // 移除现有的事件监听器，避免重复添加
+    canvas.removeEventListener('mousedown', onMouseDown);
+    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('mouseup', onMouseUp);
+    canvas.removeEventListener('mouseleave', onMouseUp);
+    canvas.removeEventListener('touchstart', onTouchStart);
+    canvas.removeEventListener('touchmove', onTouchMove);
+    canvas.removeEventListener('touchend', onTouchEnd);
+    canvas.removeEventListener('touchcancel', onTouchEnd);
+    
     if (preloadedImg) {
         // 使用预加载的图片
         cachedImage.value = preloadedImg;
@@ -155,6 +169,16 @@ const initCanvas = (preloadedImg?: HTMLImageElement) => {
             drawRoi();
         };
     }
+    
+    // 添加事件监听器
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('mouseleave', onMouseUp);
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
+    canvas.addEventListener('touchcancel', onTouchEnd);
 };
 
 const drawRoi = () => {
@@ -212,23 +236,24 @@ const drawRoiPoints = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement)
              const px = p[0];
              const py = p[1];
              if (px === undefined || py === undefined) return;
-             
+              
             const x = px * canvas.width;
             const y = py * canvas.height;
             const pointRadius = 30; // 加大点位半径
+            const isSelected = i === selectedPointIndex.value;
             
             // 绘制点位圆圈（带白色边框，更醒目）
             ctx.beginPath();
-            ctx.fillStyle = '#27ae60';
+            ctx.fillStyle = isSelected ? '#3b82f6' : '#27ae60'; // 选中的点使用蓝色
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 5;
-            ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
+            ctx.lineWidth = isSelected ? 6 : 5; // 选中的点边框更粗
+            ctx.arc(x, y, isSelected ? pointRadius + 5 : pointRadius, 0, Math.PI * 2); // 选中的点更大
             ctx.fill();
             ctx.stroke();
             
             // 绘制顺序号
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 40px Arial';
+            ctx.font = isSelected ? 'bold 45px Arial' : 'bold 40px Arial'; // 选中的点数字更大
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText((i + 1).toString(), x, y);
@@ -236,19 +261,122 @@ const drawRoiPoints = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement)
     }
 };
 
-const onCanvasClick = (e: MouseEvent) => {
+// 获取Canvas上的相对坐标
+const getCanvasCoordinates = (canvas: HTMLCanvasElement, clientX: number, clientY: number) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    return { x, y };
+};
+
+// 鼠标事件处理
+const onMouseDown = (e: MouseEvent) => {
     const canvas = roiCanvas.value;
     if(!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
     
-    roiPoints.value.push([x, y]);
+    const { x, y } = getCanvasCoordinates(canvas, e.clientX, e.clientY);
+    const nearestIndex = findNearestPoint(x, y);
+    
+    if (nearestIndex !== null) {
+        selectedPointIndex.value = nearestIndex;
+        isDragging.value = true;
+        // 防止默认行为，避免拖动时选中文本
+        e.preventDefault();
+        drawRoi();
+    }
+};
+
+const onMouseMove = (e: MouseEvent) => {
+    if (!isDragging.value || selectedPointIndex.value === null) return;
+    
+    const canvas = roiCanvas.value;
+    if(!canvas) return;
+    
+    const { x, y } = getCanvasCoordinates(canvas, e.clientX, e.clientY);
+    
+    // 更新选中点位的坐标
+    roiPoints.value[selectedPointIndex.value] = [x, y];
+    drawRoi();
+    
+    // 防止默认行为，避免拖动时选中文本
+    e.preventDefault();
+};
+
+const onMouseUp = () => {
+    isDragging.value = false;
+    selectedPointIndex.value = null;
+    drawRoi();
+};
+
+const onCanvasClick = (e: MouseEvent) => {
+    // 只有在没有拖动时才添加新点位
+    if (isDragging.value) return;
+    
+    const canvas = roiCanvas.value;
+    if(!canvas) return;
+    
+    const { x, y } = getCanvasCoordinates(canvas, e.clientX, e.clientY);
+    const nearestIndex = findNearestPoint(x, y);
+    
+    // 如果点击位置没有接近现有点位，则添加新点位
+    if (nearestIndex === null) {
+        roiPoints.value.push([x, y]);
+        drawRoi();
+    }
+};
+
+// 触摸事件处理
+const onTouchStart = (e: TouchEvent) => {
+    if (e.touches.length !== 1) return; // 只处理单点触摸
+    
+    const canvas = roiCanvas.value;
+    if(!canvas) return;
+    
+    const touch = e.touches[0];
+    if (!touch) return;
+    
+    const { x, y } = getCanvasCoordinates(canvas, touch.clientX, touch.clientY);
+    const nearestIndex = findNearestPoint(x, y);
+    
+    if (nearestIndex !== null) {
+        selectedPointIndex.value = nearestIndex;
+        isDragging.value = true;
+        // 防止默认行为，避免拖动时页面滚动
+        e.preventDefault();
+        drawRoi();
+    }
+};
+
+const onTouchMove = (e: TouchEvent) => {
+    if (e.touches.length !== 1) return; // 只处理单点触摸
+    if (!isDragging.value || selectedPointIndex.value === null) return;
+    
+    const canvas = roiCanvas.value;
+    if(!canvas) return;
+    
+    const touch = e.touches[0];
+    if (!touch) return;
+    
+    const { x, y } = getCanvasCoordinates(canvas, touch.clientX, touch.clientY);
+    
+    // 更新选中点位的坐标
+    roiPoints.value[selectedPointIndex.value] = [x, y];
+    drawRoi();
+    
+    // 防止默认行为，避免拖动时页面滚动
+    e.preventDefault();
+};
+
+const onTouchEnd = () => {
+    isDragging.value = false;
+    selectedPointIndex.value = null;
     drawRoi();
 };
 
 const clearRoi = () => {
     roiPoints.value = [];
+    selectedPointIndex.value = null;
+    isDragging.value = false;
     // 如果缓存图片不存在，重新加载
     if (!cachedImage.value || !cachedImage.value.complete) {
         const img = new Image();
@@ -261,6 +389,40 @@ const clearRoi = () => {
     } else {
         drawRoi();
     }
+};
+
+const undoRoiPoint = () => {
+    if (roiPoints.value.length > 0) {
+        roiPoints.value.pop();
+        selectedPointIndex.value = null;
+        isDragging.value = false;
+        drawRoi();
+    }
+};
+
+const findNearestPoint = (x: number, y: number, threshold: number = 0.05): number | null => {
+    let nearestIndex: number | null = null;
+    let minDistance = Infinity;
+    
+    for (let i = 0; i < roiPoints.value.length; i++) {
+        const point = roiPoints.value[i];
+        if (!point || point.length < 2) continue;
+        
+        // 使用类型断言确保TypeScript知道point[0]和point[1]是数字
+        const px = point[0] as number;
+        const py = point[1] as number;
+        
+        const dx = px - x;
+        const dy = py - y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < minDistance && distance < threshold) {
+            minDistance = distance;
+            nearestIndex = i;
+        }
+    }
+    
+    return nearestIndex;
 };
 
 const saveEditZone = async () => {
@@ -451,9 +613,12 @@ onMounted(loadData);
                     </Transition>
                     <canvas ref="roiCanvas" @click="onCanvasClick" class="max-w-full max-h-full block cursor-crosshair"></canvas>
                 </div>
-                <div class="flex items-center justify-between">
+                <div class="space-y-2">
                     <p class="text-xs text-text-muted">点击画面添加顶点，形成封闭区域</p>
-                    <button @click="clearRoi" class="text-xs px-3 py-1 rounded-lg text-text-muted hover:text-text-primary transition-all" style="background: var(--theme-bg-input);">清除区域</button>
+                    <div class="flex justify-end gap-2">
+                        <button @click="undoRoiPoint" class="text-xs px-3 py-1.5 rounded-lg text-text-primary hover:text-white hover:bg-primary/80 transition-all border border-primary/30" style="background: var(--theme-bg-input);">撤销</button>
+                        <button @click="clearRoi" class="text-xs px-3 py-1.5 rounded-lg text-text-primary hover:text-white hover:bg-red-500/80 transition-all border border-red-500/30" style="background: var(--theme-bg-input);">清除区域</button>
+                    </div>
                 </div>
             </div>
             
