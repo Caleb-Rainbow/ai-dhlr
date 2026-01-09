@@ -117,24 +117,23 @@ FROM dependencies AS production
 
 WORKDIR /app
 
-# 复制应用代码
+# 1. 只复制代码仓库中确实存在的文件
 COPY src/ ./src/
-COPY config/ ./config/
-COPY audio_assets/ ./audio_assets/
 
-# 从前端构建阶段复制编译后的静态文件
+# 2. 关键修改：不要 COPY 动态生成的目录，而是手动创建它们
+RUN mkdir -p /app/config /app/audio_assets /app/logs /app/snapshots
+
+# 3. 从前端构建阶段复制编译后的静态文件 (如果前端构建已成功)
 COPY --from=frontend-builder /app/web/fire-monitor-ui/dist ./web/fire-monitor-ui/dist
 
-# 创建必要的目录
-RUN mkdir -p /app/logs /app/snapshots
-
-# 设置非root用户 (安全最佳实践)
+# 4. 设置非root用户并授权 (确保程序有权在刚创建的目录里写文件)
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
+
 USER appuser
 
 # 暴露端口
 EXPOSE 8000
 
 # 启动命令
-CMD ["python", "-m", "src.main"]
+CMD ["python", "-m", "./src/main.py"]
