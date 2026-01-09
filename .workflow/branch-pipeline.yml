@@ -20,15 +20,27 @@ stages:
         displayName: Python 构建
         pythonVersion: '3.11'
         commands:
+          - '# 1. 修复环境源'
+          - sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          - sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          - ''
+          - '# 2. 安装系统依赖'
+          - yum install -y gcc gcc-c++ python311-devel mesa-libGL libXext libXrender libSM
+          - ''
+          - '# 3. 升级 pip'
           - python3 -m pip install --upgrade pip
-          - pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-          - pip install --upgrade setuptools wheel
-          - pip3 install -r requirements.txt --prefer-binary
+          - ''
+          - '# 4. 关键：先安装不需要编译的特定版本 numpy (避免触发源码编译)'
+          - 'pip3 install --only-binary=:all: "numpy<2.0.0"'
+          - ''
+          - '# 5. 安装剩余依赖'
+          - pip3 install -r requirements.txt
           - python3 ./src/main.py
         artifacts:
           - name: BUILD_ARTIFACT
             path:
               - ./
+        caches: []
         strategy: {}
       - step: publish@general_artifacts
         name: publish_general_artifacts
