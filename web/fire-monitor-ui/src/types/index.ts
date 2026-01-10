@@ -25,7 +25,7 @@ export interface PerformanceStats {
     memory_mb: number;
     inference_time_ms: number;
     engine: string;
-    npu_percent?: number;
+    npu_load?: number;
 }
 
 export interface Camera {

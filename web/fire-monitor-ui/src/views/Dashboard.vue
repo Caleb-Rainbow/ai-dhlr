@@ -62,7 +62,7 @@ const refreshPerformance = async () => {
     cpuHistory.value.push(stats.cpu_percent);
     if(cpuHistory.value.length > historyLimit) cpuHistory.value.shift();
 
-    npuHistory.value.push(stats.npu_percent || 0);
+    npuHistory.value.push(stats.npu_load || 0);
     if(npuHistory.value.length > historyLimit) npuHistory.value.shift();
     
   } catch (e) { console.error(e); }
@@ -98,7 +98,7 @@ onUnmounted(() => {
     <!-- Header Controls -->
     <div class="sticky top-0 z-50 transition-all duration-500">
       <!-- Hyper-transparent glass with saturation boost -->
-      <div class="backdrop-blur-2xl backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between">
+      <div class="glass-panel backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between">
         <div>
           <h2 class="text-xl font-bold text-text-primary tracking-tight flex items-center gap-2">
             实时监控
@@ -246,7 +246,7 @@ onUnmounted(() => {
             <div class="col-span-2 rounded-2xl p-3 border transition-all duration-300 hover-lift" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
                <div class="flex justify-between items-end mb-2">
                  <span class="text-[10px] text-purple-400 font-bold">NPU 核心占用</span>
-                 <span class="text-lg font-mono font-bold text-text-primary">{{ (performance.npu_percent || 0).toFixed(0) }}%</span>
+                 <span class="text-lg font-mono font-bold text-text-primary">{{ (performance.npu_load || 0).toFixed(0) }}%</span>
               </div>
               <Sparkline :data="npuHistory" :height="40" color="#a855f7" />
            </div>

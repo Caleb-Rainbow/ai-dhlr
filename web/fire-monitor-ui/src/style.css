@@ -29,8 +29,8 @@
   --theme-border-hover: rgba(255, 255, 255, 0.1);
   --theme-border-input: rgba(255, 255, 255, 0.1);
   --theme-shadow: rgba(0, 0, 0, 0.3);
-  --theme-glass-bg: rgba(24, 24, 27, 0.6);
-  --theme-glass-border: rgba(255, 255, 255, 0.05);
+  --glass-bg: rgba(25, 25, 25, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
   --theme-overlay: rgba(0, 0, 0, 0.8);
   --theme-select-bg: #18181b;
 }
@@ -85,10 +85,11 @@
 
 .glass-panel {
   background: var(--theme-glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   border: 1px solid var(--theme-glass-border);
   box-shadow: 0 8px 32px var(--theme-shadow);
+  border-radius: 10px;
 }
 
 .glass-button {

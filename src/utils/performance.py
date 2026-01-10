@@ -108,7 +108,7 @@ class PerformanceMonitor:
                 
                 # 获取 NPU 负载 (RK3568/RK3588)
                 self._npu_load = self._get_npu_load()
-                
+
                 time.sleep(1.0)
                 
             except Exception as e:

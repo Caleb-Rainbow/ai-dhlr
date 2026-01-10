@@ -183,7 +183,7 @@ onUnmounted(() => {
   <div class="space-y-6 pb-24">
     <!-- Header -->
     <div class="sticky top-0 z-50 transition-all duration-500">
-      <div class="backdrop-blur-2xl backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between">
+      <div class="glass-panel backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between">
         <div>
           <h2 class="text-xl font-bold text-text-primary tracking-tight flex items-center gap-2">
             设备巡检
