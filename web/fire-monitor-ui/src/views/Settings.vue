@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
 import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig } from '../types';
-import { Save, Info, Volume2, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff } from 'lucide-vue-next';
+import { Save, Info, Volume2, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -80,6 +80,11 @@ const showPassword = ref(false);
 const saveSuccess = ref(false);
 const saveError = ref('');
 const showSaveButton = ref(false);
+
+// 设备ID编辑状态
+const editingDeviceId = ref(false);
+const tempDeviceId = ref('');
+const savingDeviceId = ref(false);
 
 // Theme management
 const { theme, toggleTheme } = useTheme();
@@ -248,6 +253,41 @@ const setLoraConfig = async () => {
         alert('LoRa配置设置失败: ' + (e.message || e));
     } finally {
         settingLora.value = false;
+    }
+};
+
+// 开始编辑设备ID
+const startEditDeviceId = () => {
+    tempDeviceId.value = deviceInfo.value?.device_id || '';
+    editingDeviceId.value = true;
+};
+
+// 取消编辑设备ID
+const cancelEditDeviceId = () => {
+    editingDeviceId.value = false;
+    tempDeviceId.value = '';
+};
+
+// 保存设备ID
+const saveDeviceId = async () => {
+    const newId = tempDeviceId.value.trim().toUpperCase();
+    if (!newId) {
+        alert('设备ID不能为空');
+        return;
+    }
+    
+    savingDeviceId.value = true;
+    try {
+        await ws.request('set_device_id', { device_id: newId });
+        if (deviceInfo.value) {
+            deviceInfo.value.device_id = newId;
+        }
+        editingDeviceId.value = false;
+        tempDeviceId.value = '';
+    } catch (e: any) {
+        alert('设置设备ID失败: ' + (e.message || e));
+    } finally {
+        savingDeviceId.value = false;
     }
 };
 
@@ -614,7 +654,33 @@ onUnmounted(() => {
              </div>
              <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
                  <div class="text-xs text-text-muted mb-1">设备 ID</div>
-                 <div class="font-mono text-text-primary truncate" :title="deviceInfo.device_id">{{ deviceInfo.device_id || 'Unknown' }}</div>
+                 <!-- 编辑模式 -->
+                 <div v-if="editingDeviceId" class="flex items-center gap-2">
+                     <input v-model="tempDeviceId" type="text" 
+                            placeholder="输入设备ID"
+                            class="flex-1 px-2 py-1 rounded-lg border outline-none focus:border-primary/50 transition-all text-text-primary font-mono text-sm uppercase"
+                            style="background: var(--theme-bg-card); border-color: var(--theme-border-input);"
+                            @keyup.enter="saveDeviceId"
+                            @keyup.escape="cancelEditDeviceId">
+                     <button @click="saveDeviceId" :disabled="savingDeviceId"
+                             class="p-1.5 rounded-lg bg-success/20 text-success hover:bg-success/30 transition-colors disabled:opacity-50">
+                         <Loader v-if="savingDeviceId" class="w-4 h-4 animate-spin" />
+                         <Check v-else class="w-4 h-4" />
+                     </button>
+                     <button @click="cancelEditDeviceId"
+                             class="p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
+                         <XCircle class="w-4 h-4" />
+                     </button>
+                 </div>
+                 <!-- 显示模式 -->
+                 <div v-else class="flex items-center justify-between">
+                     <div class="font-mono text-text-primary truncate flex-1" :title="deviceInfo.device_id">{{ deviceInfo.device_id || 'Unknown' }}</div>
+                     <button @click="startEditDeviceId"
+                             class="ml-2 p-1.5 rounded-lg hover:bg-white/10 text-text-muted hover:text-primary transition-colors"
+                             title="修改设备ID">
+                         <Edit3 class="w-4 h-4" />
+                     </button>
+                 </div>
              </div>
              <div class="p-3 rounded-2xl border col-span-2 transition-all duration-300 hover-lift" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
                  <div class="text-xs text-text-muted mb-1">运行时间</div>

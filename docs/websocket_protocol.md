@@ -194,10 +194,14 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 | `get_snapshot` | 获取告警快照 Base64 | `filename` |
 | `get_settings` | 获取系统设置 | `category?` |
 | `update_settings` | 更新系统设置 | `category`, `settings` |
+| `set_device_id` | 设置设备ID | `device_id` |
 | `get_network` | 获取网络状态 | 无 |
 | `get_remote_config` | 获取远程配置 | 无 |
 | `update_remote_config` | 更新远程配置 | `enabled`, `server_url`, ... |
 | `verify_remote_login` | 校验远程登录 | `server_url`, `username`, `password` |
+
+**`set_device_id` 参数说明：**
+- `device_id`: 新的设备ID，只允许大写字母和数字，长度1-32位
 
 ### 日志
 

@@ -1,0 +1,116 @@
+﻿# 动火离人安全监测系统 - 默认配置文件
+# 此文件作为 config.yaml 的模板
+# 首次部署时，请复制此文件为 config.yaml 并根据实际环境修改
+
+# 系统配置
+system:
+  name: "动火离人安全监测系统"
+  version: "0.1.0"
+  debug: false
+  device_id: ""  # 留空，首次运行时自动生成
+
+# 推理引擎配置
+inference:
+  engine: "rknn"  # 推理引擎类型: rknn 或 pytorch
+  model_path: "yolo11n-sim.rknn"  # RKNN模型路径
+  confidence_threshold: 0.5  # 置信度阈值
+  person_class_id: 0  # 人员类别ID
+
+# 检测稳定性配置
+detection:
+  no_person_threshold: 3  # 连续N帧无人才视为离开
+  person_present_threshold: 2  # 连续N帧有人才视为在场
+
+# 摄像头配置
+cameras: []
+  # 示例配置:
+  # - id: "camera_1"
+  #   type: "usb"  # usb 或 rtsp
+  #   name: "主摄像头"
+  #   device: 0  # USB设备索引
+  #   width: 640
+  #   height: 480
+  #   fps: 30
+  # - id: "camera_2"
+  #   type: "rtsp"
+  #   name: "网络摄像头"
+  #   rtsp_url: "rtsp://192.168.1.100:554/stream"
+  #   username: "admin"
+  #   password: "password"
+  #   width: 1920
+  #   height: 1080
+  #   fps: 25
+
+# 灶台/区域配置
+zones: []
+  # 示例配置:
+  # - id: "zone_1"
+  #   name: "1号灶台"
+  #   camera_id: "camera_1"
+  #   roi:  # 归一化坐标 (0.0-1.0)
+  #     - [0.1, 0.1]
+  #     - [0.9, 0.1]
+  #     - [0.9, 0.9]
+  #     - [0.1, 0.9]
+  #   enabled: true
+  #   serial_index: 0  # 串口分区索引
+  #   fire_current_threshold: 100  # 动火电流阈值 (100=1.00A)
+
+# API服务配置
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "*"
+
+# 语音配置
+voice:
+  enabled: true
+  engine: "pyttsx3"
+  rate: 150
+  volume: 1.0
+
+# TTS语音合成配置
+tts:
+  enabled: true
+  engine: "kokoro"  # kokoro 或 pyttsx3
+  audio_dir: "audio_assets"
+  idle_timeout: 60  # 空闲超时销毁时间（秒）
+
+# 日志配置
+logging:
+  level: "INFO"
+  log_dir: "logs"
+  snapshot_dir: "snapshots"
+
+# GPIO配置
+gpio:
+  simulated: false  # 生产环境设为false
+
+# 三阶段报警配置
+alarm:
+  warning_time: 90  # 预警时间（秒）
+  alarm_time: 180  # 报警时间（秒）
+  action_time: 300  # 切电时间（秒）
+  broadcast_interval: 15  # 重复播报间隔（秒）
+  warning_message: "动火区域离人即将超时，请立即回到工作岗位"
+  alarm_message: "动火区域离人超时，请立即回到工作岗位"
+  action_message: "动火区域离人超时，已自动切断炉灶电源，请立即现场处理"
+
+# 串口配置
+serial:
+  enabled: true
+  port: "/dev/ttyS3"
+  baudrate: 9600
+  poll_interval: 1.0  # 轮询间隔（秒）
+
+# 远程服务器配置
+remote:
+  enabled: false
+  server_url: ""
+  websocket_path: "dhlr/socket"
+  login_path: "/login"
+  username: ""
+  password: ""
+  token: ""
+  token_expires: 0

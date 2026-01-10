@@ -183,7 +183,10 @@ class ConfigManager:
         return cls._instance
     
     def load(self, config_path: str = None) -> AppConfig:
-        """加载配置文件"""
+        """加载配置文件
+        
+        如果 config.yaml 不存在，会自动从 default_config.yaml 复制一份
+        """
         if config_path is None:
             # 默认配置文件路径
             base_dir = Path(__file__).parent.parent.parent
@@ -194,7 +197,17 @@ class ConfigManager:
         self._config_path = config_path
         
         if not config_path.exists():
-            raise FileNotFoundError(f"配置文件不存在: {config_path}")
+            # 尝试从 default_config.yaml 复制
+            default_config_path = config_path.parent / "default_config.yaml"
+            if default_config_path.exists():
+                import shutil
+                shutil.copy(default_config_path, config_path)
+                print(f"已从 {default_config_path} 创建配置文件: {config_path}")
+            else:
+                raise FileNotFoundError(
+                    f"配置文件不存在: {config_path}，"
+                    f"且默认配置文件也不存在: {default_config_path}"
+                )
         
         with open(config_path, 'r', encoding='utf-8') as f:
             raw_config = yaml.safe_load(f)

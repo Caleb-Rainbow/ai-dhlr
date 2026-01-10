@@ -78,6 +78,7 @@ class WSHandler:
             # 设置相关
             "get_settings": self._get_settings,
             "update_settings": self._update_settings,
+            "set_device_id": self._set_device_id,
             "get_network": self._get_network,
             "get_remote_config": self._get_remote_config,
             "update_remote_config": self._update_remote_config,
@@ -651,6 +652,26 @@ class WSHandler:
         
         config_manager.save()
         return {"message": "设置已更新"}
+    
+    async def _set_device_id(self, params: dict) -> dict:
+        """设置设备ID"""
+        import re
+        device_id = params.get("device_id", "").strip()
+        
+        if not device_id:
+            raise ValueError("设备ID不能为空")
+        
+        # 验证格式：只允许大写字母和数字，长度为16位
+        if not re.match(r'^[A-Z0-9]{1,32}$', device_id):
+            raise ValueError("设备ID格式无效，只允许大写字母和数字，长度1-32位")
+        
+        # 保存到配置
+        config_manager.config.system.device_id = device_id
+        config_manager.save()
+        
+        logger.info(f"设备ID已更新为: {device_id}")
+        
+        return {"device_id": device_id, "message": "设备ID已更新"}
     
     async def _get_network(self, params: dict) -> dict:
         """获取网络状态"""
