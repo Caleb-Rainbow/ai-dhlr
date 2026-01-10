@@ -1,18 +1,21 @@
 # =============================================================================
-# 动火离人安全监测系统 (DHLR) - Docker Image CI/CD
-# 自动构建并推送到阿里云容器镜像仓库
+# 动火离人安全监测系统 (DHLR) - Docker Image Release
+# 仅在发布 Release 时构建并推送到阿里云容器镜像仓库
 # =============================================================================
 
-name: Docker Image CI/CD
+name: Docker Image Release
 
 on:
-  push:
-    branches: [ "main" ]
-    tags:
-      - 'v*'  # 支持版本标签触发
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:  # 允许手动触发
+  # 仅在发布 Release 时触发
+  release:
+    types: [published]
+  # 允许手动触发 (用于紧急发版)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '镜像标签 (留空则使用 latest)'
+        required: false
+        default: ''
 
 env:
   # 阿里云容器镜像仓库配置
@@ -54,17 +57,18 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # 对于 main 分支推送，使用 latest 标签
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            # 对于标签推送，使用版本号
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            # Release 触发: 使用版本号 (如 v1.0.0 -> 1.0.0)
+            type=semver,pattern={{version}},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}},enable=${{ github.event_name == 'release' }}
+            # 始终添加 latest 标签
+            type=raw,value=latest
+            # 手动触发: 使用自定义标签或 SHA
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
             # 使用 commit SHA 作为标签
             type=sha,prefix=,format=short
-            # 使用时间戳作为标签
-            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
 
-      # 5. 构建并推送 Docker 镜像 (仅在 main 分支推送时推送)
+      # 5. 构建并推送 Docker 镜像
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -72,8 +76,8 @@ jobs:
           file: ./Dockerfile
           # 指定构建目标为 production 阶段
           target: production
-          # 仅在 main 分支推送时才推送镜像
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # Release 或手动触发时推送镜像
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # 启用缓存以加速后续构建
@@ -81,19 +85,29 @@ jobs:
           cache-to: type=gha,mode=max
           # 构建参数
           build-args: |
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            BUILD_DATE=${{ github.event.release.published_at || github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
+            VERSION=${{ github.event.release.tag_name || 'dev' }}
 
       # 6. 输出构建结果
       - name: Image digest
         run: |
-          echo "## 🐳 Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🐳 Docker Image Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Registry:** ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Registry** | \`${{ env.REGISTRY }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Release** | \`${{ github.event.release.tag_name || 'manual' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Tags" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Pushed:** ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Pull Command" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
