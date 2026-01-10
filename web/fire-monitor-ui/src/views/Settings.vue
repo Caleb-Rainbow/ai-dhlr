@@ -55,6 +55,10 @@ const loraConfig = ref<LoraConfig>({
     channel: 0
 });
 
+// 可用串口列表
+const serialPorts = ref<Array<{ device: string; name: string; description: string; hwid: string }>>([]);
+const loadingSerialPorts = ref(false);
+
 // LoRa设置状态
 const settingLora = ref(false);
 
@@ -131,7 +135,23 @@ const loadData = async () => {
         serialConfig.value = serial;
         const lora = await ws.request<LoraConfig>('get_lora_config').catch(() => loraConfig.value);
         loraConfig.value = lora;
+        // 加载可用串口列表
+        await loadSerialPorts();
     } catch (e) { console.error('Failed to load serial config', e); }
+};
+
+// 加载可用串口列表
+const loadSerialPorts = async () => {
+    loadingSerialPorts.value = true;
+    try {
+        const ports = await ws.request<Array<{ device: string; name: string; description: string; hwid: string }>>('get_serial_ports');
+        serialPorts.value = ports;
+    } catch (e) {
+        console.error('Failed to load serial ports', e);
+        serialPorts.value = [];
+    } finally {
+        loadingSerialPorts.value = false;
+    }
 };
 
 // 刷新网络状态
@@ -446,11 +466,32 @@ onUnmounted(() => {
 
          <!-- 串口路径 -->
          <div class="space-y-1">
-           <label class="text-xs text-text-muted ml-1">串口路径</label>
-           <input v-model="serialConfig.port" type="text" 
-                  placeholder="/dev/ttyS3"
-                  class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+           <div class="flex items-center justify-between">
+             <label class="text-xs text-text-muted ml-1">串口路径</label>
+             <button @click="loadSerialPorts" 
+                     :disabled="loadingSerialPorts"
+                     class="p-1 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50"
+                     title="刷新串口列表">
+               <RefreshCw class="w-3.5 h-3.5 text-text-muted" :class="{ 'animate-spin': loadingSerialPorts }" />
+             </button>
+           </div>
+           <select v-model="serialConfig.port"
+                   class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary"
+                   style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+             <!-- 当前配置的端口（如果不在列表中也显示） -->
+             <option v-if="serialConfig.port && !serialPorts.some(p => p.device === serialConfig.port)"
+                     :value="serialConfig.port">
+               {{ serialConfig.port }} (当前)
+             </option>
+             <!-- 可用串口列表 -->
+             <option v-for="port in serialPorts" :key="port.device" :value="port.device">
+               {{ port.device }} - {{ port.description || port.name }}
+             </option>
+             <!-- 无可用串口时显示提示 -->
+             <option v-if="serialPorts.length === 0 && !serialConfig.port" value="" disabled>
+               未检测到串口设备
+             </option>
+           </select>
          </div>
 
          <!-- 波特率和轮询间隔 -->

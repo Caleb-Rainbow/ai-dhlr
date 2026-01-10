@@ -11,7 +11,6 @@ from src.utils.config import (
     CameraConfig, 
     ZoneConfig, 
     AlarmConfig,
-    SafetyConfig,
     TTSConfig,
     InferenceConfig,
     DetectionConfig,
@@ -122,14 +121,6 @@ class TestAlarmConfig:
         assert config.action_time == 180
 
 
-class TestSafetyConfig:
-    """测试 SafetyConfig 数据类（旧版兼容）"""
-    
-    def test_default_values(self):
-        """测试默认值"""
-        config = SafetyConfig()
-        assert config.warning_timeout == 30
-        assert config.cutoff_timeout == 60
 
 
 class TestInferenceConfig:

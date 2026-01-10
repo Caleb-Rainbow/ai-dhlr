@@ -25,8 +25,9 @@ class ZoneStatusResponse(BaseModel):
     warning_remaining: float
     alarm_remaining: float
     cutoff_remaining: float
-    warning_timeout: int
-    cutoff_timeout: int
+    warning_time: int
+    alarm_time: int
+    action_time: int
     enabled: bool = True
     last_snapshot_path: Optional[str] = None
 
@@ -48,8 +49,8 @@ _start_time = time.time()
 async def get_all_status():
     """获取所有灶台的实时状态"""
     statuses = zone_manager.get_all_status()
-    # 获取全局安全配置
-    safety_config = get_config().safety
+    # 获取报警配置（三阶段）
+    alarm_config = get_config().alarm
     
     return [
         ZoneStatusResponse(
@@ -62,8 +63,9 @@ async def get_all_status():
             warning_remaining=s["warning_remaining"],
             alarm_remaining=s.get("alarm_remaining", 0.0),
             cutoff_remaining=s["cutoff_remaining"],
-            warning_timeout=safety_config.warning_timeout,
-            cutoff_timeout=safety_config.cutoff_timeout,
+            warning_time=alarm_config.warning_time,
+            alarm_time=alarm_config.alarm_time,
+            action_time=alarm_config.action_time,
             enabled=s.get("enabled", True),
             last_snapshot_path=s.get("last_snapshot_path")
         )
@@ -79,8 +81,8 @@ async def get_zone_status(zone_id: str):
         return {"error": "灶台不存在"}
     
     s = sm.get_status()
-    # 获取全局安全配置
-    safety_config = get_config().safety
+    # 获取报警配置（三阶段）
+    alarm_config = get_config().alarm
     
     return ZoneStatusResponse(
         id=s["id"],
@@ -92,8 +94,9 @@ async def get_zone_status(zone_id: str):
         warning_remaining=s["warning_remaining"],
         alarm_remaining=s.get("alarm_remaining", 0.0),
         cutoff_remaining=s["cutoff_remaining"],
-        warning_timeout=safety_config.warning_timeout,
-        cutoff_timeout=safety_config.cutoff_timeout,
+        warning_time=alarm_config.warning_time,
+        alarm_time=alarm_config.alarm_time,
+        action_time=alarm_config.action_time,
         enabled=s.get("enabled", True),
         last_snapshot_path=s.get("last_snapshot_path")
     )

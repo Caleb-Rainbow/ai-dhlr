@@ -36,12 +36,6 @@ class ZoneConfig:
     fire_current_threshold: int = 100  # 动火电流阈值（100=1.00A）
 
 
-@dataclass
-class SafetyConfig:
-    """安全/超时配置（旧版，保留兼容性）"""
-    warning_timeout: int = 30  # 预警超时（秒）
-    cutoff_timeout: int = 60  # 切电超时（秒）
-
 
 @dataclass
 class AlarmConfig:
@@ -151,7 +145,6 @@ class RemoteServerConfig:
 class AppConfig:
     """应用总配置"""
     system: SystemConfig
-    safety: SafetyConfig
     inference: InferenceConfig
     detection: DetectionConfig
     cameras: List[CameraConfig]
@@ -218,13 +211,6 @@ class ConfigManager:
             version=system_raw.get('version', '0.1.0'),
             debug=system_raw.get('debug', True),
             device_id=system_raw.get('device_id', '')
-        )
-        
-        # 解析安全配置
-        safety_raw = raw.get('safety', {})
-        safety = SafetyConfig(
-            warning_timeout=safety_raw.get('warning_timeout', 30),
-            cutoff_timeout=safety_raw.get('cutoff_timeout', 60)
         )
         
         # 解析推理配置
@@ -349,7 +335,6 @@ class ConfigManager:
         
         return AppConfig(
             system=system,
-            safety=safety,
             inference=inference,
             detection=detection,
             cameras=cameras,
@@ -388,10 +373,6 @@ class ConfigManager:
                 'version': config.system.version,
                 'debug': config.system.debug,
                 'device_id': config.system.device_id
-            },
-            'safety': {
-                'warning_timeout': config.safety.warning_timeout,
-                'cutoff_timeout': config.safety.cutoff_timeout
             },
             'inference': {
                 'engine': config.inference.engine,

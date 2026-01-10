@@ -92,6 +92,7 @@ class WSHandler:
             "get_log_content": self._get_log_content,
             
             # 串口相关
+            "get_serial_ports": self._get_serial_ports,
             "get_serial_config": self._get_serial_config,
             "update_serial_config": self._update_serial_config,
             "get_currents": self._get_currents,
@@ -833,6 +834,95 @@ class WSHandler:
     
     # ==================== 串口处理器 ====================
     
+    async def _get_serial_ports(self, params: dict) -> list:
+        """获取系统可用的串口列表（不依赖 pyserial）"""
+        import platform
+        import os
+        
+        ports = []
+        system = platform.system()
+        
+        try:
+            if system == "Linux":
+                # Linux: 扫描 /dev 目录下的串口设备
+                dev_patterns = [
+                    "/dev/ttyS",    # 内置串口
+                    "/dev/ttyUSB",  # USB 转串口
+                    "/dev/ttyACM",  # ACM 设备
+                    "/dev/ttyAMA",  # 树莓派等 ARM 设备
+                    "/dev/serial",  # 通用串口符号链接
+                ]
+                
+                if os.path.exists("/dev"):
+                    for entry in os.listdir("/dev"):
+                        dev_path = f"/dev/{entry}"
+                        for pattern in dev_patterns:
+                            if dev_path.startswith(pattern):
+                                # 尝试获取设备信息
+                                description = entry
+                                try:
+                                    # 尝试读取 /sys 下的设备信息
+                                    sys_path = f"/sys/class/tty/{entry}/device/driver"
+                                    if os.path.exists(sys_path):
+                                        driver = os.path.basename(os.readlink(sys_path))
+                                        description = f"{entry} ({driver})"
+                                except Exception:
+                                    pass
+                                
+                                ports.append({
+                                    "device": dev_path,
+                                    "name": entry,
+                                    "description": description,
+                                    "hwid": ""
+                                })
+                                break
+                
+            elif system == "Windows":
+                # Windows: 通过注册表查询串口
+                try:
+                    import winreg
+                    key = winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"HARDWARE\DEVICEMAP\SERIALCOMM"
+                    )
+                    i = 0
+                    while True:
+                        try:
+                            name, value, _ = winreg.EnumValue(key, i)
+                            ports.append({
+                                "device": value,  # 如 "COM3"
+                                "name": value,
+                                "description": name,  # 如 "\Device\Serial0"
+                                "hwid": ""
+                            })
+                            i += 1
+                        except WindowsError:
+                            break
+                    winreg.CloseKey(key)
+                except Exception as e:
+                    logger.warning(f"Windows 串口枚举失败: {e}")
+            
+            elif system == "Darwin":
+                # macOS: 扫描 /dev 目录
+                if os.path.exists("/dev"):
+                    for entry in os.listdir("/dev"):
+                        if entry.startswith("tty.") or entry.startswith("cu."):
+                            dev_path = f"/dev/{entry}"
+                            ports.append({
+                                "device": dev_path,
+                                "name": entry,
+                                "description": entry,
+                                "hwid": ""
+                            })
+            
+            # 按设备名排序
+            ports.sort(key=lambda x: x["device"])
+            
+        except Exception as e:
+            logger.error(f"枚举串口失败: {e}")
+        
+        return ports
+    
     async def _get_serial_config(self, params: dict) -> dict:
         """获取串口配置"""
         config = config_manager.config.serial
@@ -973,4 +1063,3 @@ class WSHandler:
 
 # 全局处理器实例
 ws_handler = WSHandler()
-
