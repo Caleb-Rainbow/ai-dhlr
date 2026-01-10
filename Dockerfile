@@ -39,7 +39,7 @@ WORKDIR /app
 
 # 安装系统依赖 (针对现代 Debian 镜像优化)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # 编译工具 (修复 async-pyserial 报错的关键)
+    # 编译工具 (部分 Python 包可能需要)
     build-essential \
     python3-dev \
     # OpenCV 依赖 (使用之前修复过的 libgl1)

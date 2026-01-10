@@ -31,7 +31,7 @@ misaki[zh]>=0.4.0
 pygame>=2.6.1
 
 #串口通讯
-async-pyserial>=0.2.4
+pyserial>=3.5
 
 #测试框架
 pytest>=7.0.0
