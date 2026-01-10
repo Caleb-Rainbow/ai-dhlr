@@ -40,7 +40,7 @@ jobs:
             libsm6 \
             libxext6 \
             libxrender1 \
-            libasound2 \
+            libasound2t64 \
             libportaudio2 \
             libsndfile1
 
