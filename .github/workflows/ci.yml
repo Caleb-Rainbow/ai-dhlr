@@ -24,6 +24,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 清理磁盘空间 (释放约 30GB)
+      - name: Free disk space
+        run: |
+          echo "=== 清理前磁盘使用情况 ==="
+          df -h
+          echo ""
+          echo "=== 开始清理 ==="
+          # 删除不需要的大型预装软件
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          # 清理 Docker 镜像
+          sudo docker image prune --all --force || true
+          # 清理 apt 缓存
+          sudo apt-get clean
+          echo ""
+          echo "=== 清理后磁盘使用情况 ==="
+          df -h
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -44,12 +66,16 @@ jobs:
             libportaudio2 \
             libsndfile1
 
-      # 安装 Python 依赖 (排除 ARM 专用的 RKNN)
+      # 安装 Python 依赖 (排除大型 ML 框架，CI 只需测试核心逻辑)
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # 排除 RKNN (仅 ARM64 平台使用)
-          grep -v "rknn" requirements.txt > requirements-ci.txt || cp requirements.txt requirements-ci.txt
+          # 排除 RKNN、ultralytics、torch 等大型包 (CI 不需要推理功能)
+          grep -vE "rknn|ultralytics|torch" requirements.txt > requirements-ci.txt || cp requirements.txt requirements-ci.txt
+          # 显示将要安装的依赖
+          echo "=== CI 依赖列表 ==="
+          cat requirements-ci.txt
+          echo ""
           pip install -r requirements-ci.txt
           # 安装测试依赖
           pip install pytest pytest-asyncio pytest-cov
