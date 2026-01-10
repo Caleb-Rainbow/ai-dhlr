@@ -141,7 +141,7 @@ class TTSManager:
     _instance: Optional['TTSManager'] = None
     
     # 配置常量
-    IDLE_TIMEOUT = 60  # 空闲60秒后销毁服务
+    IDLE_TIMEOUT = 150  # 空闲60秒后销毁服务
     
     # 资源路径（相对于项目根目录）
     MODEL_FILE = "./src/tts/assets/kokoro-v1.1-zh.onnx"
