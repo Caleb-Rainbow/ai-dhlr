@@ -531,7 +531,7 @@ onUnmounted(() => {
                       </Transition>
                    </div>
                    <div class="flex items-center gap-2 mt-1">
-                      <span class="text-xs text-text-muted">{{ zone.camera_id }}</span>
+                      <span class="text-xs text-text-muted">相机ID: {{ zone.camera_id }}</span>
                       <span class="w-1 h-1 rounded-full bg-text-muted"></span>
                       <span class="text-xs text-amber-400">阈值: {{ ((zone.fire_current_threshold || 100) / 100).toFixed(2) }}A</span>
                    </div>

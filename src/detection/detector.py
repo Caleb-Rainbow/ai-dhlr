@@ -27,11 +27,25 @@ def point_in_polygon(point: Tuple[int, int], polygon: List[Tuple[float, float]],
     Returns:
         是否在多边形内
     """
-    # 将归一化坐标转换为像素坐标
-    polygon_pixels = np.array([
-        [int(p[0] * frame_width), int(p[1] * frame_height)]
-        for p in polygon
-    ], dtype=np.int32)
+    # 验证多边形有效性
+    if not polygon or len(polygon) < 3:
+        # 多边形无效（空或点数不足），返回False
+        return False
+    
+    # 验证每个点的格式
+    try:
+        polygon_pixels = np.array([
+            [int(p[0] * frame_width), int(p[1] * frame_height)]
+            for p in polygon
+            if len(p) >= 2 and p[0] is not None and p[1] is not None
+        ], dtype=np.int32)
+    except (TypeError, ValueError, IndexError):
+        # 数据格式错误
+        return False
+    
+    # 再次检查转换后的多边形是否有效
+    if polygon_pixels.shape[0] < 3:
+        return False
     
     result = cv2.pointPolygonTest(polygon_pixels, point, False)
     return result >= 0

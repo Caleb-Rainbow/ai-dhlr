@@ -22,7 +22,7 @@ const navItems = [
 </script>
 
 <template>
-  <div class="flex flex-col h-full max-w-md mx-auto relative min-h-screen shadow-2xl overflow-hidden" style="background: var(--theme-bg-primary);">
+  <div class="flex flex-col h-full max-w-md mx-auto relative min-h-screen shadow-2xl" style="background: var(--theme-bg-primary);">
     <!-- Main Content -->
     <main class="flex-1 overflow-y-auto pt-0 pb-20 px-4 scroll-smooth" style="-webkit-overflow-scrolling: touch;">
       <RouterView v-slot="{ Component }">
@@ -36,7 +36,7 @@ const navItems = [
     <div id="portal-target" class="fixed inset-0 pointer-events-none z-50 max-w-md mx-auto"></div>
 
     <!-- Bottom Nav -->
-    <nav class="h-16 glass-panel flex items-center justify-around fixed bottom-0 w-full max-w-md z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)]">
+    <nav class="h-16 glass-panel flex items-center justify-around fixed bottom-0 w-full max-w-md z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)]" style="isolation: isolate;">
       <RouterLink 
         v-for="item in navItems" 
         :key="item.name"
