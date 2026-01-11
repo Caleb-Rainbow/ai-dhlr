@@ -540,6 +540,13 @@ async def delete_zone(zone_id: str):
         
         deleted = original_count > len(config_manager.config.zones)
         
+        # 删除灶台的音频文件
+        try:
+            from ...tts.tts_manager import tts_manager
+            tts_manager.delete_audio_files(zone_id)
+        except Exception:
+            pass  # 删除音频文件失败不影响主流程
+        
         return {
             "success": True, 
             "message": f"灶台 '{zone_name}' 已删除",

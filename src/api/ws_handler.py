@@ -254,6 +254,14 @@ class WSHandler:
         except Exception:
             pass
         
+        # 提交语音合成任务
+        try:
+            from ..tts.tts_manager import tts_manager
+            tts_manager.submit_synthesis_task(zone_id, name)
+            logger.info(f"新灶台 {zone_id} 已提交语音合成任务")
+        except Exception as e:
+            logger.warning(f"提交语音合成任务失败: {e}")
+        
         return {
             "id": zone_id,
             "name": name,
@@ -350,6 +358,14 @@ class WSHandler:
         # 从配置移除
         config_manager.config.zones = [z for z in config_manager.config.zones if z.id != zone_id]
         config_manager.save()
+        
+        # 删除灶台的音频文件
+        try:
+            from ..tts.tts_manager import tts_manager
+            tts_manager.delete_audio_files(zone_id)
+            logger.info(f"已删除灶台 {zone_id} 的音频文件")
+        except Exception as e:
+            logger.warning(f"删除音频文件失败: {e}")
         
         return {"id": zone_id, "name": zone_name, "message": "删除成功"}
     
@@ -565,7 +581,23 @@ class WSHandler:
     async def _get_status(self, params: dict) -> list:
         """获取所有灶台状态"""
         from ..zone.state_machine import zone_manager
-        return zone_manager.get_all_status()
+        
+        # 获取电流值
+        currents = {}
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            currents = serial_manager.get_all_currents()
+        except Exception:
+            pass
+        
+        # 获取状态并添加电流值
+        statuses = zone_manager.get_all_status()
+        for status in statuses:
+            zone_id = status.get("id")
+            if zone_id:
+                status["current_value"] = currents.get(zone_id, 0)
+        
+        return statuses
     
     async def _get_device(self, params: dict) -> dict:
         """获取设备信息"""

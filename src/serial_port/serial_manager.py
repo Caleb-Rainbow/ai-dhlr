@@ -290,7 +290,7 @@ class SerialManager:
         function_code = response.function_code
         data = response.data
         
-        self._logger.info(f"收到响应: addr={address}, func={function_code}, data={data.hex()}, raw={response.raw.hex()}")
+        #self._logger.info(f"收到响应: addr={address}, func={function_code}, data={data.hex()}, raw={response.raw.hex()}")
         
         if function_code == 0x03:  # 读取响应
             if len(data) >= 2:
@@ -465,9 +465,16 @@ class SerialManager:
         return False
         
     async def _do_cutoff(self, serial_index: int, zone_id: str):
+        """执行切电操作：先发送切电命令(FF)，延时后发送还原命令(00)"""
         if self._helper and self._helper.is_open:
+            # 发送切电命令 (FF)
             await self._helper.set_relay(serial_index)
             self._logger.info(f"[{zone_id}] 发送切电命令")
+            
+            # 延时 100ms 后发送还原命令 (00)
+            await asyncio.sleep(0.1)
+            await self._helper.reset_relay(serial_index)
+            self._logger.info(f"[{zone_id}] 发送还原命令")
 
     def set_lora_id(self, lora_id: int) -> bool:
         """设置LoRa编号 (Sync return, performs async action)"""

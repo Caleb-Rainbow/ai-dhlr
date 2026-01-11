@@ -425,6 +425,20 @@ class SerialHelper:
         command = bytes([address, 0x05, 0x00, 0x00, 0xFF, 0x00])
         return append_crc16(command)
     
+    def build_reset_relay_command(self, index: int) -> bytes:
+        """
+        构建继电器还原命令
+        
+        Args:
+            index: 分区索引（从0开始）
+            
+        Returns:
+            完整命令（含CRC）
+        """
+        address = 0x01 + index
+        command = bytes([address, 0x05, 0x00, 0x00, 0x00, 0x00])
+        return append_crc16(command)
+    
     def build_get_lora_id_command(self) -> bytes:
         """
         构建获取LoRa编号命令
@@ -503,8 +517,13 @@ class SerialHelper:
         return await self.send(command)
     
     async def set_relay(self, index: int) -> bool:
-        """发送设置继电器命令"""
+        """发送设置继电器命令（切电）"""
         command = self.build_set_relay_command(index)
+        return await self.send(command)
+    
+    async def reset_relay(self, index: int) -> bool:
+        """发送继电器还原命令"""
+        command = self.build_reset_relay_command(index)
         return await self.send(command)
     
     async def get_lora_id(self) -> bool:

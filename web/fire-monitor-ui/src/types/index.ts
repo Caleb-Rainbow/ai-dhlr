@@ -17,6 +17,7 @@ export interface ZoneStatus {
     alarm_remaining: number;
     cutoff_remaining: number;
     camera_id?: string;
+    current_value?: number;  // 实时电流值
 }
 
 export interface PerformanceStats {
