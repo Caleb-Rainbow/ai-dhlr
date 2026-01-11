@@ -97,6 +97,7 @@ export interface SerialConfig {
     baudrate: number;
     poll_interval: number;
     is_open: boolean;
+    debug_hex: boolean;
 }
 
 export interface LoraConfig {

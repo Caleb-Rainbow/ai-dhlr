@@ -214,11 +214,17 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 
 | Action | 说明 | 参数 | 返回 |
 |--------|------|------|------|
-| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open}` |
+| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open, debug_hex}` |
 | `update_serial_config` | 更新串口配置 | `enabled?`, `port?`, `baudrate?`, `poll_interval?` | `{message}` |
 | `get_currents` | 获取所有分区电流值 | 无 | `{currents: {zone_id: value, ...}}` |
 | `get_lora_config` | 获取LoRa配置 | 无 | `{id, channel}` |
 | `set_lora_config` | 设置LoRa配置 | `id?`, `channel?` | `{message}` |
+| `set_serial_debug` | 设置串口调试日志开关 | `enabled` | `{enabled, message}` |
+
+**`set_serial_debug` 说明：**
+- 开启后，串口发送和接收的数据将以16进制格式打印到日志中
+- 日志格式：`[TX] FF AA FF 01 03 00 30 00 01 84 05`（发送）、`[RX] 01 03 02 00 05 XX XX`（接收）
+- 用于调试串口通讯问题
 
 
 ### 巡检操作

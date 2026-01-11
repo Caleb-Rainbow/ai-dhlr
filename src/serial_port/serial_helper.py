@@ -103,6 +103,9 @@ class SerialHelper:
         
         # 用于异步操作的线程池（限制为1个线程以避免并发串口访问）
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="serial")
+        
+        # 调试开关：打印16进制数据
+        self._debug_hex = False
     
     @property
     def is_open(self) -> bool:
@@ -120,6 +123,20 @@ class SerialHelper:
     def set_on_data_received(self, callback: Callable[[SerialResponse], None]):
         """设置数据接收回调"""
         self._on_data_received = callback
+    
+    def set_debug_hex(self, enabled: bool):
+        """
+        设置16进制调试日志开关
+        
+        Args:
+            enabled: True开启调试日志，False关闭
+        """
+        self._debug_hex = enabled
+        self._logger.info(f"串口16进制调试日志: {'开启' if enabled else '关闭'}")
+    
+    def get_debug_hex(self) -> bool:
+        """获取16进制调试日志状态"""
+        return self._debug_hex
     
     async def open(self) -> bool:
         """
@@ -223,7 +240,10 @@ class SerialHelper:
                 data
             )
             if result:
-                self._logger.debug(f"发送: {data.hex().upper()}")
+                if self._debug_hex:
+                    # 格式化为空格分隔的16进制字符串
+                    hex_str = ' '.join(f'{b:02X}' for b in data)
+                    self._logger.info(f"[TX] {hex_str}")
             return result
         except Exception as e:
             self._logger.error(f"串口发送失败: {e}")
@@ -259,6 +279,10 @@ class SerialHelper:
                 )
                 
                 if data:
+                    if self._debug_hex:
+                        # 格式化为空格分隔的16进制字符串
+                        hex_str = ' '.join(f'{b:02X}' for b in data)
+                        self._logger.info(f"[RX] {hex_str}")
                     buffer.extend(data)
                     
                     # 解析响应
@@ -402,34 +426,74 @@ class SerialHelper:
         return append_crc16(command)
     
     def build_get_lora_id_command(self) -> bytes:
-        """构建获取LoRa编号命令"""
-        command = bytes([0x01, 0x03, 0x00, 0x30, 0x00, 0x02])
-        return append_crc16(command)
+        """
+        构建获取LoRa编号命令
+        
+        协议格式: FF AA FF 01 03 00 30 00 01 [CRC16]
+        - FF AA FF: 前导码
+        - 01: 设备地址
+        - 03: 功能码（读保持寄存器）
+        - 00 30: 寄存器地址
+        - 00 01: 读取1个寄存器
+        - CRC: 对命令体计算
+        """
+        preamble = bytes([0xFF, 0xAA, 0xFF])
+        command = bytes([0x01, 0x03, 0x00, 0x30, 0x00, 0x01])
+        return preamble + append_crc16(command)
     
     def build_set_lora_id_command(self, lora_id: int) -> bytes:
         """
         构建设置LoRa编号命令
         
+        协议格式: FF AA FF 01 06 00 30 00 XX [CRC16]
+        - FF AA FF: 前导码
+        - 01: 设备地址
+        - 06: 功能码（写单个寄存器）
+        - 00 30: 寄存器地址
+        - 00 XX: LoRa编号值
+        - CRC: 对命令体计算
+        
         Args:
-            lora_id: LoRa编号
+            lora_id: LoRa编号 (0-255)
         """
+        preamble = bytes([0xFF, 0xAA, 0xFF])
         command = bytes([0x01, 0x06, 0x00, 0x30, 0x00, lora_id & 0xFF])
-        return append_crc16(command)
+        return preamble + append_crc16(command)
     
     def build_get_lora_channel_command(self) -> bytes:
-        """构建获取LoRa信道命令"""
-        command = bytes([0x01, 0x03, 0x00, 0x31, 0x00, 0x02])
-        return append_crc16(command)
+        """
+        构建获取LoRa信道命令
+        
+        协议格式: FF AA FF 01 03 00 31 00 01 [CRC16]
+        - FF AA FF: 前导码
+        - 01: 设备地址
+        - 03: 功能码（读保持寄存器）
+        - 00 31: 寄存器地址
+        - 00 01: 读取1个寄存器
+        - CRC: 对命令体计算
+        """
+        preamble = bytes([0xFF, 0xAA, 0xFF])
+        command = bytes([0x01, 0x03, 0x00, 0x31, 0x00, 0x01])
+        return preamble + append_crc16(command)
     
     def build_set_lora_channel_command(self, channel: int) -> bytes:
         """
         构建设置LoRa信道命令
         
+        协议格式: FF AA FF 01 06 00 31 00 XX [CRC16]
+        - FF AA FF: 前导码
+        - 01: 设备地址
+        - 06: 功能码（写单个寄存器）
+        - 00 31: 寄存器地址
+        - 00 XX: 信道值
+        - CRC: 对命令体计算
+        
         Args:
-            channel: 信道号
+            channel: 信道号 (0-255)
         """
+        preamble = bytes([0xFF, 0xAA, 0xFF])
         command = bytes([0x01, 0x06, 0x00, 0x31, 0x00, channel & 0xFF])
-        return append_crc16(command)
+        return preamble + append_crc16(command)
     
     # ==================== 便捷发送方法 (异步) ====================
     

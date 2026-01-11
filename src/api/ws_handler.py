@@ -99,6 +99,7 @@ class WSHandler:
             "get_currents": self._get_currents,
             "get_lora_config": self._get_lora_config,
             "set_lora_config": self._set_lora_config,
+            "set_serial_debug": self._set_serial_debug,
             
             # 巡检相关
             "start_patrol": self._start_patrol,
@@ -1038,6 +1039,33 @@ class WSHandler:
             return {"message": "LoRa配置已更新: " + ", ".join(messages)}
         except Exception as e:
             raise ValueError(f"设置LoRa配置失败: {e}")
+    
+    async def _set_serial_debug(self, params: dict) -> dict:
+        """
+        设置串口16进制调试日志开关
+        
+        Args:
+            params: {"enabled": bool} - 开启或关闭调试日志
+            
+        Returns:
+            {"enabled": bool, "message": str}
+        """
+        enabled = params.get("enabled", False)
+        
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            success = serial_manager.set_debug_hex(enabled)
+            
+            if success:
+                status = "开启" if enabled else "关闭"
+                return {
+                    "enabled": enabled,
+                    "message": f"串口16进制调试日志已{status}"
+                }
+            else:
+                raise ValueError("串口未初始化")
+        except Exception as e:
+            raise ValueError(f"设置调试日志失败: {e}")
     
     # ==================== 巡检处理器 ====================
     

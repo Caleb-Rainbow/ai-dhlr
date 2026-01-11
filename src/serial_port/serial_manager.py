@@ -341,17 +341,41 @@ class SerialManager:
 
     def get_serial_config(self) -> Dict:
         is_open = False
-        # thread-safe check hack check
+        debug_hex = False
+        # thread-safe check
         if self._helper:
             is_open = self._helper.is_open
+            debug_hex = self._helper.get_debug_hex()
             
         return {
             "enabled": self._enabled,
             "port": self._port,
             "baudrate": self._baudrate,
             "poll_interval": self._poll_interval,
-            "is_open": is_open
+            "is_open": is_open,
+            "debug_hex": debug_hex
         }
+    
+    def set_debug_hex(self, enabled: bool) -> bool:
+        """
+        设置16进制调试日志开关
+        
+        Args:
+            enabled: True开启调试日志，False关闭
+            
+        Returns:
+            是否设置成功
+        """
+        if self._helper:
+            self._helper.set_debug_hex(enabled)
+            return True
+        return False
+    
+    def get_debug_hex(self) -> bool:
+        """获取16进制调试日志状态"""
+        if self._helper:
+            return self._helper.get_debug_hex()
+        return False
 
     # ==================== 控制接口 (支持Sync/Async调用) ====================
     
