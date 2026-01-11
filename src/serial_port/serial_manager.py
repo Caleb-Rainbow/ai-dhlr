@@ -187,9 +187,9 @@ class SerialManager:
         """轮询循环 (Async Task)"""
         self._logger.info("串口轮询任务已启动")
         
-        # 初始获取LoRa配置
+        # 初始获取LoRa配置（等待完成后再开始轮询）
         await asyncio.sleep(0.5)
-        self._request_lora_config()
+        await self._do_request_lora()
         
         while self._running:
             try:
@@ -243,10 +243,10 @@ class SerialManager:
         
         self._logger.info("串口轮询任务已停止")
     
-    def _request_lora_config(self):
-        """请求LoRa配置 (Fire and Forget)"""
+    async def request_lora_config(self):
+        """请求LoRa配置（供外部调用，顺序执行）"""
         if self._helper and self._helper.is_open:
-            asyncio.create_task(self._do_request_lora())
+            await self._do_request_lora()
             
     async def _do_request_lora(self):
         """请求LoRa配置（顺序发送，等待每个响应）"""
