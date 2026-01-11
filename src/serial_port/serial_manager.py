@@ -80,9 +80,9 @@ class SerialManager:
         # 电流值更新回调
         self._on_current_update: Optional[Callable[[str, int, bool], None]] = None
         
-        # 等待LoRa响应
-        self._waiting_lora_id = False
-        self._waiting_lora_channel = False
+        # 等待LoRa响应的队列 (FIFO)
+        # 元素为 'id' 或 'channel'，表示期待的响应类型
+        self._lora_response_queue: list[str] = []
         
         # 配置
         self._enabled = True
@@ -221,10 +221,11 @@ class SerialManager:
             asyncio.create_task(self._do_request_lora())
             
     async def _do_request_lora(self):
-        self._waiting_lora_id = True
+        # 按发送顺序记录期待的响应类型
+        self._lora_response_queue.append('id')
         await self._helper.get_lora_id()
         await asyncio.sleep(0.3)
-        self._waiting_lora_channel = True
+        self._lora_response_queue.append('channel')
         await self._helper.get_lora_channel()
     
     def _on_data_received(self, response: SerialResponse):
@@ -239,17 +240,18 @@ class SerialManager:
             if len(data) >= 2:
                 value = (data[0] << 8) | data[1]
                 
-                if address == 0x01 and self._waiting_lora_id:
-                    self._lora_config.id = value
-                    self._lora_config.last_update = time.time()
-                    self._waiting_lora_id = False
-                    self._logger.info(f"LoRa编号: {value}")
-                    
-                elif address == 0x01 and self._waiting_lora_channel:
-                    self._lora_config.channel = value
-                    self._lora_config.last_update = time.time()
-                    self._waiting_lora_channel = False
-                    self._logger.info(f"LoRa信道: {value}")
+                # 检查是否有等待的LoRa响应
+                if address == 0x01 and self._lora_response_queue:
+                    # 按FIFO顺序取出期待的响应类型
+                    expected_type = self._lora_response_queue.pop(0)
+                    if expected_type == 'id':
+                        self._lora_config.id = value
+                        self._lora_config.last_update = time.time()
+                        self._logger.info(f"LoRa编号: {value}")
+                    elif expected_type == 'channel':
+                        self._lora_config.channel = value
+                        self._lora_config.last_update = time.time()
+                        self._logger.info(f"LoRa信道: {value}")
                     
                 else:
                     self._update_current(address, value)
@@ -416,7 +418,8 @@ class SerialManager:
         if self._helper and self._helper.is_open:
             await self._helper.set_lora_id(lora_id)
             await asyncio.sleep(0.3)
-            self._waiting_lora_id = True
+            # 记录期待的响应类型
+            self._lora_response_queue.append('id')
             await self._helper.get_lora_id()
 
     def set_lora_channel(self, channel: int) -> bool:
@@ -433,7 +436,8 @@ class SerialManager:
         if self._helper and self._helper.is_open:
             await self._helper.set_lora_channel(channel)
             await asyncio.sleep(0.3)
-            self._waiting_lora_channel = True
+            # 记录期待的响应类型
+            self._lora_response_queue.append('channel')
             await self._helper.get_lora_channel()
 
     def update_serial_config(self, 

@@ -119,35 +119,52 @@ class TestCommandBuilder:
         """测试构建获取 LoRa ID 命令"""
         cmd = helper.build_get_lora_id_command()
         
-        assert len(cmd) == 8
-        assert cmd[0] == 0x01  # 地址
-        assert cmd[1] == 0x03  # 功能码 (读取保持寄存器)
+        # 命令格式: FF AA FF + 01 03 00 30 00 01 + CRC(2)
+        # 总长度: 3 + 6 + 2 = 11 字节
+        assert len(cmd) == 11
+        # 验证前导码
+        assert cmd[0:3] == bytes([0xFF, 0xAA, 0xFF])
+        assert cmd[3] == 0x01  # 地址
+        assert cmd[4] == 0x03  # 功能码 (读取保持寄存器)
+        assert cmd[5:7] == bytes([0x00, 0x30])  # 寄存器地址 0x0030
     
     def test_build_set_lora_id_command(self, helper):
         """测试构建设置 LoRa ID 命令"""
         lora_id = 42
         cmd = helper.build_set_lora_id_command(lora_id)
         
-        assert len(cmd) == 8
-        assert cmd[0] == 0x01  # 地址
-        assert cmd[1] == 0x06  # 功能码 (写单个寄存器)
-        assert cmd[5] == lora_id  # LoRa ID 值
+        # 命令格式: FF AA FF + 01 06 00 30 00 XX + CRC(2)
+        # 总长度: 3 + 6 + 2 = 11 字节
+        assert len(cmd) == 11
+        # 验证前导码
+        assert cmd[0:3] == bytes([0xFF, 0xAA, 0xFF])
+        assert cmd[3] == 0x01  # 地址
+        assert cmd[4] == 0x06  # 功能码 (写单个寄存器)
+        assert cmd[5:7] == bytes([0x00, 0x30])  # 寄存器地址 0x0030
+        assert cmd[8] == lora_id  # LoRa ID 值 (在 00 XX 中的 XX)
     
     def test_build_set_lora_channel_command(self, helper):
         """测试构建设置 LoRa 信道命令"""
         channel = 15
         cmd = helper.build_set_lora_channel_command(channel)
         
-        assert cmd[5] == channel
+        # 命令格式: FF AA FF + 01 06 00 31 00 XX + CRC(2)
+        # 总长度: 3 + 6 + 2 = 11 字节
+        assert len(cmd) == 11
+        # 验证前导码
+        assert cmd[0:3] == bytes([0xFF, 0xAA, 0xFF])
+        assert cmd[5:7] == bytes([0x00, 0x31])  # 寄存器地址 0x0031
+        assert cmd[8] == channel  # 信道值
     
     def test_lora_id_overflow(self, helper):
         """测试 LoRa ID 溢出处理"""
         # 传入超过 0xFF 的值，应该被截断
+        # LoRa ID 值在索引 8 的位置 (FF AA FF 01 06 00 30 00 XX)
         cmd = helper.build_set_lora_id_command(256)
-        assert cmd[5] == 0x00  # 256 & 0xFF = 0
+        assert cmd[8] == 0x00  # 256 & 0xFF = 0
         
         cmd = helper.build_set_lora_id_command(257)
-        assert cmd[5] == 0x01  # 257 & 0xFF = 1
+        assert cmd[8] == 0x01  # 257 & 0xFF = 1
 
 
 class TestCRCVerification:
