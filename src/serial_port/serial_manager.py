@@ -213,11 +213,11 @@ class SerialManager:
                         # 发送获取电流命令
                         await self._helper.get_current(zone_info.serial_index)
                         
-                        # 等待响应，超时2秒
+                        # 等待响应，超时0.5秒（正常设备通常在100ms内响应）
                         try:
                             await asyncio.wait_for(
                                 self._current_response_event.wait(), 
-                                timeout=2.0
+                                timeout=0.5
                             )
                         except asyncio.TimeoutError:
                             self._logger.warning(f"等待分区{zone_info.serial_index}电流响应超时")

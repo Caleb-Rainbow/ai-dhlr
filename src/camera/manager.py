@@ -17,6 +17,7 @@ from ..utils.logger import get_logger
 class CameraStatus(Enum):
     """摄像头状态"""
     OFFLINE = "offline"
+    CONNECTING = "connecting"  # 正在连接中
     ONLINE = "online"
     ERROR = "error"
 
@@ -61,18 +62,86 @@ class Camera:
     def is_online(self) -> bool:
         return self._status == CameraStatus.ONLINE
     
-    def start(self) -> bool:
-        """启动摄像头"""
+    def start(self, blocking: bool = False) -> bool:
+        """启动摄像头
+        
+        Args:
+            blocking: 是否阻塞式启动，默认 False（异步启动）
+        
+        Returns:
+            bool: 阻塞模式返回是否成功，非阻塞模式返回 True（表示已开始连接）
+        """
         if self._running:
             return True
         
+        if blocking:
+            return self._connect_sync()
+        else:
+            # 异步启动：在后台线程中连接
+            self._status = CameraStatus.CONNECTING
+            self._running = True  # 标记为运行中，防止重复启动
+            connect_thread = threading.Thread(
+                target=self._connect_async, 
+                daemon=True,
+                name=f"Camera-Connect-{self.id}"
+            )
+            connect_thread.start()
+            self._logger.info(f"摄像头开始异步连接: {self.id} ({self.name})")
+            return True
+    
+    def _connect_sync(self) -> bool:
+        """同步连接摄像头（阻塞式）"""
+        try:
+            if not self._open_capture():
+                return False
+            
+            self._status = CameraStatus.ONLINE
+            
+            # 启动帧读取线程
+            self._thread = threading.Thread(target=self._read_frames, daemon=True)
+            self._thread.start()
+            
+            self._logger.info(f"摄像头已启动: {self.id} ({self.name})")
+            return True
+            
+        except Exception as e:
+            self._logger.error(f"启动摄像头失败: {self.id}, 错误: {e}")
+            self._status = CameraStatus.ERROR
+            return False
+    
+    def _connect_async(self):
+        """异步连接摄像头（在后台线程中执行）"""
+        try:
+            if self._open_capture():
+                self._status = CameraStatus.ONLINE
+                # 启动帧读取线程
+                self._thread = threading.Thread(target=self._read_frames, daemon=True)
+                self._thread.start()
+                self._logger.info(f"摄像头连接成功: {self.id} ({self.name})")
+            else:
+                self._running = False  # 连接失败，重置运行状态
+        except Exception as e:
+            self._logger.error(f"摄像头连接异常: {self.id}, 错误: {e}")
+            self._status = CameraStatus.ERROR
+            self._running = False
+    
+    def _open_capture(self) -> bool:
+        """打开视频捕获设备"""
         try:
             if self.type == "usb":
                 self._cap = cv2.VideoCapture(self.config.device)
             elif self.type == "rtsp":
                 url = self._build_rtsp_url()
-                # 使用 FFMPEG 后端并设置超时参数
-                self._cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+                # 使用 FFMPEG 后端，通过 URL 参数设置超时（FFmpeg 在创建时读取这些参数）
+                # stimeout: TCP 流超时（微秒），这里设置为 5 秒
+                # rtsp_transport=tcp: 使用 TCP 传输
+                if '?' in url:
+                    url_with_timeout = f"{url}&stimeout=5000000&rtsp_transport=tcp"
+                else:
+                    url_with_timeout = f"{url}?stimeout=5000000&rtsp_transport=tcp"
+                
+                self._cap = cv2.VideoCapture(url_with_timeout, cv2.CAP_FFMPEG)
+                # 备用：设置 OpenCV 超时属性（部分版本支持）
                 self._cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
                 self._cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
             else:
@@ -90,17 +159,10 @@ class Camera:
             self._cap.set(cv2.CAP_PROP_FPS, self.config.fps)
             
             self._running = True
-            self._status = CameraStatus.ONLINE
-            
-            # 启动帧读取线程
-            self._thread = threading.Thread(target=self._read_frames, daemon=True)
-            self._thread.start()
-            
-            self._logger.info(f"摄像头已启动: {self.id} ({self.name})")
             return True
             
         except Exception as e:
-            self._logger.error(f"启动摄像头失败: {self.id}, 错误: {e}")
+            self._logger.error(f"打开摄像头失败: {self.id}, 错误: {e}")
             self._status = CameraStatus.ERROR
             return False
     
@@ -145,15 +207,20 @@ class Camera:
             try:
                 if self._cap is None or not self._cap.isOpened():
                     # 尝试重连
-                    self._status = CameraStatus.OFFLINE
+                    self._status = CameraStatus.CONNECTING
                     
                     if self.type == "usb":
                         self._cap = cv2.VideoCapture(self.config.device)
                     elif self.type == "rtsp":
                         url = self._build_rtsp_url()
-                        # 使用 FFMPEG 后端并设置超时参数（单位：微秒，5秒超时）
-                        self._cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-                        # 设置连接超时
+                        # 使用 FFMPEG 后端，通过 URL 参数设置超时（5秒）
+                        if '?' in url:
+                            url_with_timeout = f"{url}&stimeout=5000000&rtsp_transport=tcp"
+                        else:
+                            url_with_timeout = f"{url}?stimeout=5000000&rtsp_transport=tcp"
+                        
+                        self._cap = cv2.VideoCapture(url_with_timeout, cv2.CAP_FFMPEG)
+                        # 备用：设置 OpenCV 超时属性
                         self._cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
                         self._cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
                     
@@ -162,8 +229,10 @@ class Camera:
                         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
                         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
                         self._cap.set(cv2.CAP_PROP_FPS, self.config.fps)
+                        self._status = CameraStatus.ONLINE
                         self._logger.info(f"摄像头已重连: {self.id}")
                     else:
+                        self._status = CameraStatus.OFFLINE
                         time.sleep(2.0)
                         continue
 
@@ -260,10 +329,17 @@ class CameraManager:
         """获取所有摄像头"""
         return list(self._cameras.values())
     
-    def start_all(self):
-        """启动所有摄像头"""
+    def start_all(self, blocking: bool = False):
+        """启动所有摄像头
+        
+        Args:
+            blocking: 是否阻塞式启动，默认 False（异步启动，不阻塞主线程）
+        """
         for camera in self._cameras.values():
-            camera.start()
+            camera.start(blocking=blocking)
+        
+        if not blocking:
+            self._logger.info(f"已启动 {len(self._cameras)} 个摄像头的异步连接")
     
     def stop_all(self):
         """停止所有摄像头"""
