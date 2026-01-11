@@ -349,7 +349,13 @@ class ZoneManager:
         """更新灶台状态"""
         sm = self._zones.get(zone_id)
         if sm:
-            is_fire_on = self._fire_states.get(zone_id, False)
+            # 从 serial_manager 获取实际的动火状态
+            try:
+                from ..serial_port.serial_manager import serial_manager
+                is_fire_on = serial_manager.is_fire_on(zone_id)
+            except Exception:
+                # 如果 serial_manager 不可用，使用缓存的状态
+                is_fire_on = self._fire_states.get(zone_id, False)
             return sm.update(has_person, is_fire_on, current_frame)
         return None
     

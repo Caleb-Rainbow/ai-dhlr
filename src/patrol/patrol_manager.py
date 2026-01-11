@@ -202,6 +202,7 @@ class PatrolManager:
     def _run_self_check(self):
         """执行设备自检（后台线程）"""
         from ..zone.state_machine import zone_manager
+        from ..serial_port.serial_manager import serial_manager
         
         zones = zone_manager.get_all_zones()
         if not zones:
@@ -272,7 +273,8 @@ class PatrolManager:
         for i, sm in enumerate(zones):
             zone_id = sm.zone.id
             zone_name = sm.zone.name
-            is_fire_on = zone_manager.get_fire_state(zone_id)
+            # 使用 serial_manager 获取实际的动火状态
+            is_fire_on = serial_manager.is_fire_on(zone_id)
             
             current_step += 1
             progress = int((current_step / total_steps) * 100)
@@ -297,7 +299,7 @@ class PatrolManager:
                 time.sleep(5)
                 
                 # 更新检测状态
-                is_fire_on = zone_manager.get_fire_state(zone_id)
+                is_fire_on = serial_manager.is_fire_on(zone_id)
                 if not is_fire_on:
                     # 播放"已关火"语音
                     audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_FIRE_OFF)
@@ -341,6 +343,7 @@ class PatrolManager:
         """执行报警演示（后台线程）"""
         from ..zone.state_machine import zone_manager
         from ..zone.models import ZoneState
+        from ..serial_port.serial_manager import serial_manager
         
         # 开启演示模式（屏蔽人形检测）
         self._demo_mode = True
@@ -356,7 +359,7 @@ class PatrolManager:
         demo_zone = None
         for sm in zones:
             zone_id = sm.zone.id
-            if zone_manager.get_fire_state(zone_id):
+            if serial_manager.is_fire_on(zone_id):
                 demo_zone = sm
                 break
         
@@ -487,6 +490,7 @@ class PatrolManager:
     def _run_force_cutoff(self):
         """执行强制切电"""
         from ..zone.state_machine import zone_manager
+        from ..serial_port.serial_manager import serial_manager
         
         self._update_progress(PatrolStep.FORCE_CUTOFF, 10, "正在触发所有区切电...")
         
@@ -504,8 +508,8 @@ class PatrolManager:
             if audio_path:
                 voice_player.play_file(audio_path)
             
-            # 执行切电
-            gpio_controller.cutoff(zone_id)
+            # 执行切电 - 使用 serial_manager 而不是 gpio_controller
+            serial_manager.cutoff(zone_id)
             
             self._add_result(zone_id, zone_name, "强制切电", "success", 
                            f"{zone_name}已切电")
