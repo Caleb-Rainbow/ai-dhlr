@@ -234,7 +234,7 @@ class SerialManager:
         function_code = response.function_code
         data = response.data
         
-        self._logger.debug(f"收到响应: addr={address}, func={function_code}, data={data.hex()}")
+        self._logger.info(f"收到响应: addr={address}, func={function_code}, data={data.hex()}")
         
         if function_code == 0x03:  # 读取响应
             if len(data) >= 2:
