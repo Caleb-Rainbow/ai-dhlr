@@ -28,6 +28,7 @@ from src.output.voice import voice_player
 from src.output.gpio import gpio_controller
 from src.api.server import create_app
 from src.api.websocket import sync_broadcast_state_change, sync_broadcast_alarm_event
+from src.patrol.patrol_manager import patrol_manager
 
 
 class FireSafetySystem:
@@ -416,7 +417,9 @@ class FireSafetySystem:
                         is_fire_on = zone_manager._fire_states.get(sm.zone.id, False)
                     
                     # 更新状态机（传递动火状态）
-                    sm.update(has_person, is_fire_on, frame)
+                    # 检查是否在巡检模式，如果是则跳过状态机更新
+                    if not patrol_manager.is_active:
+                        sm.update(has_person, is_fire_on, frame)
                 
                 # 控制检测频率
                 time.sleep(0.1)  # ~10 FPS
