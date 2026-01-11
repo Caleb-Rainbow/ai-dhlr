@@ -84,6 +84,13 @@ class SerialManager:
         # 元素为 'id' 或 'channel'，表示期待的响应类型
         self._lora_response_queue: list[str] = []
         
+        # 等待LoRa响应的Event（用于阻塞等待响应）
+        self._lora_response_event: Optional[asyncio.Event] = None
+        
+        # 等待电流响应的Event和当前等待的分区索引
+        self._current_response_event: Optional[asyncio.Event] = None
+        self._waiting_current_index: Optional[int] = None
+        
         # 配置
         self._enabled = True
         self._port = "/dev/ttyS3"
@@ -190,7 +197,7 @@ class SerialManager:
                     await asyncio.sleep(1)
                     continue
                 
-                # 轮询所有分区电流值
+                # 轮询所有分区电流值（顺序发送，等待每个响应）
                 with self._lock:
                     zones = list(self._zone_currents.values())
                 
@@ -198,14 +205,35 @@ class SerialManager:
                     if not self._running:
                         break
                     
-                    await self._helper.get_current(zone_info.serial_index)
-                    await asyncio.sleep(0.2)  # 命令间隔
+                    try:
+                        # 设置等待状态
+                        self._current_response_event = asyncio.Event()
+                        self._waiting_current_index = zone_info.serial_index
+                        
+                        # 发送获取电流命令
+                        await self._helper.get_current(zone_info.serial_index)
+                        
+                        # 等待响应，超时2秒
+                        try:
+                            await asyncio.wait_for(
+                                self._current_response_event.wait(), 
+                                timeout=2.0
+                            )
+                        except asyncio.TimeoutError:
+                            self._logger.warning(f"等待分区{zone_info.serial_index}电流响应超时")
+                        
+                    finally:
+                        self._current_response_event = None
+                        self._waiting_current_index = None
                     
                     # 检查是否可以进行电流复位判断
                     if zone_info.cutoff_time is not None:
                         elapsed = time.time() - zone_info.cutoff_time
                         if elapsed >= self._cutoff_reset_delay:
                             zone_info.can_check_reset = True
+                    
+                    # 短暂延迟确保设备准备好
+                    await asyncio.sleep(0.05)
                 
                 await asyncio.sleep(self._poll_interval)
                 
@@ -221,12 +249,40 @@ class SerialManager:
             asyncio.create_task(self._do_request_lora())
             
     async def _do_request_lora(self):
-        # 按发送顺序记录期待的响应类型
-        self._lora_response_queue.append('id')
-        await self._helper.get_lora_id()
-        await asyncio.sleep(0.3)
-        self._lora_response_queue.append('channel')
-        await self._helper.get_lora_channel()
+        """请求LoRa配置（顺序发送，等待每个响应）"""
+        try:
+            # 获取编号
+            self._lora_response_event = asyncio.Event()
+            self._lora_response_queue.append('id')
+            await self._helper.get_lora_id()
+            # 等待响应，超时3秒
+            try:
+                await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                self._logger.warning("等待LoRa编号响应超时")
+                # 清理队列中的待处理项
+                if self._lora_response_queue and self._lora_response_queue[0] == 'id':
+                    self._lora_response_queue.pop(0)
+            
+            # 等待一小段时间确保设备准备好
+            await asyncio.sleep(0.1)
+            
+            # 获取信道
+            self._lora_response_event = asyncio.Event()
+            self._lora_response_queue.append('channel')
+            await self._helper.get_lora_channel()
+            # 等待响应，超时3秒
+            try:
+                await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                self._logger.warning("等待LoRa信道响应超时")
+                if self._lora_response_queue and self._lora_response_queue[0] == 'channel':
+                    self._lora_response_queue.pop(0)
+                    
+        except Exception as e:
+            self._logger.error(f"请求LoRa配置失败: {e}")
+        finally:
+            self._lora_response_event = None
     
     def _on_data_received(self, response: SerialResponse):
         """处理串口响应 (Called from Loop)"""
@@ -253,6 +309,10 @@ class SerialManager:
                         self._lora_config.last_update = time.time()
                         self._logger.info(f"LoRa信道: {value}")
                     
+                    # 触发Event，通知等待的协程
+                    if self._lora_response_event:
+                        self._lora_response_event.set()
+                    
                 else:
                     self._update_current(address, value)
         
@@ -265,6 +325,11 @@ class SerialManager:
     def _update_current(self, address: int, value: int):
         """更新电流值"""
         serial_index = address - 0x01
+        
+        # 触发等待的Event
+        if (self._current_response_event and 
+            self._waiting_current_index == serial_index):
+            self._current_response_event.set()
         
         with self._lock:
             for zone_id, info in self._zone_currents.items():
@@ -415,12 +480,26 @@ class SerialManager:
         return False
 
     async def _async_set_lora_id(self, lora_id: int):
+        """异步设置LoRa编号（顺序发送，等待响应）"""
         if self._helper and self._helper.is_open:
-            await self._helper.set_lora_id(lora_id)
-            await asyncio.sleep(0.3)
-            # 记录期待的响应类型
-            self._lora_response_queue.append('id')
-            await self._helper.get_lora_id()
+            try:
+                # 发送设置命令
+                await self._helper.set_lora_id(lora_id)
+                await asyncio.sleep(0.3)
+                
+                # 发送读取命令确认
+                self._lora_response_event = asyncio.Event()
+                self._lora_response_queue.append('id')
+                await self._helper.get_lora_id()
+                
+                try:
+                    await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    self._logger.warning("等待LoRa编号确认响应超时")
+                    if self._lora_response_queue and self._lora_response_queue[0] == 'id':
+                        self._lora_response_queue.pop(0)
+            finally:
+                self._lora_response_event = None
 
     def set_lora_channel(self, channel: int) -> bool:
         """设置LoRa信道"""
@@ -433,12 +512,26 @@ class SerialManager:
         return False
 
     async def _async_set_lora_channel(self, channel: int):
+        """异步设置LoRa信道（顺序发送，等待响应）"""
         if self._helper and self._helper.is_open:
-            await self._helper.set_lora_channel(channel)
-            await asyncio.sleep(0.3)
-            # 记录期待的响应类型
-            self._lora_response_queue.append('channel')
-            await self._helper.get_lora_channel()
+            try:
+                # 发送设置命令
+                await self._helper.set_lora_channel(channel)
+                await asyncio.sleep(0.3)
+                
+                # 发送读取命令确认
+                self._lora_response_event = asyncio.Event()
+                self._lora_response_queue.append('channel')
+                await self._helper.get_lora_channel()
+                
+                try:
+                    await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    self._logger.warning("等待LoRa信道确认响应超时")
+                    if self._lora_response_queue and self._lora_response_queue[0] == 'channel':
+                        self._lora_response_queue.pop(0)
+            finally:
+                self._lora_response_event = None
 
     def update_serial_config(self, 
                              enabled: bool = None,
