@@ -581,23 +581,7 @@ class WSHandler:
     async def _get_status(self, params: dict) -> list:
         """获取所有灶台状态"""
         from ..zone.state_machine import zone_manager
-        
-        # 获取电流值
-        currents = {}
-        try:
-            from ..serial_port.serial_manager import serial_manager
-            currents = serial_manager.get_all_currents()
-        except Exception:
-            pass
-        
-        # 获取状态并添加电流值
-        statuses = zone_manager.get_all_status()
-        for status in statuses:
-            zone_id = status.get("id")
-            if zone_id:
-                status["current_value"] = currents.get(zone_id, 0)
-        
-        return statuses
+        return zone_manager.get_all_status()
     
     async def _get_device(self, params: dict) -> dict:
         """获取设备信息"""

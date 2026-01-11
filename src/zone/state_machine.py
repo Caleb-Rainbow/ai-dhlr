@@ -373,7 +373,22 @@ class ZoneManager:
     
     def get_all_status(self) -> List[dict]:
         """获取所有灶台状态"""
-        return [sm.get_status() for sm in self._zones.values()]
+        # 获取电流值
+        currents = {}
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            currents = serial_manager.get_all_currents()
+        except Exception:
+            pass
+            
+        result = []
+        for sm in self._zones.values():
+            status = sm.get_status()
+            # 注入实时电流值
+            status['current_value'] = currents.get(sm.zone.id, 0)
+            result.append(status)
+            
+        return result
     
     def initialize_from_config(self, zones: List[ZoneConfig],
                               on_warning: Callable = None,

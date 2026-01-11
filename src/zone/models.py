@@ -33,6 +33,7 @@ class Zone:
     warning_remaining: float = 0.0     # 到预警倒计时剩余（秒）
     alarm_remaining: float = 0.0       # 到报警倒计时剩余（秒）
     cutoff_remaining: float = 0.0      # 到切电倒计时剩余（秒）
+    current_value: float = 0.0         # 实时电流值（安培 x 100，或原始值）
     last_snapshot_path: Optional[str] = None  # 最后截图路径
     
     def to_dict(self) -> dict:
@@ -50,6 +51,7 @@ class Zone:
             "warning_remaining": round(self.warning_remaining, 1),
             "alarm_remaining": round(self.alarm_remaining, 1),
             "cutoff_remaining": round(self.cutoff_remaining, 1),
+            "current_value": self.current_value,
             "last_snapshot_path": self.last_snapshot_path
         }
     
