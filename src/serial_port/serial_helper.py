@@ -510,6 +510,7 @@ class SerialHelper:
     async def get_lora_id(self) -> bool:
         """发送获取LoRa编号命令"""
         command = self.build_get_lora_id_command()
+        self._logger.info(f"发送获取LoRa编号命令: {command.hex()}")
         return await self.send(command)
     
     async def set_lora_id(self, lora_id: int) -> bool:
@@ -520,6 +521,7 @@ class SerialHelper:
     async def get_lora_channel(self) -> bool:
         """发送获取LoRa信道命令"""
         command = self.build_get_lora_channel_command()
+        self._logger.info(f"发送获取LoRa信道命令: {command.hex()}")
         return await self.send(command)
     
     async def set_lora_channel(self, channel: int) -> bool:
