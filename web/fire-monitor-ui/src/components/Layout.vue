@@ -36,7 +36,7 @@ const navItems = [
     <div id="portal-target" class="fixed inset-0 pointer-events-none z-50 max-w-md mx-auto"></div>
 
     <!-- Bottom Nav -->
-    <nav class="h-16 glass-panel flex items-center justify-around fixed bottom-0 w-full max-w-md z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)]" style="isolation: isolate;">
+    <nav class="h-16 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] flex items-center justify-around fixed bottom-0 w-full max-w-md z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <RouterLink 
         v-for="item in navItems" 
         :key="item.name"

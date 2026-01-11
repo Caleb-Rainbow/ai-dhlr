@@ -99,7 +99,7 @@ onUnmounted(() => {
     <div class="sticky top-0 z-50 transition-all duration-500">
       <!-- Hyper-transparent glass with saturation boost -->
       <div
-        class="glass-panel backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between">
+        class="backdrop-blur-sm backdrop-saturate-150 bg-[var(--theme-glass-bg)] bg-white/[0.01] border border-[var(--theme-glass-border)] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between rounded-10 transition-all">
         <div>
           <h2 class="text-xl font-bold text-text-primary tracking-tight flex items-center gap-2">
             实时监控
@@ -114,11 +114,11 @@ onUnmounted(() => {
         </div>
         <div class="flex gap-2">
           <button @click="refreshStatus"
-            class="glass-button p-2.5 rounded-xl text-text-secondary active:scale-90 transition-transform">
+            class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] p-2.5 rounded-xl text-text-secondary active:scale-90 transition-all hover:bg-[var(--theme-bg-input-hover)]">
             <RefreshCcw class="w-4 h-4" />
           </button>
           <button @click="toggleFullscreen"
-            class="glass-button p-2.5 rounded-xl text-text-secondary active:scale-90 transition-transform">
+            class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] p-2.5 rounded-xl text-text-secondary active:scale-90 transition-all hover:bg-[var(--theme-bg-input-hover)]">
             <Maximize2 class="w-4 h-4" />
           </button>
         </div>
@@ -134,7 +134,7 @@ onUnmounted(() => {
 
       <!-- Empty State -->
       <div v-else-if="enabledZones.length === 0" key="empty"
-        class="flex flex-col items-center justify-center p-12 glass-panel rounded-2xl">
+        class="flex flex-col items-center justify-center p-12 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-2xl shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <div class="text-4xl mb-4 grayscale opacity-50">🍳</div>
         <p class="text-text-muted">暂无启用的灶台</p>
       </div>
@@ -143,7 +143,7 @@ onUnmounted(() => {
       <div v-else key="content" class="grid grid-cols-2 gap-3">
         <TransitionGroup name="card">
           <div v-for="(zone, index) in enabledZones" :key="zone.id"
-            class="glass-panel rounded-3xl p-4 relative overflow-hidden group transition-all duration-300 hover:border-white/10 hover-lift"
+            class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-4 relative overflow-hidden group transition-all duration-300 hover:border-white/10 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
             :class="[
               { 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.2)]': ['alarm', 'cutoff'].includes(zone.state) },
               { 'border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]': zone.state === 'warning' },
@@ -226,7 +226,7 @@ onUnmounted(() => {
 
     <!-- Performance Panel with Animation -->
     <Transition name="fade" mode="out-in">
-      <div v-if="performance" key="perf" class="glass-panel p-5 rounded-3xl space-y-4">
+      <div v-if="performance" key="perf" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <h3 class="flex items-center gap-2 text-xs font-bold text-text-muted uppercase tracking-wider">
           <Activity class="w-3.5 h-3.5" /> 性能监控
         </h3>

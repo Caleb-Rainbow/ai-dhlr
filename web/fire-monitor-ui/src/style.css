@@ -29,8 +29,8 @@
   --theme-border-hover: rgba(255, 255, 255, 0.1);
   --theme-border-input: rgba(255, 255, 255, 0.1);
   --theme-shadow: rgba(0, 0, 0, 0.3);
-  --glass-bg: rgba(25, 25, 25, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.1);
+  --theme-glass-bg: rgba(25, 25, 25, 0.7);
+  --theme-glass-border: rgba(255, 255, 255, 0.1);
   --theme-overlay: rgba(0, 0, 0, 0.8);
   --theme-select-bg: #18181b;
 }
@@ -79,34 +79,7 @@
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* ========================================
-   Glassmorphism Utilities
-   ======================================== */
 
-.glass-panel {
-  background: var(--theme-glass-bg);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  border: 1px solid var(--theme-glass-border);
-  box-shadow: 0 8px 32px var(--theme-shadow);
-  border-radius: 10px;
-}
-
-.glass-button {
-  background: var(--theme-bg-input);
-  border: 1px solid var(--theme-border-input);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  transition: all 0.2s ease;
-}
-
-.glass-button:hover {
-  background: var(--theme-bg-input-hover);
-}
-
-.glass-button:active {
-  transform: scale(0.95);
-}
 
 /* ========================================
    Text Effects

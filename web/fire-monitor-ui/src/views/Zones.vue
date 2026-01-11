@@ -500,7 +500,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="zones.length === 0" key="empty" class="flex flex-col items-center justify-center p-12 glass-panel rounded-2xl">
+      <div v-else-if="zones.length === 0" key="empty" class="flex flex-col items-center justify-center p-12 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-2xl shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <div class="text-4xl mb-4 grayscale opacity-50">🔥</div>
         <p class="text-text-muted">暂无灶台配置</p>
       </div>
@@ -509,7 +509,7 @@ onUnmounted(() => {
       <div v-else key="content" class="space-y-4">
         <TransitionGroup name="list" tag="div" class="space-y-4 relative">
           <div v-for="(zone, index) in zones" :key="zone.id" 
-            class="glass-panel p-5 rounded-3xl flex items-center justify-between group transition-all hover:border-white/20 hover-lift"
+            class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl flex items-center justify-between group transition-all hover:border-white/20 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
             :style="{ animationDelay: `${index * 0.05}s` }"
           >
             

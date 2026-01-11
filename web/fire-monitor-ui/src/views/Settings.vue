@@ -344,7 +344,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Network Status - 网络状态 -->
-    <div class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 animate-fade-in-up shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <component :is="networkIcon" class="w-4 h-4" /> 网络状态
         <button @click="refreshNetwork" class="ml-auto p-1 rounded-lg hover:bg-white/10 transition-colors">
@@ -383,7 +383,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Remote Server Config - 远程服务器配置 -->
-    <div class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Server class="w-4 h-4" /> 远程服务器
         <div class="ml-auto flex items-center gap-2">
@@ -494,7 +494,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Serial Port Config - 串口配置 -->
-    <div v-if="!loading" class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Server class="w-4 h-4" /> 串口配置
         <span v-if="serialConfig.is_open" class="text-xs text-success ml-auto">已连接</span>
@@ -603,7 +603,7 @@ onUnmounted(() => {
     </div>
 
     <!-- LoRa Config - LoRa配置 -->
-    <div v-if="!loading" class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Wifi class="w-4 h-4" /> LoRa 配置
       </h3>
@@ -634,7 +634,7 @@ onUnmounted(() => {
 
 
     <!-- Theme Settings -->
-    <div class="glass-panel p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Palette class="w-4 h-4" /> 外观设置
       </h3>
@@ -674,7 +674,7 @@ onUnmounted(() => {
 
     <!-- System Info -->
     <Transition name="fade" mode="out-in">
-      <div v-if="loading" key="loading" class="glass-panel p-5 rounded-3xl space-y-4">
+      <div v-if="loading" key="loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Info class="w-4 h-4" /> 设备信息
         </h3>
@@ -692,7 +692,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-else-if="deviceInfo" key="content" class="glass-panel p-5 rounded-3xl space-y-4">
+      <div v-else-if="deviceInfo" key="content" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Info class="w-4 h-4" /> 设备信息
         </h3>
@@ -747,7 +747,7 @@ onUnmounted(() => {
 
     <!-- Alarm Thresholds -->
     <Transition name="fade" mode="out-in">
-      <div v-if="!loading" class="glass-panel p-5 rounded-3xl space-y-4">
+      <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <ShieldAlert class="w-4 h-4" /> 报警阈值 (秒)
         </h3>
@@ -776,7 +776,7 @@ onUnmounted(() => {
 
     <!-- Voice Settings -->
     <Transition name="fade" mode="out-in">
-      <div v-if="!loading" class="glass-panel p-5 rounded-3xl space-y-4">
+      <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Volume2 class="w-4 h-4" /> 语音播报
         </h3>

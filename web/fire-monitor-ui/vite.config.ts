@@ -32,6 +32,8 @@ export default defineConfig({
   },
   // 构建配置
   build: {
+    // 设置构建目标为现代浏览器，确保backdrop-filter等新特性不会被移除
+    target: 'esnext',
     // 每次构建生成新的文件名哈希
     rollupOptions: {
       output: {

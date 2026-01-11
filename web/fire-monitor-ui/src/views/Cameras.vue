@@ -182,7 +182,7 @@ onUnmounted(() => {
       <div v-else key="content" class="space-y-4">
         <TransitionGroup name="list" tag="div" class="space-y-4 relative">
           <div v-for="(cam, index) in cameras" :key="cam.id" 
-            class="glass-panel p-4 rounded-2xl flex items-center gap-4 transition-all hover:border-white/20 hover-lift"
+            class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-4 rounded-2xl flex items-center gap-4 transition-all hover:border-white/20 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
             :style="{ animationDelay: `${index * 0.05}s` }"
           >
             

@@ -183,7 +183,7 @@ onUnmounted(() => {
   <div class="space-y-6 pb-24">
     <!-- Header -->
     <div class="sticky top-0 z-50 transition-all duration-500">
-      <div class="glass-panel backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between">
+      <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between rounded-10 transition-all">
         <div>
           <h2 class="text-xl font-bold text-text-primary tracking-tight flex items-center gap-2">
             设备巡检
@@ -212,7 +212,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 功能区 -->
-    <div class="glass-panel rounded-3xl p-5 space-y-4">
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
         <SearchCheck class="w-4 h-4" /> 巡检功能
       </h3>
@@ -240,7 +240,7 @@ onUnmounted(() => {
         <button
           @click="selfCheck"
           :disabled="!isActive || loading !== null || isBusy"
-          class="py-4 rounded-xl font-bold text-sm transition-all active:scale-95 glass-button disabled:opacity-50 flex flex-col items-center gap-2">
+          class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] py-4 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center gap-2 hover:bg-[var(--theme-bg-input-hover)]">
           <SearchCheck class="w-5 h-5 text-blue-400" />
           <span>设备自检</span>
         </button>
@@ -248,7 +248,7 @@ onUnmounted(() => {
         <button
           @click="alarmDemo"
           :disabled="!isActive || loading !== null || isBusy"
-          class="py-4 rounded-xl font-bold text-sm transition-all active:scale-95 glass-button disabled:opacity-50 flex flex-col items-center gap-2">
+          class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] py-4 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center gap-2 hover:bg-[var(--theme-bg-input-hover)]">
           <Bell class="w-5 h-5 text-purple-400" />
           <span>报警演示</span>
         </button>
@@ -287,7 +287,7 @@ onUnmounted(() => {
 
     <!-- 进度显示 -->
     <Transition name="fade" mode="out-in">
-      <div v-if="isActive && isBusy" class="glass-panel rounded-3xl p-5 space-y-4">
+      <div v-if="isActive && isBusy" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <div class="flex items-center justify-between">
           <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
             <Clock class="w-4 h-4 animate-spin" /> 执行中
@@ -311,7 +311,7 @@ onUnmounted(() => {
     </Transition>
 
     <!-- 结果区域 -->
-    <div class="glass-panel rounded-3xl p-5 space-y-4">
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
         <CheckCircle class="w-4 h-4" /> 巡检结果
       </h3>

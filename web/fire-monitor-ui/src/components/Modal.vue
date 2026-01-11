@@ -38,7 +38,7 @@ watch(() => props.isOpen, (newVal) => {
           
           <!-- Modal Content -->
           <Transition name="modal-content" appear>
-            <div class="relative glass-panel w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl">
+            <div class="relative backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl">
                 <!-- Header -->
                 <div class="px-6 py-4 border-b border-white/5 flex justify-between items-center">
                     <h3 class="text-lg font-bold text-text-primary tracking-wide">{{ title }}</h3>

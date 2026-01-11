@@ -94,7 +94,7 @@ onMounted(async () => {
           <div class="skeleton h-12 rounded-2xl"></div>
           <div class="skeleton w-12 h-12 rounded-2xl"></div>
         </div>
-        <div class="flex-1 glass-panel rounded-3xl overflow-hidden">
+        <div class="flex-1 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl overflow-hidden shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
           <div class="px-4 py-3 border-b" style="border-color: var(--theme-border-input);">
             <div class="skeleton h-4 w-32"></div>
           </div>
@@ -128,7 +128,7 @@ onMounted(async () => {
         </div>
 
         <!-- Log Viewer Content -->
-        <div class="flex-1 glass-panel rounded-3xl overflow-hidden flex flex-col shadow-2xl min-h-0">
+        <div class="flex-1 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl overflow-hidden flex flex-col shadow-2xl shadow-[0_8px_32px_var(--theme-shadow)] min-h-0 transition-all">
            <div class="px-4 py-3 border-b flex justify-between items-center" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
               <div class="flex items-center gap-2 overflow-hidden">
                  <Transition name="pop" mode="out-in">
