@@ -1,16 +1,44 @@
 """
 串口业务管理器
 负责维护各分区电流值、动火状态判断和LoRa配置
+
+重要设计：
+- 所有串口命令通过全局队列依次执行
+- 严格按照 发送->回复->发送->回复 的顺序处理
+- 避免并发发送导致嵌入式设备无法处理
 """
 import asyncio
 import threading
 import time
 from typing import Dict, Optional, Callable, Any
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from concurrent.futures import Future
 
 from .serial_helper import SerialHelper, SerialResponse
 from ..utils.logger import get_logger
+
+
+class CommandType(Enum):
+    """串口命令类型"""
+    GET_CURRENT = auto()       # 获取电流
+    SET_RELAY = auto()         # 切电
+    RESET_RELAY = auto()       # 复位继电器
+    GET_LORA_ID = auto()       # 获取LoRa编号
+    SET_LORA_ID = auto()       # 设置LoRa编号
+    GET_LORA_CHANNEL = auto()  # 获取LoRa信道
+    SET_LORA_CHANNEL = auto()  # 设置LoRa信道
+
+
+@dataclass
+class SerialCommand:
+    """串口命令"""
+    type: CommandType           # 命令类型
+    index: Optional[int] = None # 分区索引（用于电流/继电器命令）
+    value: Optional[int] = None # 值（用于设置命令）
+    zone_id: Optional[str] = None  # 灶台ID（用于日志）
+    future: Optional[asyncio.Future] = None  # 用于等待命令完成
+    expect_response: bool = True  # 是否期待响应（写命令也有响应）
 
 
 @dataclass
@@ -42,9 +70,14 @@ class SerialManager:
     
     职责：
     - 管理串口连接（在独立线程的EventLoop中运行）
+    - 通过全局命令队列依次执行所有串口操作
     - 周期性轮询电流值
     - 维护各分区电流和动火状态
     - 管理LoRa配置
+    
+    重要设计：
+    - 所有串口命令（电流查询、切电、LoRa配置等）都通过命令队列依次执行
+    - 严格保证 发送->回复->发送->回复 的顺序
     """
     
     _instance: Optional['SerialManager'] = None
@@ -80,16 +113,11 @@ class SerialManager:
         # 电流值更新回调
         self._on_current_update: Optional[Callable[[str, int, bool], None]] = None
         
-        # 等待LoRa响应的队列 (FIFO)
-        # 元素为 'id' 或 'channel'，表示期待的响应类型
-        self._lora_response_queue: list[str] = []
-        
-        # 等待LoRa响应的Event（用于阻塞等待响应）
-        self._lora_response_event: Optional[asyncio.Event] = None
-        
-        # 等待电流响应的Event和当前等待的分区索引
-        self._current_response_event: Optional[asyncio.Event] = None
-        self._waiting_current_index: Optional[int] = None
+        # ==================== 全局命令队列 ====================
+        # 所有串口命令都通过这个队列依次执行
+        self._command_queue: asyncio.Queue = None  # 在EventLoop中初始化
+        self._current_command: Optional[SerialCommand] = None  # 当前正在执行的命令
+        self._response_event: Optional[asyncio.Event] = None  # 等待响应的事件
         
         # 配置
         self._enabled = True
@@ -128,7 +156,7 @@ class SerialManager:
         while self._loop is None:
             time.sleep(0.01)
             
-        # 在Loop中初始化Helper
+        # 在Loop中初始化Helper和命令队列
         asyncio.run_coroutine_threadsafe(self._init_helper(), self._loop)
         
         self._logger.info(f"串口管理器初始化完成: {port} @ {baudrate}")
@@ -143,14 +171,151 @@ class SerialManager:
     
     async def _init_helper(self):
         """初始化Helper (运行在Loop中)"""
+        # 初始化命令队列
+        self._command_queue = asyncio.Queue()
+        
         self._helper = SerialHelper(self._port, self._baudrate)
         self._helper.set_on_data_received(self._on_data_received)
         
         if await self._helper.open():
+            # 启动命令处理器任务
+            asyncio.create_task(self._command_processor())
             # 启动轮询任务
             asyncio.create_task(self._poll_loop())
         else:
             self._logger.warning("串口打开失败(Async)")
+    
+    async def _command_processor(self):
+        """
+        命令处理器 - 核心任务
+        
+        从队列中取出命令，依次执行，等待响应后再处理下一个命令。
+        确保所有串口操作严格按顺序执行。
+        """
+        self._logger.info("串口命令处理器已启动")
+        
+        while self._running:
+            try:
+                # 从队列获取命令（阻塞等待）
+                command = await self._command_queue.get()
+                self._current_command = command
+                
+                if not self._helper or not self._helper.is_open:
+                    self._logger.warning("串口未打开，跳过命令")
+                    if command.future and not command.future.done():
+                        command.future.set_result(False)
+                    continue
+                
+                # 创建响应等待事件
+                self._response_event = asyncio.Event()
+                
+                # 发送命令
+                success = await self._send_command(command)
+                
+                if success and command.expect_response:
+                    # 等待响应，超时时间根据命令类型不同
+                    timeout = self._get_command_timeout(command)
+                    try:
+                        await asyncio.wait_for(
+                            self._response_event.wait(),
+                            timeout=timeout
+                        )
+                    except asyncio.TimeoutError:
+                        self._logger.warning(f"命令响应超时: {command.type.name}")
+                
+                # 命令完成
+                if command.future and not command.future.done():
+                    command.future.set_result(success)
+                
+                # 短暂延迟，确保设备准备好接收下一个命令
+                await asyncio.sleep(0.05)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self._logger.error(f"命令处理器错误: {e}")
+            finally:
+                self._current_command = None
+                self._response_event = None
+                self._command_queue.task_done()
+        
+        self._logger.info("串口命令处理器已停止")
+    
+    def _get_command_timeout(self, command: SerialCommand) -> float:
+        """根据命令类型获取超时时间"""
+        if command.type in [CommandType.GET_LORA_ID, CommandType.SET_LORA_ID,
+                            CommandType.GET_LORA_CHANNEL, CommandType.SET_LORA_CHANNEL]:
+            return 3.0  # LoRa命令超时较长
+        else:
+            return 0.5  # 普通命令超时较短
+    
+    async def _send_command(self, command: SerialCommand) -> bool:
+        """发送命令到串口"""
+        try:
+            if command.type == CommandType.GET_CURRENT:
+                return await self._helper.get_current(command.index)
+            
+            elif command.type == CommandType.SET_RELAY:
+                return await self._helper.set_relay(command.index)
+            
+            elif command.type == CommandType.RESET_RELAY:
+                return await self._helper.reset_relay(command.index)
+            
+            elif command.type == CommandType.GET_LORA_ID:
+                return await self._helper.get_lora_id()
+            
+            elif command.type == CommandType.SET_LORA_ID:
+                return await self._helper.set_lora_id(command.value)
+            
+            elif command.type == CommandType.GET_LORA_CHANNEL:
+                return await self._helper.get_lora_channel()
+            
+            elif command.type == CommandType.SET_LORA_CHANNEL:
+                return await self._helper.set_lora_channel(command.value)
+            
+            else:
+                self._logger.warning(f"未知命令类型: {command.type}")
+                return False
+                
+        except Exception as e:
+            self._logger.error(f"发送命令失败: {e}")
+            return False
+    
+    async def _enqueue_command(self, command: SerialCommand) -> bool:
+        """
+        将命令加入队列
+        
+        Args:
+            command: 要执行的命令
+            
+        Returns:
+            命令是否成功加入队列
+        """
+        if self._command_queue is None:
+            self._logger.warning("命令队列未初始化")
+            return False
+        
+        await self._command_queue.put(command)
+        return True
+    
+    def _enqueue_command_sync(self, command: SerialCommand) -> bool:
+        """
+        同步方式将命令加入队列（从外部线程调用）
+        
+        Args:
+            command: 要执行的命令
+            
+        Returns:
+            命令是否成功提交
+        """
+        if self._loop is None or self._command_queue is None:
+            return False
+        
+        asyncio.run_coroutine_threadsafe(
+            self._command_queue.put(command),
+            self._loop
+        )
+        return True
     
     def register_zone(self, zone_id: str, serial_index: int, fire_threshold: int):
         """注册分区"""
@@ -187,9 +352,9 @@ class SerialManager:
         """轮询循环 (Async Task)"""
         self._logger.info("串口轮询任务已启动")
         
-        # 初始获取LoRa配置（等待完成后再开始轮询）
+        # 初始获取LoRa配置
         await asyncio.sleep(0.5)
-        await self._do_request_lora()
+        await self._request_lora_internal()
         
         while self._running:
             try:
@@ -197,7 +362,7 @@ class SerialManager:
                     await asyncio.sleep(1)
                     continue
                 
-                # 轮询所有分区电流值（顺序发送，等待每个响应）
+                # 轮询所有分区电流值（通过命令队列依次执行）
                 with self._lock:
                     zones = list(self._zone_currents.values())
                 
@@ -205,35 +370,23 @@ class SerialManager:
                     if not self._running:
                         break
                     
-                    try:
-                        # 设置等待状态
-                        self._current_response_event = asyncio.Event()
-                        self._waiting_current_index = zone_info.serial_index
-                        
-                        # 发送获取电流命令
-                        await self._helper.get_current(zone_info.serial_index)
-                        
-                        # 等待响应，超时0.5秒（正常设备通常在100ms内响应）
-                        try:
-                            await asyncio.wait_for(
-                                self._current_response_event.wait(), 
-                                timeout=0.5
-                            )
-                        except asyncio.TimeoutError:
-                            self._logger.warning(f"等待分区{zone_info.serial_index}电流响应超时")
-                        
-                    finally:
-                        self._current_response_event = None
-                        self._waiting_current_index = None
+                    # 创建获取电流命令并加入队列
+                    command = SerialCommand(
+                        type=CommandType.GET_CURRENT,
+                        index=zone_info.serial_index,
+                        zone_id=zone_info.zone_id,
+                        expect_response=True
+                    )
+                    await self._enqueue_command(command)
                     
                     # 检查是否可以进行电流复位判断
                     if zone_info.cutoff_time is not None:
                         elapsed = time.time() - zone_info.cutoff_time
                         if elapsed >= self._cutoff_reset_delay:
                             zone_info.can_check_reset = True
-                    
-                    # 短暂延迟确保设备准备好
-                    await asyncio.sleep(0.05)
+                
+                # 等待队列中的所有命令完成
+                await self._command_queue.join()
                 
                 await asyncio.sleep(self._poll_interval)
                 
@@ -243,46 +396,23 @@ class SerialManager:
         
         self._logger.info("串口轮询任务已停止")
     
+    async def _request_lora_internal(self):
+        """请求LoRa配置（内部使用，通过命令队列）"""
+        # 获取编号
+        cmd1 = SerialCommand(type=CommandType.GET_LORA_ID, expect_response=True)
+        await self._enqueue_command(cmd1)
+        
+        # 等待一下
+        await asyncio.sleep(0.1)
+        
+        # 获取信道
+        cmd2 = SerialCommand(type=CommandType.GET_LORA_CHANNEL, expect_response=True)
+        await self._enqueue_command(cmd2)
+    
     async def request_lora_config(self):
-        """请求LoRa配置（供外部调用，顺序执行）"""
+        """请求LoRa配置（供外部调用）"""
         if self._helper and self._helper.is_open:
-            await self._do_request_lora()
-            
-    async def _do_request_lora(self):
-        """请求LoRa配置（顺序发送，等待每个响应）"""
-        try:
-            # 获取编号
-            self._lora_response_event = asyncio.Event()
-            self._lora_response_queue.append('id')
-            await self._helper.get_lora_id()
-            # 等待响应，超时3秒
-            try:
-                await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                self._logger.warning("等待LoRa编号响应超时")
-                # 清理队列中的待处理项
-                if self._lora_response_queue and self._lora_response_queue[0] == 'id':
-                    self._lora_response_queue.pop(0)
-            
-            # 等待一小段时间确保设备准备好
-            await asyncio.sleep(0.1)
-            
-            # 获取信道
-            self._lora_response_event = asyncio.Event()
-            self._lora_response_queue.append('channel')
-            await self._helper.get_lora_channel()
-            # 等待响应，超时3秒
-            try:
-                await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                self._logger.warning("等待LoRa信道响应超时")
-                if self._lora_response_queue and self._lora_response_queue[0] == 'channel':
-                    self._lora_response_queue.pop(0)
-                    
-        except Exception as e:
-            self._logger.error(f"请求LoRa配置失败: {e}")
-        finally:
-            self._lora_response_event = None
+            await self._request_lora_internal()
     
     def _on_data_received(self, response: SerialResponse):
         """处理串口响应 (Called from Loop)"""
@@ -290,30 +420,31 @@ class SerialManager:
         function_code = response.function_code
         data = response.data
         
-        #self._logger.info(f"收到响应: addr={address}, func={function_code}, data={data.hex()}, raw={response.raw.hex()}")
+        current_cmd = self._current_command
         
         if function_code == 0x03:  # 读取响应
             if len(data) >= 2:
                 value = (data[0] << 8) | data[1]
                 
-                # 检查是否有等待的LoRa响应
-                if address == 0x01 and self._lora_response_queue:
-                    # 按FIFO顺序取出期待的响应类型
-                    expected_type = self._lora_response_queue.pop(0)
-                    if expected_type == 'id':
+                # 根据当前命令类型处理响应
+                if current_cmd:
+                    if current_cmd.type == CommandType.GET_LORA_ID:
                         self._lora_config.id = value
                         self._lora_config.last_update = time.time()
                         self._logger.info(f"LoRa编号: {value}")
-                    elif expected_type == 'channel':
+                    elif current_cmd.type == CommandType.GET_LORA_CHANNEL:
                         self._lora_config.channel = value
                         self._lora_config.last_update = time.time()
                         self._logger.info(f"LoRa信道: {value}")
-                    
-                    # 触发Event，通知等待的协程
-                    if self._lora_response_event:
-                        self._lora_response_event.set()
-                    
+                    elif current_cmd.type == CommandType.GET_CURRENT:
+                        self._update_current(address, value)
+                    else:
+                        # 可能是设置LoRa后的读取确认
+                        if address == 0x01:
+                            # 根据上下文判断是ID还是Channel
+                            pass
                 else:
+                    # 没有当前命令，尝试通过地址判断
                     self._update_current(address, value)
         
         elif function_code == 0x05:
@@ -321,15 +452,14 @@ class SerialManager:
         
         elif function_code == 0x06:
             self._logger.info(f"寄存器写入成功: addr={address}")
+        
+        # 触发响应事件，通知命令处理器
+        if self._response_event:
+            self._response_event.set()
     
     def _update_current(self, address: int, value: int):
         """更新电流值"""
         serial_index = address - 0x01
-        
-        # 触发等待的Event
-        if (self._current_response_event and 
-            self._waiting_current_index == serial_index):
-            self._current_response_event.set()
         
         with self._lock:
             for zone_id, info in self._zone_currents.items():
@@ -345,7 +475,6 @@ class SerialManager:
                     
                     if self._on_current_update:
                         try:
-                            # 回调可能需要在Loop外执行? 暂时直接执行
                             self._on_current_update(zone_id, value, info.is_fire_on)
                         except Exception as e:
                             self._logger.error(f"电流更新回调错误: {e}")
@@ -409,10 +538,13 @@ class SerialManager:
     def get_serial_config(self) -> Dict:
         is_open = False
         debug_hex = False
+        queue_size = 0
         # thread-safe check
         if self._helper:
             is_open = self._helper.is_open
             debug_hex = self._helper.get_debug_hex()
+        if self._command_queue:
+            queue_size = self._command_queue.qsize()
             
         return {
             "enabled": self._enabled,
@@ -420,7 +552,8 @@ class SerialManager:
             "baudrate": self._baudrate,
             "poll_interval": self._poll_interval,
             "is_open": is_open,
-            "debug_hex": debug_hex
+            "debug_hex": debug_hex,
+            "queue_size": queue_size  # 新增：队列中等待的命令数
         }
     
     def set_debug_hex(self, enabled: bool) -> bool:
@@ -444,10 +577,14 @@ class SerialManager:
             return self._helper.get_debug_hex()
         return False
 
-    # ==================== 控制接口 (支持Sync/Async调用) ====================
+    # ==================== 控制接口 (通过命令队列执行) ====================
     
     def cutoff(self, zone_id: str) -> bool:
-        """执行切电 (Sync, Non-blocking)"""
+        """
+        执行切电 (Sync, Non-blocking)
+        
+        切电操作通过命令队列执行，保证与其他串口操作顺序执行。
+        """
         with self._lock:
             if zone_id not in self._zone_currents:
                 return False
@@ -455,90 +592,100 @@ class SerialManager:
             info.cutoff_time = time.time()
             info.can_check_reset = False
             serial_index = info.serial_index
-            
-        if self._loop and self._helper:
-             asyncio.run_coroutine_threadsafe(
-                 self._do_cutoff(serial_index, zone_id), 
-                 self._loop
-             )
-             return True
-        return False
         
-    async def _do_cutoff(self, serial_index: int, zone_id: str):
-        """执行切电操作：先发送切电命令(FF)，延时后发送还原命令(00)"""
-        if self._helper and self._helper.is_open:
-            # 发送切电命令 (FF)
-            await self._helper.set_relay(serial_index)
-            self._logger.info(f"[{zone_id}] 发送切电命令")
-            
-            # 延时 100ms 后发送还原命令 (00)
-            await asyncio.sleep(0.1)
-            await self._helper.reset_relay(serial_index)
-            self._logger.info(f"[{zone_id}] 发送还原命令")
+        # 将切电和复位命令加入队列
+        if self._loop and self._command_queue is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._enqueue_cutoff_commands(serial_index, zone_id),
+                self._loop
+            )
+            return True
+        return False
+    
+    async def _enqueue_cutoff_commands(self, serial_index: int, zone_id: str):
+        """将切电和复位命令加入队列"""
+        # 切电命令
+        cmd1 = SerialCommand(
+            type=CommandType.SET_RELAY,
+            index=serial_index,
+            zone_id=zone_id,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd1)
+        self._logger.info(f"[{zone_id}] 切电命令已加入队列")
+        
+        # 等待100ms后发送复位命令
+        await asyncio.sleep(0.1)
+        
+        # 复位命令
+        cmd2 = SerialCommand(
+            type=CommandType.RESET_RELAY,
+            index=serial_index,
+            zone_id=zone_id,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd2)
+        self._logger.info(f"[{zone_id}] 复位命令已加入队列")
 
     def set_lora_id(self, lora_id: int) -> bool:
-        """设置LoRa编号 (Sync return, performs async action)"""
-        if self._loop and self._helper:
+        """设置LoRa编号 (通过命令队列执行)"""
+        if self._loop and self._command_queue is not None:
             asyncio.run_coroutine_threadsafe(
-                self._async_set_lora_id(lora_id),
+                self._enqueue_set_lora_id(lora_id),
                 self._loop
             )
             return True
         return False
 
-    async def _async_set_lora_id(self, lora_id: int):
-        """异步设置LoRa编号（顺序发送，等待响应）"""
-        if self._helper and self._helper.is_open:
-            try:
-                # 发送设置命令
-                await self._helper.set_lora_id(lora_id)
-                await asyncio.sleep(0.3)
-                
-                # 发送读取命令确认
-                self._lora_response_event = asyncio.Event()
-                self._lora_response_queue.append('id')
-                await self._helper.get_lora_id()
-                
-                try:
-                    await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    self._logger.warning("等待LoRa编号确认响应超时")
-                    if self._lora_response_queue and self._lora_response_queue[0] == 'id':
-                        self._lora_response_queue.pop(0)
-            finally:
-                self._lora_response_event = None
+    async def _enqueue_set_lora_id(self, lora_id: int):
+        """将设置LoRa编号命令加入队列"""
+        # 设置命令
+        cmd1 = SerialCommand(
+            type=CommandType.SET_LORA_ID,
+            value=lora_id,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd1)
+        
+        # 等待一下再读取确认
+        await asyncio.sleep(0.3)
+        
+        # 读取确认
+        cmd2 = SerialCommand(
+            type=CommandType.GET_LORA_ID,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd2)
 
     def set_lora_channel(self, channel: int) -> bool:
-        """设置LoRa信道"""
-        if self._loop and self._helper:
+        """设置LoRa信道 (通过命令队列执行)"""
+        if self._loop and self._command_queue is not None:
             asyncio.run_coroutine_threadsafe(
-                self._async_set_lora_channel(channel),
+                self._enqueue_set_lora_channel(channel),
                 self._loop
             )
             return True
         return False
 
-    async def _async_set_lora_channel(self, channel: int):
-        """异步设置LoRa信道（顺序发送，等待响应）"""
-        if self._helper and self._helper.is_open:
-            try:
-                # 发送设置命令
-                await self._helper.set_lora_channel(channel)
-                await asyncio.sleep(0.3)
-                
-                # 发送读取命令确认
-                self._lora_response_event = asyncio.Event()
-                self._lora_response_queue.append('channel')
-                await self._helper.get_lora_channel()
-                
-                try:
-                    await asyncio.wait_for(self._lora_response_event.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    self._logger.warning("等待LoRa信道确认响应超时")
-                    if self._lora_response_queue and self._lora_response_queue[0] == 'channel':
-                        self._lora_response_queue.pop(0)
-            finally:
-                self._lora_response_event = None
+    async def _enqueue_set_lora_channel(self, channel: int):
+        """将设置LoRa信道命令加入队列"""
+        # 设置命令
+        cmd1 = SerialCommand(
+            type=CommandType.SET_LORA_CHANNEL,
+            value=channel,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd1)
+        
+        # 等待一下再读取确认
+        await asyncio.sleep(0.3)
+        
+        # 读取确认
+        cmd2 = SerialCommand(
+            type=CommandType.GET_LORA_CHANNEL,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd2)
 
     def update_serial_config(self, 
                              enabled: bool = None,
@@ -579,11 +726,9 @@ class SerialManager:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         
+        self._command_queue = None
         self._logger.info("串口管理器已停止")
 
 
 # 全局串口管理器实例
 serial_manager = SerialManager()
-
-
-
