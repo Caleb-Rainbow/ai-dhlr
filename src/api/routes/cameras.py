@@ -16,7 +16,7 @@ router = APIRouter(prefix="/cameras", tags=["cameras"])
 
 class CameraAddRequest(BaseModel):
     """添加摄像头请求"""
-    id: str
+    id: Optional[str] = None
     name: str
     type: str = "rtsp"  # usb 或 rtsp
     device: Optional[int] = None
@@ -30,8 +30,10 @@ class CameraAddRequest(BaseModel):
     @field_validator('id')
     @classmethod
     def validate_id(cls, v):
-        if not v or not v.strip():
-            raise ValueError('摄像头ID不能为空')
+        if v is None:
+            return None
+        if not v.strip():
+            return None
         # 检查ID格式
         v = v.strip()
         if len(v) > 50:
@@ -125,7 +127,7 @@ async def add_camera(request: CameraAddRequest):
     添加摄像头
     
     请求参数:
-    - id: 摄像头唯一ID（必填）
+    - id: 摄像头唯一ID（可选，未填则自动生成）
     - name: 摄像头名称（必填）
     - type: 类型，"usb" 或 "rtsp"（可选，默认rtsp）
     - device: USB设备索引（USB类型必填）
@@ -141,6 +143,16 @@ async def add_camera(request: CameraAddRequest):
     通过 /cameras 接口轮询摄像头状态确认连接结果。
     """
     try:
+        # 如果未提供ID，则自动生成
+        if not request.id:
+            # 获取现有所有ID
+            existing_ids = {cam.id for cam in camera_manager.get_all_cameras()}
+            # 查找最小可用整数ID
+            next_id = 1
+            while str(next_id) in existing_ids:
+                next_id += 1
+            request.id = str(next_id)
+        
         # 检查ID是否已存在
         existing = camera_manager.get_camera(request.id)
         if existing:
@@ -236,7 +248,7 @@ async def delete_camera(camera_id: str):
 async def update_camera(camera_id: str, request: CameraAddRequest):
     """更新摄像头"""
     # 验证ID一致性
-    if request.id != camera_id:
+    if request.id and request.id != camera_id:
         raise HTTPException(status_code=400, detail="ID不匹配")
     
     # 检查摄像头是否存在
@@ -259,7 +271,7 @@ async def update_camera(camera_id: str, request: CameraAddRequest):
     
     # 2. 创建新配置
     config = CameraConfig(
-        id=request.id,
+        id=request.id or camera_id,
         type=request.type,
         name=request.name,
         device=request.device,
