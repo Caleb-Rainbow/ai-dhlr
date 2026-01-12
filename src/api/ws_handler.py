@@ -533,12 +533,30 @@ class WSHandler:
         if not camera_id:
             raise ValueError("缺少 camera_id 参数")
         
+        from ..camera.manager import camera_manager
         from ..camera.stream import get_snapshot
+        
+        # 检查摄像头状态
+        camera = camera_manager.get_camera(camera_id)
+        if not camera:
+            raise ValueError(f"摄像头 {camera_id} 不存在")
+        
+        # 如果摄像头离线或错误状态，尝试触发重连
+        if not camera.is_online:
+            self.logger.info(f"预览时检测到摄像头离线，触发重连: {camera_id}")
+            camera.reconnect()
+            # 等待短暂时间让重连开始
+            import asyncio
+            await asyncio.sleep(0.5)
+            # 再次检查状态
+            if not camera.is_online:
+                raise ValueError(f"摄像头离线，正在尝试重连...")
+        
         snapshot = get_snapshot(camera_id, quality=80)
         if snapshot:
             b64 = base64.b64encode(snapshot).decode('utf-8')
             return {"image": f"data:image/jpeg;base64,{b64}"}
-        raise ValueError("获取预览失败，摄像头可能离线")
+        raise ValueError("获取预览失败，请稍后重试")
     
     async def _get_snapshot_image(self, params: dict) -> dict:
         """获取告警快照图片 (Base64 编码)"""

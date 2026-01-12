@@ -39,6 +39,9 @@ class CameraInfo:
 class Camera:
     """摄像头封装类"""
     
+    # 帧超时时间（秒）- 超过此时间未读到帧则触发重连
+    FRAME_TIMEOUT_SEC = 10
+    
     def __init__(self, config: CameraConfig):
         self.config = config
         self.id = config.id
@@ -52,6 +55,7 @@ class Camera:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._last_frame_time = 0
+        self._force_reconnect = False  # 强制重连标志
         self._logger = get_logger()
     
     @property
@@ -188,6 +192,27 @@ class Camera:
         self._status = CameraStatus.OFFLINE
         self._logger.info(f"摄像头已停止: {self.id}")
     
+    def reconnect(self):
+        """
+        触发摄像头重连
+        用于处理摄像头断线后恢复的场景
+        """
+        if not self._running:
+            self._logger.info(f"摄像头未运行，启动连接: {self.id}")
+            self.start()
+            return
+        
+        self._logger.info(f"触发摄像头重连: {self.id}")
+        self._force_reconnect = True
+        # 释放当前连接以触发重连
+        if self._cap:
+            try:
+                self._cap.release()
+            except Exception as e:
+                self._logger.warning(f"释放摄像头连接时出错: {self.id}, {e}")
+            self._cap = None
+        self._status = CameraStatus.CONNECTING
+    
     def _build_rtsp_url(self) -> str:
         """构建RTSP URL（带认证）"""
         url = self.config.rtsp_url
@@ -205,6 +230,30 @@ class Camera:
         
         while self._running:
             try:
+                # 检查是否需要强制重连
+                if self._force_reconnect:
+                    self._force_reconnect = False
+                    self._logger.info(f"执行强制重连: {self.id}")
+                    if self._cap:
+                        try:
+                            self._cap.release()
+                        except Exception:
+                            pass
+                    self._cap = None
+                
+                # 检查帧超时（连接看起来正常但长时间无帧）
+                if (self._cap is not None and self._cap.isOpened() and 
+                    self._last_frame_time > 0 and 
+                    time.time() - self._last_frame_time > self.FRAME_TIMEOUT_SEC):
+                    self._logger.warning(f"摄像头帧超时（{self.FRAME_TIMEOUT_SEC}秒无新帧），触发重连: {self.id}")
+                    if self._cap:
+                        try:
+                            self._cap.release()
+                        except Exception:
+                            pass
+                    self._cap = None
+                    self._status = CameraStatus.CONNECTING
+                
                 if self._cap is None or not self._cap.isOpened():
                     # 尝试重连
                     self._status = CameraStatus.CONNECTING
@@ -230,6 +279,7 @@ class Camera:
                         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
                         self._cap.set(cv2.CAP_PROP_FPS, self.config.fps)
                         self._status = CameraStatus.ONLINE
+                        self._last_frame_time = time.time()  # 重置帧时间
                         self._logger.info(f"摄像头已重连: {self.id}")
                     else:
                         self._status = CameraStatus.OFFLINE
