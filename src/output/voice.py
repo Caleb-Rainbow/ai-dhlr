@@ -216,6 +216,25 @@ class VoicePlayer:
             except queue.Empty:
                 break
     
+    def stop_playback(self):
+        """
+        停止当前播放并清空队列
+        
+        用于灶台停用或进入巡检模式时立即停止所有播报
+        """
+        # 清空队列
+        self._clear_queue()
+        
+        # 停止当前正在播放的音频
+        if self._pygame_initialized:
+            try:
+                import pygame
+                if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                    pygame.mixer.music.stop()
+                    self._logger.info("已停止当前音频播放")
+            except Exception as e:
+                self._logger.warning(f"停止播放失败: {e}")
+    
     def stop(self):
         """停止语音播报器"""
         self._running = False

@@ -239,8 +239,11 @@ class FireSafetySystem:
         """从播报队列移除灶台"""
         with self._broadcast_lock:
             if zone_id in self._broadcast_stop_flags:
-                self._broadcast_stop_flags[zone_id]["active"] = False
-                self._logger.info(f"[{zone_id}] 已标记停止播报")
+                info = self._broadcast_stop_flags[zone_id]
+                # 只在状态真正变化时才打印日志
+                if isinstance(info, dict) and info.get("active", False):
+                    info["active"] = False
+                    self._logger.info(f"[{zone_id}] 已标记停止播报")
     
     def _frame_to_base64(self, frame) -> str:
         """将图像帧转换为Base64编码"""
@@ -267,6 +270,11 @@ class FireSafetySystem:
         
         while self._running:
             try:
+                # 巡检模式下暂停常规播报
+                if patrol_manager.is_active:
+                    time.sleep(0.5)
+                    continue
+                
                 config = get_config()
                 interval = config.alarm.broadcast_interval
                 

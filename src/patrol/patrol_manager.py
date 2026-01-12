@@ -164,6 +164,9 @@ class PatrolManager:
             self._state.message = "巡检模式已开启"
             self._state.results = []
         
+        # 停止所有正在进行的播报
+        voice_player.stop_playback()
+        
         self._logger.info("巡检模式已开启")
         self._broadcast_status()
         

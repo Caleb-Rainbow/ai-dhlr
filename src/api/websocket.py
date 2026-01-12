@@ -104,6 +104,45 @@ class MessageDispatcher:
         self.local_manager = LocalConnectionManager()
         self._remote_client = None  # 延迟导入，避免循环依赖
         self._lock = asyncio.Lock()
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None  # 主事件循环引用
+    
+    def set_main_loop(self, loop: asyncio.AbstractEventLoop):
+        """设置主事件循环引用（在 FastAPI 启动时调用）"""
+        self._main_loop = loop
+        logger.info(f"主事件循环已设置: {loop}")
+    
+    def get_main_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """
+        获取主事件循环
+        
+        按以下优先级获取:
+        1. 已保存的主事件循环引用
+        2. 尝试获取当前运行的事件循环
+        """
+        # 优先使用保存的主事件循环
+        if self._main_loop is not None:
+            try:
+                if not self._main_loop.is_closed():
+                    return self._main_loop
+            except Exception:
+                pass
+        
+        # 尝试获取当前运行的事件循环
+        try:
+            loop = asyncio.get_running_loop()
+            return loop
+        except RuntimeError:
+            pass
+        
+        # 尝试 get_event_loop（兼容旧版本）
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                return loop
+        except (RuntimeError, DeprecationWarning):
+            pass
+        
+        return None
     
     @property
     def remote_client(self):
@@ -280,33 +319,31 @@ def sync_broadcast_alarm_event(zone_id: str, zone_name: str, alarm_type: str,
     """
     同步版本的报警事件广播
     用于从非异步上下文调用
+    
+    注意: 必须在主事件循环中发送 WebSocket 消息，因为 WebSocket 连接
+    是在主事件循环中创建的。在新事件循环中操作 WebSocket 会导致问题。
     """
     try:
-        # 获取或创建事件循环
-        loop = None
-        try:
-            # 尝试获取主事件循环
-            loop = asyncio.get_event_loop()
-            if loop and loop.is_running():
-                # 使用当前运行的事件循环
-                asyncio.run_coroutine_threadsafe(
-                    broadcast_alarm_event(zone_id, zone_name, alarm_type, image_base64, message),
-                    loop
-                )
-                return
-        except (RuntimeError, AssertionError):
-            # 当前线程没有事件循环或事件循环已关闭
-            pass
+        # 获取主事件循环
+        loop = message_dispatcher.get_main_loop()
         
-        # 创建新的事件循环
-        new_loop = asyncio.new_event_loop()
-        
-        try:
-            # 在新的事件循环上运行
-            new_loop.run_until_complete(broadcast_alarm_event(zone_id, zone_name, alarm_type, image_base64, message))
-        finally:
-            # 关闭新创建的事件循环
-            new_loop.close()
+        if loop is not None and loop.is_running():
+            # 将协程提交到主事件循环执行
+            future = asyncio.run_coroutine_threadsafe(
+                broadcast_alarm_event(zone_id, zone_name, alarm_type, image_base64, message),
+                loop
+            )
+            # 不等待结果，让它在后台执行
+            # 但记录任何异常
+            def handle_exception(fut):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.error(f"广播报警事件失败: {e}")
+            future.add_done_callback(handle_exception)
+        else:
+            # 如果没有可用的事件循环，记录警告
+            logger.warning(f"无法广播报警事件: 主事件循环不可用 (zone={zone_id}, type={alarm_type})")
     except Exception as e:
         logger.error(f"同步广播报警事件失败: {e}", exc_info=True)
 
@@ -315,33 +352,33 @@ def sync_broadcast_state_change(event_data: dict):
     """
     同步版本的状态变化广播
     用于从非异步上下文调用
+    
+    注意: 必须在主事件循环中发送 WebSocket 消息，因为 WebSocket 连接
+    是在主事件循环中创建的。在新事件循环中操作 WebSocket 会导致问题。
     """
     try:
-        # 获取或创建事件循环
-        loop = None
-        try:
-            # 尝试获取主事件循环
-            loop = asyncio.get_event_loop()
-            if loop and loop.is_running():
-                # 使用当前运行的事件循环
-                asyncio.run_coroutine_threadsafe(
-                    broadcast_state_change(event_data),
-                    loop
-                )
-                return
-        except (RuntimeError, AssertionError):
-            # 当前线程没有事件循环或事件循环已关闭
-            pass
+        # 获取主事件循环
+        loop = message_dispatcher.get_main_loop()
         
-        # 创建新的事件循环
-        new_loop = asyncio.new_event_loop()
-        
-        try:
-            # 在新的事件循环上运行
-            new_loop.run_until_complete(broadcast_state_change(event_data))
-        finally:
-            # 关闭新创建的事件循环
-            new_loop.close()
+        if loop is not None and loop.is_running():
+            # 将协程提交到主事件循环执行
+            future = asyncio.run_coroutine_threadsafe(
+                broadcast_state_change(event_data),
+                loop
+            )
+            # 不等待结果，让它在后台执行
+            # 但记录任何异常
+            def handle_exception(fut):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.error(f"广播状态变化失败: {e}")
+            future.add_done_callback(handle_exception)
+        else:
+            # 如果没有可用的事件循环，记录警告
+            zone_id = event_data.get("zone_id", "unknown")
+            new_state = event_data.get("new_state", "unknown")
+            logger.warning(f"无法广播状态变化: 主事件循环不可用 (zone={zone_id}, state={new_state})")
     except Exception as e:
         logger.error(f"同步广播状态变化事件失败: {e}", exc_info=True)
 
@@ -366,25 +403,30 @@ def sync_broadcast_patrol_event(event_type: str, data: dict):
     """
     同步版本的巡检事件广播
     用于从非异步上下文调用
+    
+    注意: 必须在主事件循环中发送 WebSocket 消息，因为 WebSocket 连接
+    是在主事件循环中创建的。在新事件循环中操作 WebSocket 会导致问题。
     """
     try:
-        # 获取或创建事件循环
-        loop = None
-        try:
-            loop = asyncio.get_event_loop()
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    broadcast_patrol_event(event_type, data),
-                    loop
-                )
-                return
-        except (RuntimeError, AssertionError):
-            pass
+        # 获取主事件循环
+        loop = message_dispatcher.get_main_loop()
         
-        new_loop = asyncio.new_event_loop()
-        try:
-            new_loop.run_until_complete(broadcast_patrol_event(event_type, data))
-        finally:
-            new_loop.close()
+        if loop is not None and loop.is_running():
+            # 将协程提交到主事件循环执行
+            future = asyncio.run_coroutine_threadsafe(
+                broadcast_patrol_event(event_type, data),
+                loop
+            )
+            # 不等待结果，让它在后台执行
+            # 但记录任何异常
+            def handle_exception(fut):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.error(f"广播巡检事件失败: {e}")
+            future.add_done_callback(handle_exception)
+        else:
+            # 如果没有可用的事件循环，记录警告
+            logger.warning(f"无法广播巡检事件: 主事件循环不可用 (type={event_type})")
     except Exception as e:
         logger.error(f"同步广播巡检事件失败: {e}", exc_info=True)

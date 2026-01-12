@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 
 from .routes import cameras, zones, status, control, settings
-from .websocket import ws_manager, broadcast_status_update
+from .websocket import ws_manager, broadcast_status_update, message_dispatcher
 from ..zone.state_machine import zone_manager
 from ..utils.logger import get_logger
 
@@ -48,6 +48,14 @@ async def lifespan(app: FastAPI):
     
     # 启动时
     logger.info("FastAPI服务启动")
+    
+    # 保存主事件循环引用（用于从非异步上下文发送 WebSocket 消息）
+    try:
+        main_loop = asyncio.get_running_loop()
+        message_dispatcher.set_main_loop(main_loop)
+    except RuntimeError:
+        logger.warning("无法获取主事件循环")
+    
     _status_broadcast_task = asyncio.create_task(status_broadcast_loop())
     
     # 启动网络监测
