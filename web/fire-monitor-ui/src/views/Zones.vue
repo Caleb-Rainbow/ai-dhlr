@@ -269,6 +269,14 @@ const getCanvasCoordinates = (canvas: HTMLCanvasElement, clientX: number, client
     return { x, y };
 };
 
+// 限制坐标在边界范围内 [0, 1]
+const clampCoordinates = (x: number, y: number) => {
+    return {
+        x: Math.max(0, Math.min(1, x)),
+        y: Math.max(0, Math.min(1, y))
+    };
+};
+
 // 鼠标事件处理
 const onMouseDown = (e: MouseEvent) => {
     const canvas = roiCanvas.value;
@@ -294,8 +302,11 @@ const onMouseMove = (e: MouseEvent) => {
     
     const { x, y } = getCanvasCoordinates(canvas, e.clientX, e.clientY);
     
+    // 限制坐标在边界范围内
+    const clamped = clampCoordinates(x, y);
+    
     // 更新选中点位的坐标
-    roiPoints.value[selectedPointIndex.value] = [x, y];
+    roiPoints.value[selectedPointIndex.value] = [clamped.x, clamped.y];
     drawRoi();
     
     // 防止默认行为，避免拖动时选中文本
@@ -316,11 +327,14 @@ const onCanvasClick = (e: MouseEvent) => {
     if(!canvas) return;
     
     const { x, y } = getCanvasCoordinates(canvas, e.clientX, e.clientY);
-    const nearestIndex = findNearestPoint(x, y);
+    
+    // 限制坐标在边界范围内
+    const clamped = clampCoordinates(x, y);
+    const nearestIndex = findNearestPoint(clamped.x, clamped.y);
     
     // 如果点击位置没有接近现有点位，则添加新点位
     if (nearestIndex === null) {
-        roiPoints.value.push([x, y]);
+        roiPoints.value.push([clamped.x, clamped.y]);
         drawRoi();
     }
 };
@@ -359,8 +373,11 @@ const onTouchMove = (e: TouchEvent) => {
     
     const { x, y } = getCanvasCoordinates(canvas, touch.clientX, touch.clientY);
     
+    // 限制坐标在边界范围内
+    const clamped = clampCoordinates(x, y);
+    
     // 更新选中点位的坐标
-    roiPoints.value[selectedPointIndex.value] = [x, y];
+    roiPoints.value[selectedPointIndex.value] = [clamped.x, clamped.y];
     drawRoi();
     
     // 防止默认行为，避免拖动时页面滚动
