@@ -389,7 +389,11 @@ class FireSafetySystem:
             try:
                 # 遍历所有灶台
                 for sm in zone_manager.get_all_zones():
+                    # 检查灶台是否启用
                     if not sm.zone.enabled:
+                        # 灶台停用时：停止播报并强制重置状态
+                        self._remove_from_broadcast_queue(sm.zone.id)
+                        sm.force_idle()
                         continue
                     
                     # 获取对应摄像头的帧
@@ -416,8 +420,11 @@ class FireSafetySystem:
                         # 回退到模拟GPIO状态
                         is_fire_on = zone_manager._fire_states.get(sm.zone.id, False)
                     
-                    # 更新状态机（传递动火状态）
-                    # 检查是否在巡检模式，如果是则跳过状态机更新
+                    # 始终更新检测结果到 zone 对象，确保巡检模式下也能获取实时状态
+                    sm.zone.has_person = has_person
+                    sm.zone.is_fire_on = is_fire_on
+                    
+                    # 仅在非巡检模式下更新状态机（触发状态转换和回调）
                     if not patrol_manager.is_active:
                         sm.update(has_person, is_fire_on, frame)
                 

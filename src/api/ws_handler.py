@@ -299,6 +299,9 @@ class WSHandler:
             sm.update_config(roi=params["roi"])
         if "enabled" in params:
             sm.zone.enabled = params["enabled"]
+            # 停用灶台时强制重置状态
+            if not params["enabled"]:
+                sm.force_idle()
         
         # 同步配置
         for cfg in config_manager.config.zones:

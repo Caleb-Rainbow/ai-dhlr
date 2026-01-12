@@ -261,6 +261,34 @@ class ZoneStateMachine:
             self.zone.last_snapshot_path = path
             event_logger.log_warning(self.zone.id, f"无人看管已超时报警。截图: {path}")
     
+    def force_idle(self):
+        """
+        强制重置到空闲状态（用于灶台停用时）
+        
+        会重置所有定时器并将状态设置为 IDLE，同时触发状态变化回调
+        """
+        with self._lock:
+            if self.zone.state == ZoneState.IDLE:
+                return  # 已经是空闲状态，无需操作
+            
+            old_state = self.zone.state
+            self._reset_timers()
+            self.zone.state = ZoneState.IDLE
+            
+            self._logger.info(f"[{self.zone.id}] 强制重置: {old_state.value} -> idle")
+            
+            # 触发状态变化回调
+            if self._on_state_change:
+                event = StateChangeEvent(
+                    zone_id=self.zone.id,
+                    zone_name=self.zone.name,
+                    old_state=old_state,
+                    new_state=ZoneState.IDLE,
+                    timestamp=time.time(),
+                    message="灶台停用，强制重置"
+                )
+                self._on_state_change(event)
+    
     def reset(self) -> bool:
         """
         复位状态（人工介入后调用）

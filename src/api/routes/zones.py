@@ -337,6 +337,9 @@ async def create_or_update_zone_full(request: ZoneConfigRequest):
             existing.zone.name = request.name
             existing.zone.camera_id = request.camera_id
             existing.zone.enabled = request.enabled
+            # 停用灶台时强制重置状态
+            if not request.enabled:
+                existing.force_idle()
             
             # 同步更新 config_manager 中的配置
             for zone_cfg in config_manager.config.zones:
@@ -461,6 +464,9 @@ async def update_zone(zone_id: str, request: ZoneUpdateRequest):
         if request.enabled is not None:
             sm.zone.enabled = request.enabled
             updated_fields.append("enabled")
+            # 停用灶台时强制重置状态
+            if not request.enabled:
+                sm.force_idle()
         
         if not updated_fields:
             return {

@@ -173,9 +173,9 @@ onUnmounted(() => {
                   </Transition>
 
                   <Transition name="pop" mode="out-in">
-                    <div :key="zone.has_person ? 'person-on' : (zone.is_fire_on ? 'person-warning' : 'person-off')"
+                    <div :key="zone.has_person ? 'person-on' : 'person-off'"
                       class="w-8 h-8 rounded-full flex items-center justify-center transition-colors duration-300 border border-white/5"
-                      :class="zone.has_person ? 'bg-emerald-500/20 text-emerald-500 shadow-inner shadow-emerald-500/20' : (zone.is_fire_on ? 'bg-amber-500/20 text-amber-500 animate-pulse' : 'bg-white/5 text-gray-600')">
+                      :class="zone.has_person ? 'bg-emerald-500/20 text-emerald-500 shadow-inner shadow-emerald-500/20' : 'bg-white/5 text-gray-600'">
                       <User class="w-4 h-4" :class="{ 'fill-current': zone.has_person }" />
                     </div>
                   </Transition>
@@ -226,7 +226,8 @@ onUnmounted(() => {
 
     <!-- Performance Panel with Animation -->
     <Transition name="fade" mode="out-in">
-      <div v-if="performance" key="perf" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+      <div v-if="performance" key="perf"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <h3 class="flex items-center gap-2 text-xs font-bold text-text-muted uppercase tracking-wider">
           <Activity class="w-3.5 h-3.5" /> 性能监控
         </h3>
@@ -248,7 +249,7 @@ onUnmounted(() => {
             <div class="flex justify-between items-end mb-2">
               <span class="text-[10px] text-text-muted font-bold">CPU</span>
               <span class="text-lg font-mono font-bold text-text-primary">{{ performance.cpu_percent.toFixed(0)
-                }}%</span>
+              }}%</span>
             </div>
             <Sparkline :data="cpuHistory" :height="30" color="#3b82f6" />
           </div>
@@ -259,7 +260,7 @@ onUnmounted(() => {
             <div class="flex justify-between items-end mb-2">
               <span class="text-[10px] text-purple-400 font-bold">NPU 核心占用</span>
               <span class="text-lg font-mono font-bold text-text-primary">{{ (performance.npu_load || 0).toFixed(0)
-                }}%</span>
+              }}%</span>
             </div>
             <Sparkline :data="npuHistory" :height="40" color="#a855f7" />
           </div>

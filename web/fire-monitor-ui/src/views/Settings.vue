@@ -296,7 +296,7 @@ const toggleSerialDebug = async () => {
 
 // 开始编辑设备ID
 const startEditDeviceId = () => {
-  tempDeviceId.value = deviceInfo.value?.device_id || '';
+  tempDeviceId.value = deviceInfo.value?.device_id || 'dhlr';
   editingDeviceId.value = true;
 };
 
@@ -308,7 +308,7 @@ const cancelEditDeviceId = () => {
 
 // 保存设备ID
 const saveDeviceId = async () => {
-  const newId = tempDeviceId.value.trim().toUpperCase();
+  const newId = tempDeviceId.value.trim();
   if (!newId) {
     alert('设备ID不能为空');
     return;
@@ -725,19 +725,15 @@ onUnmounted(() => {
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Info class="w-4 h-4" /> 设备信息
         </h3>
-        <div class="grid grid-cols-2 gap-4">
-          <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
-            style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            <div class="text-xs text-text-muted mb-1">系统版本</div>
-            <div class="font-mono text-text-primary">{{ deviceInfo.version }}</div>
-          </div>
+        <div class="space-y-4">
+          <!-- 设备ID 单独一行 -->
           <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
             <div class="text-xs text-text-muted mb-1">设备 ID</div>
             <!-- 编辑模式 -->
             <div v-if="editingDeviceId" class="space-y-2">
               <input v-model="tempDeviceId" type="text" placeholder="输入设备ID"
-                class="w-full px-2 py-1.5 rounded-lg border outline-none focus:border-primary/50 transition-all text-text-primary font-mono text-sm uppercase"
+                class="w-full px-2 py-1.5 rounded-lg border outline-none focus:border-primary/50 transition-all text-text-primary font-mono text-sm"
                 style="background: var(--theme-bg-card); border-color: var(--theme-border-input);"
                 @keyup.enter="saveDeviceId" @keyup.escape="cancelEditDeviceId">
               <div class="flex items-center justify-end gap-2">
@@ -765,10 +761,18 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-          <div class="p-3 rounded-2xl border col-span-2 transition-all duration-300 hover-lift"
-            style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            <div class="text-xs text-text-muted mb-1">运行时间</div>
-            <div class="font-mono text-text-primary">{{ ((deviceInfo.uptime || 0) / 3600).toFixed(1) }} 小时</div>
+          <!-- 系统版本和运行时间放在一行 -->
+          <div class="grid grid-cols-2 gap-4">
+            <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
+              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+              <div class="text-xs text-text-muted mb-1">系统版本</div>
+              <div class="font-mono text-text-primary">{{ deviceInfo.version }}</div>
+            </div>
+            <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
+              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+              <div class="text-xs text-text-muted mb-1">运行时间</div>
+              <div class="font-mono text-text-primary">{{ ((deviceInfo.uptime || 0) / 3600).toFixed(1) }} 小时</div>
+            </div>
           </div>
         </div>
       </div>
