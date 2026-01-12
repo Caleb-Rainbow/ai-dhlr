@@ -110,6 +110,10 @@ class WSHandler:
             "patrol_force_alarm": self._patrol_force_alarm,
             "patrol_force_cutoff": self._patrol_force_cutoff,
             "get_patrol_status": self._get_patrol_status,
+            # 单灶台巡检操作
+            "patrol_check_person": self._patrol_check_person,
+            "patrol_check_fire": self._patrol_check_fire,
+            "patrol_cutoff_zone": self._patrol_cutoff_zone,
         }
     
     async def handle_request(self, message: dict) -> dict:
@@ -1101,9 +1105,16 @@ class WSHandler:
         return patrol_manager.device_self_check()
     
     async def _patrol_alarm_demo(self, params: dict) -> dict:
-        """报警演示"""
+        """报警演示（支持单灶台或自动选择）"""
         from ..patrol.patrol_manager import patrol_manager
-        return patrol_manager.alarm_demo()
+        
+        zone_id = params.get("zone_id")
+        if zone_id:
+            # 单灶台报警演示
+            return patrol_manager.alarm_demo_zone(zone_id)
+        else:
+            # 兼容旧接口，自动选择第一个动火灶台
+            return patrol_manager.alarm_demo()
     
     async def _patrol_force_warning(self, params: dict) -> dict:
         """强制预警（所有区）"""
@@ -1124,6 +1135,33 @@ class WSHandler:
         """获取巡检状态"""
         from ..patrol.patrol_manager import patrol_manager
         return patrol_manager.get_state()
+    
+    async def _patrol_check_person(self, params: dict) -> dict:
+        """检测单个灶台的离人状态"""
+        zone_id = params.get("zone_id")
+        if not zone_id:
+            raise ValueError("缺少 zone_id 参数")
+        
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.check_person_zone(zone_id)
+    
+    async def _patrol_check_fire(self, params: dict) -> dict:
+        """检测单个灶台的动火状态"""
+        zone_id = params.get("zone_id")
+        if not zone_id:
+            raise ValueError("缺少 zone_id 参数")
+        
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.check_fire_zone(zone_id)
+    
+    async def _patrol_cutoff_zone(self, params: dict) -> dict:
+        """对单个灶台执行切电"""
+        zone_id = params.get("zone_id")
+        if not zone_id:
+            raise ValueError("缺少 zone_id 参数")
+        
+        from ..patrol.patrol_manager import patrol_manager
+        return patrol_manager.cutoff_zone(zone_id)
 
 
 # 全局处理器实例

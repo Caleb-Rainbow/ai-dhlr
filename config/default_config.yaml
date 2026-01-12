@@ -12,7 +12,7 @@ system:
 # 推理引擎配置
 inference:
   engine: "rknn"  # 推理引擎类型: rknn 或 pytorch
-  model_path: "yolo11n-sim.rknn"  # RKNN模型路径
+  model_path: "yolo11m-sim.rknn"  # RKNN模型路径
   confidence_threshold: 0.5  # 置信度阈值
   person_class_id: 0  # 人员类别ID
 

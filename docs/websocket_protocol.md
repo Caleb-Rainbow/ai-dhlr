@@ -233,12 +233,27 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 |--------|------|------|------|
 | `start_patrol` | 开始巡检模式 | 无 | `{success, message}` |
 | `stop_patrol` | 退出巡检模式 | 无 | `{success, message}` |
-| `patrol_self_check` | 设备自检 | 无 | `{success, message}` |
-| `patrol_alarm_demo` | 报警演示 | 无 | `{success, message}` |
+| `get_patrol_status` | 获取巡检状态 | 无 | 巡检状态对象 |
+
+#### 单灶台操作
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `patrol_check_person` | 检测单个灶台的离人状态 | `zone_id` | `{success, has_person, message}` |
+| `patrol_check_fire` | 检测单个灶台的动火状态 | `zone_id` | `{success, is_fire_on, message}` |
+| `patrol_alarm_demo` | 报警演示（预警→报警→切电，每步间隔10秒） | `zone_id` | `{success, message}` |
+| `patrol_cutoff_zone` | 单灶台切电 | `zone_id` | `{success, message}` |
+
+> **注意**：`patrol_alarm_demo` 需要灶台处于动火状态，否则返回错误。
+
+#### 全局强制动作
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `patrol_self_check` | 设备自检（批量检测所有灶台） | 无 | `{success, message}` |
 | `patrol_force_warning` | 强制预警（所有区） | 无 | `{success, message}` |
 | `patrol_force_alarm` | 强制报警（所有区） | 无 | `{success, message}` |
 | `patrol_force_cutoff` | 强制切电（所有区） | 无 | `{success, message}` |
-| `get_patrol_status` | 获取巡检状态 | 无 | 巡检状态对象 |
 
 **巡检事件推送**
 ```json

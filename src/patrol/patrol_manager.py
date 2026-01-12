@@ -184,6 +184,193 @@ class PatrolManager:
         
         return {"success": True, "message": "巡检模式已退出"}
     
+    def check_person_zone(self, zone_id: str) -> dict:
+        """
+        检测单个灶台的离人状态
+        
+        Args:
+            zone_id: 灶台ID
+            
+        Returns:
+            {"success": bool, "has_person": bool, "message": str}
+        """
+        if not self.is_active:
+            return {"success": False, "message": "请先开启巡检模式"}
+        
+        from ..zone.state_machine import zone_manager
+        
+        sm = zone_manager.get_zone(zone_id)
+        if not sm:
+            return {"success": False, "message": f"灶台 '{zone_id}' 不存在"}
+        
+        zone_name = sm.zone.name
+        has_person = sm.zone.has_person
+        
+        # 播放对应语音
+        if has_person:
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_HAS_PERSON)
+            message = f"{zone_name}有人"
+        else:
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_PERSON)
+            message = f"{zone_name}没人"
+        
+        if audio_path:
+            voice_player.play_file(audio_path)
+        
+        # 添加结果
+        self._add_result(zone_id, zone_name, "离人检测", "success", message)
+        
+        return {"success": True, "has_person": has_person, "message": message}
+    
+    def check_fire_zone(self, zone_id: str) -> dict:
+        """
+        检测单个灶台的动火状态
+        
+        Args:
+            zone_id: 灶台ID
+            
+        Returns:
+            {"success": bool, "is_fire_on": bool, "message": str}
+        """
+        if not self.is_active:
+            return {"success": False, "message": "请先开启巡检模式"}
+        
+        from ..zone.state_machine import zone_manager
+        from ..serial_port.serial_manager import serial_manager
+        
+        sm = zone_manager.get_zone(zone_id)
+        if not sm:
+            return {"success": False, "message": f"灶台 '{zone_id}' 不存在"}
+        
+        zone_name = sm.zone.name
+        is_fire_on = serial_manager.is_fire_on(zone_id)
+        
+        # 播放对应语音
+        if is_fire_on:
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_FIRE_ON)
+            message = f"{zone_name}动火"
+        else:
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_FIRE)
+            message = f"{zone_name}未动火"
+        
+        if audio_path:
+            voice_player.play_file(audio_path)
+        
+        # 添加结果
+        self._add_result(zone_id, zone_name, "动火检测", "success", message)
+        
+        return {"success": True, "is_fire_on": is_fire_on, "message": message}
+    
+    def alarm_demo_zone(self, zone_id: str) -> dict:
+        """
+        对单个灶台进行报警演示
+        
+        演示流程：预警 -> 10秒 -> 报警 -> 10秒 -> 切电
+        前提条件：灶台必须处于动火状态
+        
+        Args:
+            zone_id: 灶台ID
+        """
+        if not self.is_active:
+            return {"success": False, "message": "请先开启巡检模式"}
+        
+        from ..zone.state_machine import zone_manager
+        from ..serial_port.serial_manager import serial_manager
+        
+        sm = zone_manager.get_zone(zone_id)
+        if not sm:
+            return {"success": False, "message": f"灶台 '{zone_id}' 不存在"}
+        
+        zone_name = sm.zone.name
+        
+        # 检查是否动火
+        if not serial_manager.is_fire_on(zone_id):
+            self._add_result(zone_id, zone_name, "报警演示", "error", f"{zone_name}未动火，无法演示")
+            return {"success": False, "message": f"{zone_name}未动火，请先开启灶台"}
+        
+        # 在后台线程执行演示
+        thread = threading.Thread(
+            target=self._run_alarm_demo_zone, 
+            args=(zone_id, zone_name), 
+            daemon=True
+        )
+        thread.start()
+        
+        return {"success": True, "message": f"{zone_name}报警演示已启动"}
+    
+    def _run_alarm_demo_zone(self, zone_id: str, zone_name: str):
+        """执行单灶台报警演示（后台线程）"""
+        import time
+        
+        # 开启演示模式
+        self._demo_mode = True
+        self._update_progress(PatrolStep.ALARM_DEMO, 10, f"{zone_name}报警演示开始...")
+        
+        try:
+            # 预警
+            self._update_progress(PatrolStep.ALARM_DEMO, 25, f"{zone_name}预警中...")
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.WARNING)
+            if audio_path:
+                voice_player.play_file(audio_path, priority=True)
+            self._add_result(zone_id, zone_name, "报警演示", "warning", "预警")
+            time.sleep(10)
+            
+            # 报警
+            self._update_progress(PatrolStep.ALARM_DEMO, 50, f"{zone_name}报警中...")
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ALARM)
+            if audio_path:
+                voice_player.play_file(audio_path, priority=True)
+            self._add_result(zone_id, zone_name, "报警演示", "warning", "报警")
+            time.sleep(10)
+            
+            # 切电
+            self._update_progress(PatrolStep.ALARM_DEMO, 75, f"{zone_name}切电中...")
+            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ACTION)
+            if audio_path:
+                voice_player.play_file(audio_path, priority=True)
+            
+            # 执行切电
+            from ..serial_port.serial_manager import serial_manager
+            serial_manager.cutoff(zone_id)
+            
+            self._add_result(zone_id, zone_name, "报警演示", "success", "切电完成")
+            
+        finally:
+            self._demo_mode = False
+        
+        self._update_progress(PatrolStep.IDLE, 100, f"{zone_name}报警演示完成")
+    
+    def cutoff_zone(self, zone_id: str) -> dict:
+        """
+        对单个灶台执行切电
+        
+        Args:
+            zone_id: 灶台ID
+        """
+        if not self.is_active:
+            return {"success": False, "message": "请先开启巡检模式"}
+        
+        from ..zone.state_machine import zone_manager
+        from ..serial_port.serial_manager import serial_manager
+        
+        sm = zone_manager.get_zone(zone_id)
+        if not sm:
+            return {"success": False, "message": f"灶台 '{zone_id}' 不存在"}
+        
+        zone_name = sm.zone.name
+        
+        # 播放切电语音
+        audio_path = tts_manager.get_audio_path(zone_id, AudioType.ACTION)
+        if audio_path:
+            voice_player.play_file(audio_path, priority=True)
+        
+        # 执行切电
+        serial_manager.cutoff(zone_id)
+        
+        self._add_result(zone_id, zone_name, "强制切电", "success", f"{zone_name}已切电")
+        
+        return {"success": True, "message": f"{zone_name}已切电"}
+    
     def device_self_check(self) -> dict:
         """
         设备自检
@@ -258,14 +445,8 @@ class PatrolManager:
                     f"{zone_name}离人状态正常"
                 )
             
-            # 播放"离人监测正常"语音
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_PERSON_OK)
-            if audio_path:
-                voice_player.play_file(audio_path)
-                time.sleep(2)
-            
             self._add_result(zone_id, zone_name, "离人检测", "success", 
-                           f"{zone_name}离人监测正常")
+                           f"{zone_name}离人状态正常")
         
         # 第二阶段：动火检测
         self._update_progress(PatrolStep.SELF_CHECK_FIRE, 50, "开始动火检测...")
@@ -301,8 +482,8 @@ class PatrolManager:
                 # 更新检测状态
                 is_fire_on = serial_manager.is_fire_on(zone_id)
                 if not is_fire_on:
-                    # 播放"已关火"语音
-                    audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_FIRE_OFF)
+                    # 播放"未动火"语音
+                    audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_FIRE)
                     if audio_path:
                         voice_player.play_file(audio_path)
                         time.sleep(1.5)
@@ -313,14 +494,8 @@ class PatrolManager:
                     f"{zone_name}动火状态正常"
                 )
             
-            # 播放"动火监测正常"语音
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_FIRE_OK)
-            if audio_path:
-                voice_player.play_file(audio_path)
-                time.sleep(2)
-            
             self._add_result(zone_id, zone_name, "动火检测", "success", 
-                           f"{zone_name}动火监测正常")
+                           f"{zone_name}动火状态正常")
         
         self._update_progress(PatrolStep.IDLE, 100, "设备自检完成")
     

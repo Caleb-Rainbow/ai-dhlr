@@ -22,11 +22,9 @@ class AudioType(Enum):
     ACTION = "action"       # 切电
     # 巡检语音类型
     PATROL_HAS_PERSON = "patrol_has_person"    # {zone_name}有人
-    PATROL_NO_PERSON = "patrol_no_person"      # {zone_name}离人
-    PATROL_PERSON_OK = "patrol_person_ok"      # {zone_name}离人监测正常
-    PATROL_FIRE_ON = "patrol_fire_on"          # {zone_name}动火中
-    PATROL_FIRE_OFF = "patrol_fire_off"        # {zone_name}已关火
-    PATROL_FIRE_OK = "patrol_fire_ok"          # {zone_name}动火监测正常
+    PATROL_NO_PERSON = "patrol_no_person"      # {zone_name}没人
+    PATROL_FIRE_ON = "patrol_fire_on"          # {zone_name}动火
+    PATROL_NO_FIRE = "patrol_no_fire"          # {zone_name}未动火
 
 
 @dataclass
@@ -291,35 +289,21 @@ class TTSManager:
                 zone_id=zone_id,
                 zone_name=zone_name,
                 audio_type=AudioType.PATROL_NO_PERSON,
-                text=f"{zone_name}离人",
-                callback=None
-            ),
-            SynthesisTask(
-                zone_id=zone_id,
-                zone_name=zone_name,
-                audio_type=AudioType.PATROL_PERSON_OK,
-                text=f"{zone_name}离人监测正常",
+                text=f"{zone_name}没人",
                 callback=None
             ),
             SynthesisTask(
                 zone_id=zone_id,
                 zone_name=zone_name,
                 audio_type=AudioType.PATROL_FIRE_ON,
-                text=f"{zone_name}动火中",
+                text=f"{zone_name}动火",
                 callback=None
             ),
             SynthesisTask(
                 zone_id=zone_id,
                 zone_name=zone_name,
-                audio_type=AudioType.PATROL_FIRE_OFF,
-                text=f"{zone_name}已关火",
-                callback=None
-            ),
-            SynthesisTask(
-                zone_id=zone_id,
-                zone_name=zone_name,
-                audio_type=AudioType.PATROL_FIRE_OK,
-                text=f"{zone_name}动火监测正常",
+                audio_type=AudioType.PATROL_NO_FIRE,
+                text=f"{zone_name}未动火",
                 callback=callback  # 最后一个任务完成时回调
             ),
         ]
@@ -418,8 +402,8 @@ class TTSManager:
             # 更新进度
             self._synthesis_progress[task.zone_id] = self._synthesis_progress.get(task.zone_id, 0) + 1
             
-            # 如果是最后一个任务（PATROL_FIRE_OK），更新状态
-            if task.audio_type == AudioType.PATROL_FIRE_OK:
+            # 如果是最后一个任务（PATROL_NO_FIRE），更新状态
+            if task.audio_type == AudioType.PATROL_NO_FIRE:
                 if success and self.has_audio_files(task.zone_id):
                     self._synthesis_status[task.zone_id] = "completed"
                 elif not success:

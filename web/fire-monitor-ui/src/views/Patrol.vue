@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { 
   LogOut, SearchCheck, AlertTriangle, Bell, Zap, 
-  Play, CheckCircle, XCircle, AlertCircle, Clock
+  Play, CheckCircle, XCircle, AlertCircle, Clock, User, Flame
 } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 
@@ -23,6 +23,11 @@ interface PatrolState {
   results: PatrolResult[];
 }
 
+interface Zone {
+  id: string;
+  name: string;
+}
+
 const patrolState = ref<PatrolState>({
   is_active: false,
   current_step: 'idle',
@@ -31,7 +36,9 @@ const patrolState = ref<PatrolState>({
   results: []
 });
 
+const zones = ref<Zone[]>([]);
 const loading = ref<string | null>(null);
+const zoneLoading = ref<Record<string, string | null>>({});
 let unsubscribePatrol: (() => void) | null = null;
 
 // 步骤名称映射
@@ -61,6 +68,16 @@ const statusColors: Record<string, string> = {
 
 const isActive = computed(() => patrolState.value.is_active);
 const isBusy = computed(() => patrolState.value.current_step !== 'idle');
+
+// 获取灶台列表
+const fetchZones = async () => {
+  try {
+    const data = await ws.request<Zone[]>('get_zones');
+    zones.value = data;
+  } catch (e) {
+    console.error('获取灶台列表失败:', e);
+  }
+};
 
 // 获取巡检状态
 const fetchStatus = async () => {
@@ -98,27 +115,51 @@ const stopPatrol = async () => {
   }
 };
 
-// 设备自检
-const selfCheck = async () => {
-  loading.value = 'self_check';
+// 检测离人状态
+const checkPerson = async (zoneId: string) => {
+  zoneLoading.value[zoneId] = 'person';
   try {
-    await ws.request('patrol_self_check');
+    await ws.request('patrol_check_person', { zone_id: zoneId });
   } catch (e) {
-    console.error('设备自检失败:', e);
+    console.error('离人检测失败:', e);
   } finally {
-    loading.value = null;
+    zoneLoading.value[zoneId] = null;
+  }
+};
+
+// 检测动火状态
+const checkFire = async (zoneId: string) => {
+  zoneLoading.value[zoneId] = 'fire';
+  try {
+    await ws.request('patrol_check_fire', { zone_id: zoneId });
+  } catch (e) {
+    console.error('动火检测失败:', e);
+  } finally {
+    zoneLoading.value[zoneId] = null;
   }
 };
 
 // 报警演示
-const alarmDemo = async () => {
-  loading.value = 'alarm_demo';
+const alarmDemo = async (zoneId: string) => {
+  zoneLoading.value[zoneId] = 'demo';
   try {
-    await ws.request('patrol_alarm_demo');
+    await ws.request('patrol_alarm_demo', { zone_id: zoneId });
   } catch (e) {
     console.error('报警演示失败:', e);
   } finally {
-    loading.value = null;
+    zoneLoading.value[zoneId] = null;
+  }
+};
+
+// 切电
+const cutoffZone = async (zoneId: string) => {
+  zoneLoading.value[zoneId] = 'cutoff';
+  try {
+    await ws.request('patrol_cutoff_zone', { zone_id: zoneId });
+  } catch (e) {
+    console.error('切电失败:', e);
+  } finally {
+    zoneLoading.value[zoneId] = null;
   }
 };
 
@@ -164,8 +205,12 @@ const formatTime = (timestamp: number) => {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
+// 检查灶台是否正在加载
+const isZoneLoading = (zoneId: string) => !!zoneLoading.value[zoneId];
+
 onMounted(async () => {
   await ws.connect();
+  await fetchZones();
   await fetchStatus();
   
   // 监听巡检事件
@@ -214,7 +259,7 @@ onUnmounted(() => {
     <!-- 功能区 -->
     <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
-        <SearchCheck class="w-4 h-4" /> 巡检功能
+        <SearchCheck class="w-4 h-4" /> 巡检控制
       </h3>
 
       <!-- 启动/退出巡检 -->
@@ -234,54 +279,91 @@ onUnmounted(() => {
           退出巡检
         </button>
       </div>
+    </div>
 
-      <!-- 功能按钮组 -->
-      <div class="grid grid-cols-2 gap-3">
+    <!-- 灶台列表 -->
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+      <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
+        <Flame class="w-4 h-4" /> 灶台操作
+      </h3>
+
+      <div v-if="zones.length === 0" class="text-center py-8 text-text-muted text-sm">
+        暂无灶台配置
+      </div>
+
+      <div v-else class="space-y-3">
+        <div v-for="zone in zones" :key="zone.id"
+          class="p-4 rounded-xl border border-white/5 bg-white/[0.02] space-y-3">
+          <!-- 灶台名称 -->
+          <div class="font-bold text-text-primary">{{ zone.name }}</div>
+          
+          <!-- 操作按钮组 -->
+          <div class="grid grid-cols-4 gap-2">
+            <button
+              @click="checkPerson(zone.id)"
+              :disabled="!isActive || isBusy || isZoneLoading(zone.id)"
+              class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all active:scale-95 bg-blue-500/15 text-blue-400 border border-blue-500/25 hover:bg-blue-500/25 disabled:opacity-50 flex flex-col items-center gap-1">
+              <User class="w-4 h-4" />
+              <span>离人检测</span>
+            </button>
+            
+            <button
+              @click="checkFire(zone.id)"
+              :disabled="!isActive || isBusy || isZoneLoading(zone.id)"
+              class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all active:scale-95 bg-orange-500/15 text-orange-400 border border-orange-500/25 hover:bg-orange-500/25 disabled:opacity-50 flex flex-col items-center gap-1">
+              <Flame class="w-4 h-4" />
+              <span>动火检测</span>
+            </button>
+            
+            <button
+              @click="alarmDemo(zone.id)"
+              :disabled="!isActive || isBusy || isZoneLoading(zone.id)"
+              class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all active:scale-95 bg-purple-500/15 text-purple-400 border border-purple-500/25 hover:bg-purple-500/25 disabled:opacity-50 flex flex-col items-center gap-1">
+              <Bell class="w-4 h-4" />
+              <span>报警演示</span>
+            </button>
+            
+            <button
+              @click="cutoffZone(zone.id)"
+              :disabled="!isActive || isBusy || isZoneLoading(zone.id)"
+              class="py-2.5 px-2 rounded-xl text-xs font-bold transition-all active:scale-95 bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25 disabled:opacity-50 flex flex-col items-center gap-1">
+              <Zap class="w-4 h-4" />
+              <span>切电</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 强制动作组 -->
+    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+      <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
+        <AlertTriangle class="w-4 h-4" /> 全局强制动作
+      </h3>
+      <div class="grid grid-cols-3 gap-2">
         <button
-          @click="selfCheck"
+          @click="forceWarning"
           :disabled="!isActive || loading !== null || isBusy"
-          class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] py-4 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center gap-2 hover:bg-[var(--theme-bg-input-hover)]">
-          <SearchCheck class="w-5 h-5 text-blue-400" />
-          <span>设备自检</span>
+          class="py-3 rounded-xl text-xs font-bold transition-all active:scale-95 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50">
+          <AlertCircle class="w-4 h-4 inline-block mr-1" />
+          预警
         </button>
         
         <button
-          @click="alarmDemo"
+          @click="forceAlarm"
           :disabled="!isActive || loading !== null || isBusy"
-          class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] py-4 rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center gap-2 hover:bg-[var(--theme-bg-input-hover)]">
-          <Bell class="w-5 h-5 text-purple-400" />
-          <span>报警演示</span>
+          class="py-3 rounded-xl text-xs font-bold transition-all active:scale-95 bg-orange-500/20 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 disabled:opacity-50">
+          <AlertTriangle class="w-4 h-4 inline-block mr-1" />
+          报警
         </button>
-      </div>
-
-      <!-- 强制动作组 -->
-      <div class="pt-2 border-t border-white/5">
-        <p class="text-[10px] text-text-muted uppercase tracking-wider mb-3">强制动作</p>
-        <div class="grid grid-cols-3 gap-2">
-          <button
-            @click="forceWarning"
-            :disabled="!isActive || loading !== null || isBusy"
-            class="py-3 rounded-xl text-xs font-bold transition-all active:scale-95 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50">
-            <AlertCircle class="w-4 h-4 inline-block mr-1" />
-            预警
-          </button>
-          
-          <button
-            @click="forceAlarm"
-            :disabled="!isActive || loading !== null || isBusy"
-            class="py-3 rounded-xl text-xs font-bold transition-all active:scale-95 bg-orange-500/20 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 disabled:opacity-50">
-            <AlertTriangle class="w-4 h-4 inline-block mr-1" />
-            报警
-          </button>
-          
-          <button
-            @click="forceCutoff"
-            :disabled="!isActive || loading !== null || isBusy"
-            class="py-3 rounded-xl text-xs font-bold transition-all active:scale-95 bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 disabled:opacity-50">
-            <Zap class="w-4 h-4 inline-block mr-1" />
-            切电
-          </button>
-        </div>
+        
+        <button
+          @click="forceCutoff"
+          :disabled="!isActive || loading !== null || isBusy"
+          class="py-3 rounded-xl text-xs font-bold transition-all active:scale-95 bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 disabled:opacity-50">
+          <Zap class="w-4 h-4 inline-block mr-1" />
+          切电
+        </button>
       </div>
     </div>
 
