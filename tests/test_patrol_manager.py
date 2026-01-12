@@ -66,6 +66,9 @@ class MockVoicePlayer:
     
     def play_file(self, path: str, priority: bool = False):
         self.played_files.append(path)
+    
+    def stop_playback(self):
+        pass
 
 
 # ==================== Fixtures ====================

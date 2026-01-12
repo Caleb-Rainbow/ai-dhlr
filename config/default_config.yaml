@@ -75,7 +75,7 @@ tts:
   enabled: true
   engine: "kokoro"  # kokoro 或 pyttsx3
   audio_dir: "audio_assets"
-  idle_timeout: 60  # 空闲超时销毁时间（秒）
+  idle_timeout: 150  # 空闲超时销毁时间（秒）
 
 # 日志配置
 logging:
