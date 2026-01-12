@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
 import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig } from '../types';
-import { Save, Info, Volume2, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check } from 'lucide-vue-next';
+import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -62,6 +62,10 @@ const loadingSerialPorts = ref(false);
 
 // LoRa设置状态
 const settingLora = ref(false);
+
+// 音量设置
+const voiceVolume = ref(100); // 音量百分比 0-100，默认最大音量
+const settingVolume = ref(false);
 
 // 编辑用的本地状态
 const remoteForm = ref({
@@ -144,6 +148,12 @@ const loadData = async () => {
     // 加载可用串口列表
     await loadSerialPorts();
   } catch (e) { console.error('Failed to load serial config', e); }
+
+  // 加载音量配置
+  try {
+    const volumeData = await ws.request<{ volume: number }>('get_volume').catch(() => ({ volume: 1.0 }));
+    voiceVolume.value = Math.round(volumeData.volume * 100);
+  } catch (e) { console.error('Failed to load volume config', e); }
 };
 
 // 加载可用串口列表
@@ -257,6 +267,18 @@ const setLoraConfig = async () => {
   }
 };
 
+// 设置音量
+const updateVolume = async () => {
+  settingVolume.value = true;
+  try {
+    await ws.request('set_volume', { volume: voiceVolume.value / 100 });
+  } catch (e: any) {
+    console.error('设置音量失败', e);
+  } finally {
+    settingVolume.value = false;
+  }
+};
+
 // 切换串口调试日志
 const togglingSerialDebug = ref(false);
 const toggleSerialDebug = async () => {
@@ -344,7 +366,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Network Status - 网络状态 -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 animate-fade-in-up shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+    <div
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 animate-fade-in-up shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <component :is="networkIcon" class="w-4 h-4" /> 网络状态
         <button @click="refreshNetwork" class="ml-auto p-1 rounded-lg hover:bg-white/10 transition-colors">
@@ -383,7 +406,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Remote Server Config - 远程服务器配置 -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Server class="w-4 h-4" /> 远程服务器
         <div class="ml-auto flex items-center gap-2">
@@ -494,7 +518,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Serial Port Config - 串口配置 -->
-    <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div v-if="!loading"
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Server class="w-4 h-4" /> 串口配置
         <span v-if="serialConfig.is_open" class="text-xs text-success ml-auto">已连接</span>
@@ -603,7 +628,8 @@ onUnmounted(() => {
     </div>
 
     <!-- LoRa Config - LoRa配置 -->
-    <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div v-if="!loading"
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Wifi class="w-4 h-4" /> LoRa 配置
       </h3>
@@ -634,7 +660,8 @@ onUnmounted(() => {
 
 
     <!-- Theme Settings -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+    <div
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
       <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
         <Palette class="w-4 h-4" /> 外观设置
       </h3>
@@ -674,7 +701,8 @@ onUnmounted(() => {
 
     <!-- System Info -->
     <Transition name="fade" mode="out-in">
-      <div v-if="loading" key="loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+      <div v-if="loading" key="loading"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Info class="w-4 h-4" /> 设备信息
         </h3>
@@ -692,7 +720,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-else-if="deviceInfo" key="content" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+      <div v-else-if="deviceInfo" key="content"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Info class="w-4 h-4" /> 设备信息
         </h3>
@@ -747,7 +776,8 @@ onUnmounted(() => {
 
     <!-- Alarm Thresholds -->
     <Transition name="fade" mode="out-in">
-      <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
+      <div v-if="!loading"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <ShieldAlert class="w-4 h-4" /> 报警阈值 (秒)
         </h3>
@@ -776,12 +806,29 @@ onUnmounted(() => {
 
     <!-- Voice Settings -->
     <Transition name="fade" mode="out-in">
-      <div v-if="!loading" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
+      <div v-if="!loading"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
         <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
           <Volume2 class="w-4 h-4" /> 语音播报
         </h3>
 
         <div class="space-y-4">
+          <!-- 音量调整 -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs text-text-muted ml-1">播报音量</label>
+              <span class="text-sm font-mono text-primary font-medium">{{ voiceVolume }}%</span>
+            </div>
+            <div class="flex items-center gap-3 p-3 rounded-2xl"
+              style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+              <VolumeX v-if="voiceVolume === 0" class="w-5 h-5 text-text-muted flex-shrink-0" />
+              <Volume2 v-else class="w-5 h-5 text-primary flex-shrink-0" />
+              <input type="range" v-model.number="voiceVolume" min="0" max="100" step="1" @change="updateVolume"
+                class="volume-slider flex-1 h-2 rounded-full appearance-none cursor-pointer"
+                :style="{ background: `linear-gradient(to right, var(--color-primary) ${voiceVolume}%, var(--theme-border-input) ${voiceVolume}%)` }" />
+            </div>
+          </div>
+
           <div class="space-y-1">
             <label class="text-xs text-text-muted ml-1">播报间隔 (秒)</label>
             <input v-model.number="alarmSettings.broadcast_interval" type="number"
@@ -887,5 +934,42 @@ onUnmounted(() => {
     opacity: 0;
     transform: translateX(100px) scale(0.3);
   }
+}
+
+/* 音量滑动条样式 */
+.volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px var(--color-primary-shadow, rgba(99, 102, 241, 0.4));
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 </style>

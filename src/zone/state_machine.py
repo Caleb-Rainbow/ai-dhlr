@@ -300,8 +300,29 @@ class ZoneStateMachine:
                 self.zone.roi = [tuple(p) for p in roi]
     
     def get_status(self) -> dict:
-        """获取当前状态"""
+        """获取当前状态（实时计算倒计时）"""
         with self._lock:
+            # 如果当前状态是无人动火相关状态，需要实时计算倒计时
+            if self._no_person_start_time is not None and self.zone.state in [
+                ZoneState.ACTIVE_NO_PERSON, ZoneState.WARNING, ZoneState.ALARM
+            ]:
+                # 获取三阶段报警配置
+                config = get_config()
+                alarm_config = config.alarm
+                warning_time = alarm_config.warning_time
+                alarm_time = alarm_config.alarm_time
+                action_time = alarm_config.action_time
+                
+                # 计算实时的无人持续时间
+                current_time = time.time()
+                no_person_duration = current_time - self._no_person_start_time
+                
+                # 实时更新倒计时值
+                self.zone.no_person_duration = no_person_duration
+                self.zone.warning_remaining = max(0, warning_time - no_person_duration)
+                self.zone.alarm_remaining = max(0, alarm_time - no_person_duration)
+                self.zone.cutoff_remaining = max(0, action_time - no_person_duration)
+            
             return self.zone.to_dict()
 
 

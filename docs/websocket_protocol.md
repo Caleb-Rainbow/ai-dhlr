@@ -203,6 +203,18 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 **`set_device_id` 参数说明：**
 - `device_id`: 新的设备ID，只允许大写字母和数字，长度1-32位
 
+### 语音音量
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `get_volume` | 获取当前语音音量 | 无 | `{volume: float}` |
+| `set_volume` | 设置语音音量 | `volume` (0.0-1.0) | `{volume, message}` |
+
+**说明：**
+- `volume`：音量值范围为 0.0（静音）到 1.0（最大音量）
+- 设置后会立即生效并持久化到配置文件
+
+
 ### 日志
 
 | Action | 说明 | 参数 |

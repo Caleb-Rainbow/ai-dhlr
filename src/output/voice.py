@@ -234,6 +234,29 @@ class VoicePlayer:
         
         self._logger.info("语音播报器已停止")
     
+    def set_volume(self, volume: float):
+        """动态设置音量
+        
+        Args:
+            volume: 音量值 (0.0 - 1.0)
+        """
+        self._volume = max(0.0, min(1.0, volume))
+        self._logger.info(f"音量已设置为: {self._volume * 100:.0f}%")
+        
+        # 如果正在播放，立即更新音量
+        if self._pygame_initialized:
+            try:
+                import pygame
+                if pygame.mixer.get_init():
+                    pygame.mixer.music.set_volume(self._volume)
+            except Exception as e:
+                self._logger.warning(f"更新音量失败: {e}")
+    
+    @property
+    def volume(self) -> float:
+        """获取当前音量"""
+        return self._volume
+    
     @property
     def is_enabled(self) -> bool:
         return self._enabled

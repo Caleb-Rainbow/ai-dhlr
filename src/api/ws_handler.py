@@ -83,6 +83,9 @@ class WSHandler:
             "get_remote_config": self._get_remote_config,
             "update_remote_config": self._update_remote_config,
             "verify_remote_login": self._verify_remote_login,
+            # 音量相关
+            "get_volume": self._get_volume,
+            "set_volume": self._set_volume,
             
             # 控制相关
             "reset_zone": self._reset_zone,
@@ -645,6 +648,12 @@ class WSHandler:
                 "idle_timeout": config.tts.idle_timeout
             }
         
+        if category in ["all", "voice"]:
+            result["voice"] = {
+                "enabled": config.voice.enabled,
+                "volume": config.voice.volume
+            }
+        
         return result
     
     async def _update_settings(self, params: dict) -> dict:
@@ -693,6 +702,36 @@ class WSHandler:
         logger.info(f"设备ID已更新为: {device_id}")
         
         return {"device_id": device_id, "message": "设备ID已更新"}
+    
+    async def _get_volume(self, params: dict) -> dict:
+        """获取当前语音音量"""
+        config = config_manager.config
+        return {"volume": config.voice.volume}
+    
+    async def _set_volume(self, params: dict) -> dict:
+        """设置语音音量"""
+        volume = params.get("volume")
+        
+        if volume is None:
+            raise ValueError("缺少 volume 参数")
+        
+        # 验证范围
+        volume = float(volume)
+        if volume < 0 or volume > 1:
+            raise ValueError("音量必须在 0.0 到 1.0 之间")
+        
+        # 更新配置
+        config_manager.config.voice.volume = volume
+        config_manager.save()
+        
+        # 更新播放器音量
+        try:
+            from ..output.voice import voice_player
+            voice_player.set_volume(volume)
+        except Exception as e:
+            logger.warning(f"更新播放器音量失败: {e}")
+        
+        return {"volume": volume, "message": "音量已更新"}
     
     async def _get_network(self, params: dict) -> dict:
         """获取网络状态"""
