@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
 import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig } from '../types';
-import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check } from 'lucide-vue-next';
+import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -90,6 +90,10 @@ const showSaveButton = ref(false);
 const editingDeviceId = ref(false);
 const tempDeviceId = ref('');
 const savingDeviceId = ref(false);
+
+// 系统更新状态
+const updatingSystem = ref(false);
+const updateResult = ref<{ success: boolean; message: string } | null>(null);
 
 // Theme management
 const { theme, toggleTheme } = useTheme();
@@ -326,6 +330,33 @@ const saveDeviceId = async () => {
     alert('设置设备ID失败: ' + (e.message || e));
   } finally {
     savingDeviceId.value = false;
+  }
+};
+
+// 触发系统更新
+const triggerSystemUpdate = async () => {
+  if (!confirm('确定要更新系统吗？\n\n更新将拉取最新代码并重启服务，期间连接会断开。')) {
+    return;
+  }
+
+  updatingSystem.value = true;
+  updateResult.value = null;
+
+  try {
+    const result = await ws.request<{ success: boolean; message: string }>('trigger_update');
+    updateResult.value = result;
+    // 5秒后隐藏结果提示
+    setTimeout(() => {
+      updateResult.value = null;
+    }, 5000);
+  } catch (e: any) {
+    updateResult.value = { success: false, message: e.message || '更新失败' };
+    // 5秒后隐藏错误提示
+    setTimeout(() => {
+      updateResult.value = null;
+    }, 5000);
+  } finally {
+    updatingSystem.value = false;
   }
 };
 
@@ -774,6 +805,36 @@ onUnmounted(() => {
               <div class="font-mono text-text-primary">{{ ((deviceInfo.uptime || 0) / 3600).toFixed(1) }} 小时</div>
             </div>
           </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- System Update - 系统更新 -->
+    <Transition name="fade" mode="out-in">
+      <div v-if="!loading"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+        <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+          <Download class="w-4 h-4" /> 系统更新
+        </h3>
+        <div class="space-y-3">
+          <p class="text-sm text-text-muted">
+            点击下方按钮将拉取最新代码并重启服务。更新过程中连接会短暂断开。
+          </p>
+          <button @click="triggerSystemUpdate" :disabled="updatingSystem"
+            class="w-full py-3 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20">
+            <Loader v-if="updatingSystem" class="w-5 h-5 animate-spin" />
+            <Download v-else class="w-5 h-5" />
+            <span>{{ updatingSystem ? '正在更新...' : '立即更新系统' }}</span>
+          </button>
+          <!-- 更新结果提示 -->
+          <Transition name="slide-fade">
+            <div v-if="updateResult" class="flex items-center gap-2 p-3 rounded-xl text-sm"
+              :class="updateResult.success ? 'bg-success/20 text-success' : 'bg-red-500/20 text-red-400'">
+              <CheckCircle v-if="updateResult.success" class="w-4 h-4 flex-shrink-0" />
+              <XCircle v-else class="w-4 h-4 flex-shrink-0" />
+              <span>{{ updateResult.message }}</span>
+            </div>
+          </Transition>
         </div>
       </div>
     </Transition>

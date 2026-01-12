@@ -117,6 +117,9 @@ class WSHandler:
             "patrol_check_person": self._patrol_check_person,
             "patrol_check_fire": self._patrol_check_fire,
             "patrol_cutoff_zone": self._patrol_cutoff_zone,
+            
+            # 系统更新
+            "trigger_update": self._trigger_update,
         }
     
     async def handle_request(self, message: dict) -> dict:
@@ -1204,6 +1207,51 @@ class WSHandler:
         
         from ..patrol.patrol_manager import patrol_manager
         return patrol_manager.cutoff_zone(zone_id)
+
+
+    async def _trigger_update(self, params: dict) -> dict:
+        """
+        触发系统更新脚本
+        
+        执行 update.sh 脚本，拉取最新代码并重启服务。
+        注意：执行后服务将重启，WebSocket 连接会断开。
+        
+        Returns:
+            {"message": str, "success": bool}
+        """
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        # 获取项目根目录
+        project_root = Path(__file__).parent.parent.parent
+        update_script = project_root / "update.sh"
+        
+        if not update_script.exists():
+            raise ValueError(f"更新脚本不存在: {update_script}")
+        
+        logger.info(f"触发系统更新，执行脚本: {update_script}")
+        
+        try:
+            # 确保脚本有执行权限
+            os.chmod(update_script, 0o755)
+            
+            # 在后台执行更新脚本（使用 nohup 确保即使 WebSocket 断开也能继续执行）
+            subprocess.Popen(
+                ["bash", str(update_script)],
+                cwd=str(project_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            
+            return {
+                "success": True,
+                "message": "更新脚本已触发，服务即将重启..."
+            }
+        except Exception as e:
+            logger.error(f"执行更新脚本失败: {e}")
+            raise ValueError(f"执行更新脚本失败: {e}")
 
 
 # 全局处理器实例

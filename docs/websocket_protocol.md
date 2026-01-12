@@ -283,6 +283,24 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 }
 ```
 
+### 系统更新
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `trigger_update` | 触发系统更新 | 无 | `{success, message}` |
+
+**说明：**
+- 该接口会执行服务器上的 `update.sh` 脚本
+- 脚本将拉取最新的 Git 代码并重启服务
+- 执行后 WebSocket 连接会断开，需要等待服务重启后重新连接
+- 建议在调用前向用户显示确认对话框
+
+**调用示例：**
+```typescript
+const result = await ws.request<{ success: boolean; message: string }>('trigger_update');
+// result: { success: true, message: "更新脚本已触发，服务即将重启..." }
+```
+
 ---
 
 ## 重连策略
