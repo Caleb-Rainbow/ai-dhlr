@@ -692,9 +692,15 @@ class SerialManager:
                              port: str = None, 
                              baudrate: int = None,
                              poll_interval: float = None) -> bool:
-        """更新配置"""
+        """
+        更新配置
+        
+        只有当配置真正改变时才触发串口重启，避免不必要的重新初始化。
+        """
         need_restart = False
-        if enabled is not None:
+        
+        # 只有值真正改变时才设置 need_restart
+        if enabled is not None and enabled != self._enabled:
             self._enabled = enabled
             need_restart = True
         if port is not None and port != self._port:
@@ -703,10 +709,12 @@ class SerialManager:
         if baudrate is not None and baudrate != self._baudrate:
             self._baudrate = baudrate
             need_restart = True
-        if poll_interval is not None:
+        if poll_interval is not None and poll_interval != self._poll_interval:
             self._poll_interval = poll_interval
+            # poll_interval 改变不需要重启串口
             
         if need_restart:
+            self._logger.info(f"串口配置已更改，正在重新初始化...")
             self.stop()
             time.sleep(0.5)
             self.initialize(
@@ -715,18 +723,49 @@ class SerialManager:
                 self._baudrate,
                 self._poll_interval
             )
+        else:
+            self._logger.info("串口配置未改变，无需重新初始化")
         return True
 
     def stop(self):
-        """停止"""
-        self._running = False
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        """
+        停止串口管理器
         
+        正确关闭串口连接、停止事件循环、清理所有状态，
+        以便后续可以重新初始化。
+        """
+        self._running = False
+        
+        # 先关闭串口
+        if self._loop and self._helper:
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._helper.close(),
+                    self._loop
+                )
+                future.result(timeout=2.0)
+            except Exception as e:
+                self._logger.warning(f"关闭串口时出错: {e}")
+        
+        # 停止事件循环
+        if self._loop:
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except Exception:
+                pass
+        
+        # 等待线程结束
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         
+        # 重置所有状态，以便重新初始化
+        self._helper = None
+        self._loop = None
+        self._thread = None
         self._command_queue = None
+        self._current_command = None
+        self._response_event = None
+        
         self._logger.info("串口管理器已停止")
 
 
