@@ -452,7 +452,7 @@ class FireSafetySystem:
                             for z in enabled_zones
                         )
                         has_alarm = any(
-                            z.state.value in ['warning', 'alarm', 'cutoff']
+                            z.zone.state.value in ['warning', 'alarm', 'cutoff']
                             for z in enabled_zones
                         )
                         self._logger.debug(f"指示灯状态: has_fire={has_fire}, has_absence={has_absence}, has_alarm={has_alarm}")
