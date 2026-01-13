@@ -455,10 +455,11 @@ class FireSafetySystem:
                             z.state.value in ['warning', 'alarm', 'cutoff']
                             for z in enabled_zones
                         )
-                        
+                        self._logger.debug(f"指示灯状态: has_fire={has_fire}, has_absence={has_absence}, has_alarm={has_alarm}")
                         # 更新指示灯
                         self._indicator_controller.update_indicators(has_fire, has_absence, has_alarm)
                     except Exception as e:
+                        self._logger.error(f"指示灯更新错误: {e}")
                         pass  # 忽略指示灯更新错误，不影响主流程
                 
                 # 控制检测频率

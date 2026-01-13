@@ -172,17 +172,17 @@ class IndicatorController:
         if fire_on != self._last_states["fire"]:
             self._gpio.write(self.config.pin_fire, fire_on)
             self._last_states["fire"] = fire_on
-            logger.debug(f"动火指示灯: {'亮' if fire_on else '灭'}")
+            logger.info(f"动火指示灯: {'亮' if fire_on else '灭'}")
         
         if absence != self._last_states["absence"]:
             self._gpio.write(self.config.pin_absence, absence)
             self._last_states["absence"] = absence
-            logger.debug(f"离人指示灯: {'亮' if absence else '灭'}")
+            logger.info(f"离人指示灯: {'亮' if absence else '灭'}")
         
         if alarm != self._last_states["alarm"]:
             self._gpio.write(self.config.pin_alarm, alarm)
             self._last_states["alarm"] = alarm
-            logger.debug(f"报警指示灯: {'亮' if alarm else '灭'}")
+            logger.info(f"报警指示灯: {'亮' if alarm else '灭'}")
     
     def turn_off_all(self):
         """关闭所有指示灯"""
@@ -196,7 +196,7 @@ class IndicatorController:
         self._gpio.write(self.config.pin_absence, False)
         self._gpio.write(self.config.pin_alarm, False)
         self._last_states = {"fire": False, "absence": False, "alarm": False}
-        logger.debug("所有指示灯已关闭")
+        logger.info("所有指示灯已关闭")
     
     def reload_config(self, gpio_config):
         """重新加载配置"""
