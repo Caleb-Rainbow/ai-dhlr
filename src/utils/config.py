@@ -107,7 +107,11 @@ class LoggingConfig:
 @dataclass
 class GpioConfig:
     """GPIO配置"""
-    simulated: bool = True  # Demo阶段模拟
+    enabled: bool = True                      # 是否启用 GPIO 输出
+    gpio_path: str = "/sys/external_gpio"     # sysfs GPIO 路径
+    pin_fire: str = "gpio0"                   # 动火指示灯引脚
+    pin_absence: str = "gpio1"                # 离人指示灯引脚
+    pin_alarm: str = "gpio2"                  # 报警指示灯引脚
 
 
 @dataclass
@@ -300,7 +304,11 @@ class ConfigManager:
         # 解析GPIO配置
         gpio_raw = raw.get('gpio', {})
         gpio = GpioConfig(
-            simulated=gpio_raw.get('simulated', True)
+            enabled=gpio_raw.get('enabled', True),
+            gpio_path=gpio_raw.get('gpio_path', '/sys/external_gpio'),
+            pin_fire=gpio_raw.get('pin_fire', 'gpio0'),
+            pin_absence=gpio_raw.get('pin_absence', 'gpio1'),
+            pin_alarm=gpio_raw.get('pin_alarm', 'gpio2')
         )
         
         # 解析报警配置（三阶段）
@@ -441,7 +449,11 @@ class ConfigManager:
                 'snapshot_dir': config.logging.snapshot_dir
             },
             'gpio': {
-                'simulated': config.gpio.simulated
+                'enabled': config.gpio.enabled,
+                'gpio_path': config.gpio.gpio_path,
+                'pin_fire': config.gpio.pin_fire,
+                'pin_absence': config.gpio.pin_absence,
+                'pin_alarm': config.gpio.pin_alarm
             },
             'alarm': {
                 'warning_time': config.alarm.warning_time,

@@ -149,6 +149,18 @@ class FireSafetySystem:
             except Exception as e:
                 self._logger.warning(f"串口管理器初始化失败: {e}")
             
+            # 初始化 GPIO 指示灯控制器
+            try:
+                from src.output.gpio import init_indicator_controller
+                self._indicator_controller = init_indicator_controller(config.gpio)
+                if self._indicator_controller.is_available():
+                    self._logger.info("GPIO 指示灯控制器初始化完成")
+                else:
+                    self._logger.info("GPIO 指示灯控制器已初始化（sysfs 不可用，已禁用）")
+            except Exception as e:
+                self._logger.warning(f"GPIO 指示灯控制器初始化失败: {e}")
+                self._indicator_controller = None
+            
             self._logger.info("系统初始化完成")
             return True
             
@@ -426,6 +438,28 @@ class FireSafetySystem:
                     # 仅在非巡检模式下更新状态机（触发状态转换和回调）
                     if not patrol_manager.is_active:
                         sm.update(has_person, is_fire_on, frame)
+                
+                # 更新 GPIO 指示灯状态
+                if hasattr(self, '_indicator_controller') and self._indicator_controller:
+                    try:
+                        zones = zone_manager.get_all_zones()
+                        enabled_zones = [z for z in zones if z.zone.enabled]
+                        
+                        # 聚合所有区域状态
+                        has_fire = any(z.zone.is_fire_on for z in enabled_zones)
+                        has_absence = any(
+                            z.zone.is_fire_on and not z.zone.has_person
+                            for z in enabled_zones
+                        )
+                        has_alarm = any(
+                            z.state.value in ['warning', 'alarm', 'cutoff']
+                            for z in enabled_zones
+                        )
+                        
+                        # 更新指示灯
+                        self._indicator_controller.update_indicators(has_fire, has_absence, has_alarm)
+                    except Exception as e:
+                        pass  # 忽略指示灯更新错误，不影响主流程
                 
                 # 控制检测频率
                 time.sleep(0.1)  # ~10 FPS

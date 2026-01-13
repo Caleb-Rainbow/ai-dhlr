@@ -238,6 +238,19 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 - 日志格式：`[TX] FF AA FF 01 03 00 30 00 01 84 05`（发送）、`[RX] 01 03 02 00 05 XX XX`（接收）
 - 用于调试串口通讯问题
 
+### GPIO 控制
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `get_gpio_pins` | 获取可用 GPIO 引脚列表 | 无 | `{pins: ["gpio0", "gpio1", ...]}` |
+| `get_gpio_config` | 获取 GPIO 配置 | 无 | `{enabled, gpio_path, pin_fire, pin_absence, pin_alarm}` |
+| `update_gpio_config` | 更新 GPIO 配置 | `enabled?`, `pin_fire?`, `pin_absence?`, `pin_alarm?` | `{message}` |
+
+**说明：**
+- GPIO 通过 sysfs 接口控制，路径默认为 `/sys/external_gpio`
+- 三个指示灯分别表示：动火状态（fire）、离人状态（absence）、报警状态（alarm）
+- 只要有任意区域处于对应状态，相应指示灯就会亮起
+
 
 ### 巡检操作
 

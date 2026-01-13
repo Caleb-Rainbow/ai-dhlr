@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
-import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig } from '../types';
-import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download } from 'lucide-vue-next';
+import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig, GpioConfig } from '../types';
+import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -55,6 +55,19 @@ const loraConfig = ref<LoraConfig>({
   id: 0,
   channel: 0
 });
+
+// GPIO配置
+const gpioConfig = ref<GpioConfig>({
+  enabled: true,
+  gpio_path: '/sys/external_gpio',
+  pin_fire: 'gpio0',
+  pin_absence: 'gpio1',
+  pin_alarm: 'gpio2'
+});
+
+// 可用GPIO引脚列表
+const gpioPins = ref<string[]>([]);
+const loadingGpioPins = ref(false);
 
 // 可用串口列表
 const serialPorts = ref<Array<{ device: string; name: string; description: string; hwid: string }>>([]);
@@ -158,6 +171,41 @@ const loadData = async () => {
     const volumeData = await ws.request<{ volume: number }>('get_volume').catch(() => ({ volume: 1.0 }));
     voiceVolume.value = Math.round(volumeData.volume * 100);
   } catch (e) { console.error('Failed to load volume config', e); }
+
+  // 加载GPIO配置
+  try {
+    const gpio = await ws.request<GpioConfig>('get_gpio_config').catch(() => gpioConfig.value);
+    gpioConfig.value = gpio;
+    await loadGpioPins();
+  } catch (e) { console.error('Failed to load gpio config', e); }
+};
+
+// 加载可用GPIO引脚列表
+const loadGpioPins = async () => {
+  loadingGpioPins.value = true;
+  try {
+    const result = await ws.request<{ pins: string[] }>('get_gpio_pins');
+    gpioPins.value = result.pins || [];
+  } catch (e) {
+    console.error('Failed to load GPIO pins', e);
+    gpioPins.value = [];
+  } finally {
+    loadingGpioPins.value = false;
+  }
+};
+
+// 保存GPIO配置
+const savingGpio = ref(false);
+const saveGpioConfig = async () => {
+  savingGpio.value = true;
+  try {
+    await ws.request('update_gpio_config', gpioConfig.value);
+    // 显示成功提示
+  } catch (e: any) {
+    alert('保存GPIO配置失败: ' + (e.message || e));
+  } finally {
+    savingGpio.value = false;
+  }
 };
 
 // 加载可用串口列表
@@ -687,6 +735,78 @@ onUnmounted(() => {
         <Loader v-if="settingLora" class="w-4 h-4 animate-spin" />
         <span>{{ settingLora ? '设置中...' : '应用 LoRa 配置' }}</span>
       </button>
+    </div>
+
+    <!-- GPIO Config - GPIO指示灯配置 -->
+    <div v-if="!loading"
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+      <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+        <Lightbulb class="w-4 h-4" /> GPIO 指示灯
+        <button @click="loadGpioPins" :disabled="loadingGpioPins"
+          class="ml-auto p-1 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50" title="刷新引脚列表">
+          <RefreshCw class="w-3.5 h-3.5 text-text-muted" :class="{ 'animate-spin': loadingGpioPins }" />
+        </button>
+      </h3>
+
+      <div class="space-y-4">
+        <!-- 启用开关 -->
+        <div class="flex items-center justify-between p-4 rounded-2xl"
+          style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center"
+              :class="gpioConfig.enabled ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'">
+              <Lightbulb class="w-5 h-5" />
+            </div>
+            <div>
+              <div class="font-medium text-text-primary">启用指示灯</div>
+              <div class="text-xs text-text-muted">{{ gpioConfig.enabled ? '已启用' : '已禁用' }}</div>
+            </div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" v-model="gpioConfig.enabled" class="sr-only peer">
+            <div class="w-12 h-6 rounded-full peer transition-colors duration-300"
+              :class="gpioConfig.enabled ? 'bg-success' : 'bg-gray-500'">
+              <div class="absolute top-[2px] w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300"
+                :class="gpioConfig.enabled ? 'left-[26px]' : 'left-[2px]'"></div>
+            </div>
+          </label>
+        </div>
+
+        <!-- 引脚选择 -->
+        <div class="grid grid-cols-3 gap-3">
+          <div class="space-y-1">
+            <label class="text-xs text-text-muted ml-1">动火指示灯</label>
+            <select v-model="gpioConfig.pin_fire"
+              class="w-full rounded-xl px-3 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary text-sm"
+              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+              <option v-for="pin in gpioPins" :key="pin" :value="pin">{{ pin }}</option>
+            </select>
+          </div>
+          <div class="space-y-1">
+            <label class="text-xs text-text-muted ml-1">离人指示灯</label>
+            <select v-model="gpioConfig.pin_absence"
+              class="w-full rounded-xl px-3 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary text-sm"
+              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+              <option v-for="pin in gpioPins" :key="pin" :value="pin">{{ pin }}</option>
+            </select>
+          </div>
+          <div class="space-y-1">
+            <label class="text-xs text-text-muted ml-1">报警指示灯</label>
+            <select v-model="gpioConfig.pin_alarm"
+              class="w-full rounded-xl px-3 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary text-sm"
+              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+              <option v-for="pin in gpioPins" :key="pin" :value="pin">{{ pin }}</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 保存按钮 -->
+        <button @click="saveGpioConfig" :disabled="savingGpio"
+          class="w-full py-3 bg-primary hover:bg-primary-light text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+          <Loader v-if="savingGpio" class="w-4 h-4 animate-spin" />
+          <span>{{ savingGpio ? '保存中...' : '应用 GPIO 配置' }}</span>
+        </button>
+      </div>
     </div>
 
 

@@ -105,3 +105,11 @@ export interface LoraConfig {
     id: number;
     channel: number;
 }
+
+export interface GpioConfig {
+    enabled: boolean;
+    gpio_path: string;
+    pin_fire: string;
+    pin_absence: string;
+    pin_alarm: string;
+}

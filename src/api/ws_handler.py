@@ -118,6 +118,11 @@ class WSHandler:
             "patrol_check_fire": self._patrol_check_fire,
             "patrol_cutoff_zone": self._patrol_cutoff_zone,
             
+            # GPIO 相关
+            "get_gpio_pins": self._get_gpio_pins,
+            "get_gpio_config": self._get_gpio_config,
+            "update_gpio_config": self._update_gpio_config,
+            
             # 系统更新
             "trigger_update": self._trigger_update,
         }
@@ -1270,6 +1275,53 @@ class WSHandler:
         except Exception as e:
             logger.error(f"执行更新脚本失败: {e}")
             raise ValueError(f"执行更新脚本失败: {e}")
+
+    # ==================== GPIO 处理器 ====================
+    
+    async def _get_gpio_pins(self, params: dict) -> dict:
+        """获取可用的 GPIO 引脚列表"""
+        from ..output.gpio import list_gpio_pins
+        gpio_path = config_manager.config.gpio.gpio_path
+        pins = list_gpio_pins(gpio_path)
+        return {"pins": pins}
+    
+    async def _get_gpio_config(self, params: dict) -> dict:
+        """获取 GPIO 配置"""
+        gpio = config_manager.config.gpio
+        return {
+            "enabled": gpio.enabled,
+            "gpio_path": gpio.gpio_path,
+            "pin_fire": gpio.pin_fire,
+            "pin_absence": gpio.pin_absence,
+            "pin_alarm": gpio.pin_alarm
+        }
+    
+    async def _update_gpio_config(self, params: dict) -> dict:
+        """更新 GPIO 配置"""
+        gpio = config_manager.config.gpio
+        
+        if "enabled" in params:
+            gpio.enabled = params["enabled"]
+        if "pin_fire" in params:
+            gpio.pin_fire = params["pin_fire"]
+        if "pin_absence" in params:
+            gpio.pin_absence = params["pin_absence"]
+        if "pin_alarm" in params:
+            gpio.pin_alarm = params["pin_alarm"]
+        
+        config_manager.save()
+        
+        # 重新加载指示灯控制器配置
+        try:
+            from ..output.gpio import get_indicator_controller
+            controller = get_indicator_controller()
+            if controller:
+                controller.reload_config(gpio)
+                logger.info("已重新加载 GPIO 指示灯配置")
+        except Exception as e:
+            logger.warning(f"重新加载 GPIO 配置失败: {e}")
+        
+        return {"message": "GPIO 配置已更新"}
 
 
 # 全局处理器实例
