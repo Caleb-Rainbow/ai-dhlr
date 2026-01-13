@@ -25,7 +25,6 @@ from src.detection.detector import PersonDetector
 from src.zone.state_machine import zone_manager, ZoneState, StateChangeEvent
 from src.zone.models import Zone
 from src.output.voice import voice_player
-from src.output.gpio import gpio_controller
 from src.api.server import create_app
 from src.api.websocket import sync_broadcast_state_change, sync_broadcast_alarm_event
 from src.patrol.patrol_manager import patrol_manager
@@ -92,10 +91,6 @@ class FireSafetySystem:
                 enabled=config.voice.enabled,
                 volume=config.voice.volume
             )
-            
-            # 初始化GPIO控制
-            gpio_controller.initialize(simulated=config.gpio.simulated)
-            
             # 初始化TTS管理器（Kokoro智能生命周期管理）
             if config.tts.enabled:
                 try:
@@ -186,9 +181,6 @@ class FireSafetySystem:
         """切电回调（第三阶段）- 执行切电并更新播报内容"""
         config = get_config()
         self._logger.warning(f"[切电] {zone.name} 无人看管超过 {config.alarm.action_time} 秒，执行切电")
-        
-        # 使用GPIO控制器执行切电（兼容模拟模式）
-        gpio_controller.cutoff(zone.id)
         
         # 使用串口管理器执行切电（实际硬件）
         try:
@@ -425,7 +417,6 @@ class FireSafetySystem:
                     if serial_mgr:
                         is_fire_on = serial_mgr.is_fire_on(sm.zone.id)
                     else:
-                        # 回退到模拟GPIO状态
                         is_fire_on = zone_manager._fire_states.get(sm.zone.id, False)
                     
                     # 始终更新检测结果到 zone 对象，确保巡检模式下也能获取实时状态
@@ -476,7 +467,6 @@ class FireSafetySystem:
         camera_manager.stop_all()
         if self._detector:
             self._detector.release()
-        gpio_controller.cleanup()
         
         self._logger.info("系统已停止")
     

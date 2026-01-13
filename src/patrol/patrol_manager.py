@@ -12,7 +12,6 @@ from enum import Enum
 from ..utils.logger import get_logger
 from ..tts.tts_manager import tts_manager, AudioType
 from ..output.voice import voice_player
-from ..output.gpio import gpio_controller
 
 
 class PatrolStep(Enum):
@@ -686,7 +685,7 @@ class PatrolManager:
             if audio_path:
                 voice_player.play_file(audio_path)
             
-            # 执行切电 - 使用 serial_manager 而不是 gpio_controller
+            # 执行切电 - 使用 serial_manager
             serial_manager.cutoff(zone_id)
             
             self._add_result(zone_id, zone_name, "强制切电", "success", 

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
 
-from .routes import cameras, zones, status, control, settings
+from .routes import cameras, zones, status, settings
 from .websocket import ws_manager, broadcast_status_update, message_dispatcher
 from ..zone.state_machine import zone_manager
 from ..utils.logger import get_logger
@@ -129,7 +129,6 @@ def create_app() -> FastAPI:
     app.include_router(cameras.router)
     app.include_router(zones.router)
     app.include_router(status.router)
-    app.include_router(control.router)
     app.include_router(settings.router)
     
     # WebSocket端点
