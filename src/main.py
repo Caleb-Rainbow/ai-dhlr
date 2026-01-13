@@ -448,7 +448,7 @@ class FireSafetySystem:
                         # 聚合所有区域状态
                         has_fire = any(z.zone.is_fire_on for z in enabled_zones)
                         has_absence = any(
-                            z.zone.is_fire_on and not z.zone.has_person
+                            not z.zone.has_person
                             for z in enabled_zones
                         )
                         has_alarm = any(
