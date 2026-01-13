@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { RefreshCcw, Activity, Flame, User, Cpu, Zap, Maximize2 } from 'lucide-vue-next';
+import { RefreshCcw, Activity, Flame, User, Cpu, Zap, Maximize2, Lightbulb } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneStatus, DeviceInfo, PerformanceStats } from '../types';
 import Sparkline from '../components/Sparkline.vue';
@@ -21,6 +21,11 @@ let perfTimer: ReturnType<typeof setInterval> | null = null;
 let unsubscribeStatus: (() => void) | null = null;
 
 const enabledZones = computed(() => zones.value.filter(z => z.enabled !== false));
+
+// 指示灯状态计算
+const indicatorFire = computed(() => enabledZones.value.some(z => z.is_fire_on));
+const indicatorAbsence = computed(() => enabledZones.value.some(z => !z.has_person));
+const indicatorAlarm = computed(() => enabledZones.value.some(z => ['warning', 'alarm', 'cutoff'].includes(z.state)));
 
 // Fullscreen toggle function
 const toggleFullscreen = () => {
@@ -121,6 +126,41 @@ onUnmounted(() => {
             class="backdrop-blur-sm bg-[var(--theme-bg-input)] border border-[var(--theme-border-input)] p-2.5 rounded-xl text-text-secondary active:scale-90 transition-all hover:bg-[var(--theme-bg-input-hover)]">
             <Maximize2 class="w-4 h-4" />
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Indicator Lights Status - 指示灯状态 -->
+    <div
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] rounded-2xl p-3 transition-all">
+      <div class="flex items-center justify-between gap-2">
+        <div class="text-[10px] text-text-muted font-bold uppercase tracking-wider flex items-center gap-1.5">
+          <Lightbulb class="w-3 h-3" /> 指示灯
+        </div>
+        <div class="flex items-center gap-3">
+          <!-- 动火指示灯 -->
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-full transition-all duration-300"
+              :class="indicatorFire ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]' : 'bg-gray-600'">
+            </div>
+            <span class="text-[10px] font-medium"
+              :class="indicatorFire ? 'text-orange-400' : 'text-text-muted'">动火</span>
+          </div>
+          <!-- 离人指示灯 -->
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-full transition-all duration-300"
+              :class="indicatorAbsence ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]' : 'bg-gray-600'">
+            </div>
+            <span class="text-[10px] font-medium"
+              :class="indicatorAbsence ? 'text-amber-400' : 'text-text-muted'">离人</span>
+          </div>
+          <!-- 报警指示灯 -->
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-full transition-all duration-300"
+              :class="indicatorAlarm ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse' : 'bg-gray-600'">
+            </div>
+            <span class="text-[10px] font-medium" :class="indicatorAlarm ? 'text-red-400' : 'text-text-muted'">报警</span>
+          </div>
         </div>
       </div>
     </div>
