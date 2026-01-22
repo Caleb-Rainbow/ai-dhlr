@@ -146,7 +146,7 @@ class IndicatorController:
         for pin in pins:
             if pin:
                 self._gpio.set_direction(pin, output=True)
-                self._gpio.write(pin, False)  # 初始化为低电平（灭灯）
+                self._gpio.write(pin, True)  # 初始化为高电平（灭灯，低电平为亮）
         logger.info(f"GPIO 指示灯初始化完成 (动火: {self.config.pin_fire}, 离人: {self.config.pin_absence}, 报警: {self.config.pin_alarm})")
     
     def is_available(self) -> bool:
@@ -168,19 +168,19 @@ class IndicatorController:
         if not self._gpio.is_available():
             return
         
-        # 只有状态变化时才更新 GPIO
+        # 只有状态变化时才更新 GPIO（低电平为亮，高电平为灭，所以取反）
         if fire_on != self._last_states["fire"]:
-            self._gpio.write(self.config.pin_fire, fire_on)
+            self._gpio.write(self.config.pin_fire, not fire_on)  # 取反：亮时写低电平，灭时写高电平
             self._last_states["fire"] = fire_on
             logger.info(f"动火指示灯: {'亮' if fire_on else '灭'}")
         
         if absence != self._last_states["absence"]:
-            self._gpio.write(self.config.pin_absence, absence)
+            self._gpio.write(self.config.pin_absence, not absence)  # 取反：亮时写低电平，灭时写高电平
             self._last_states["absence"] = absence
             logger.info(f"离人指示灯: {'亮' if absence else '灭'}")
         
         if alarm != self._last_states["alarm"]:
-            self._gpio.write(self.config.pin_alarm, alarm)
+            self._gpio.write(self.config.pin_alarm, not alarm)  # 取反：亮时写低电平，灭时写高电平
             self._last_states["alarm"] = alarm
             logger.info(f"报警指示灯: {'亮' if alarm else '灭'}")
     
@@ -192,9 +192,9 @@ class IndicatorController:
         if not self._gpio.is_available():
             return
         
-        self._gpio.write(self.config.pin_fire, False)
-        self._gpio.write(self.config.pin_absence, False)
-        self._gpio.write(self.config.pin_alarm, False)
+        self._gpio.write(self.config.pin_fire, True)  # 高电平为灭
+        self._gpio.write(self.config.pin_absence, True)  # 高电平为灭
+        self._gpio.write(self.config.pin_alarm, True)  # 高电平为灭
         self._last_states = {"fire": False, "absence": False, "alarm": False}
         logger.info("所有指示灯已关闭")
     
