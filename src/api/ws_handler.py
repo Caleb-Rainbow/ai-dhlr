@@ -217,6 +217,7 @@ class WSHandler:
         enabled = params.get("enabled", True)
         serial_index = params.get("serial_index", 0)
         fire_current_threshold = params.get("fire_current_threshold", 100)
+        enable_temp_sensor = params.get("enable_temp_sensor", False)  # 是否启用温度传感器
         
         if not name:
             raise ValueError("灶台名称不能为空")
@@ -238,6 +239,28 @@ class WSHandler:
         else:
             zone_id = f"zone_{uuid.uuid4().hex[:8]}"
         
+        # 温度传感器自动分配逻辑
+        temp_sensor_address = None
+        if enable_temp_sensor:
+            try:
+                from ..serial_port.serial_manager import serial_manager
+                # 分配一个新地址
+                new_address = serial_manager.allocate_sensor_address()
+                if new_address == 0:
+                    raise ValueError("无可用的传感器地址，请先解绑其他传感器")
+                
+                # 发送命令将传感器从默认地址(123)修改为新地址
+                # 注意：用户需确保此时只接入了一个传感器
+                DEFAULT_SENSOR_ADDRESS = 123
+                success = serial_manager.assign_sensor_address(DEFAULT_SENSOR_ADDRESS, new_address)
+                if success:
+                    temp_sensor_address = new_address
+                    logger.info(f"温度传感器已分配地址: {DEFAULT_SENSOR_ADDRESS} -> {new_address}")
+                else:
+                    raise ValueError("发送传感器配置命令失败，串口可能未连接")
+            except ImportError:
+                raise ValueError("串口模块不可用")
+        
         # 创建配置
         config = ZoneConfig(
             id=zone_id,
@@ -246,7 +269,8 @@ class WSHandler:
             roi=[tuple(p) for p in roi] if roi else [],
             enabled=enabled,
             serial_index=serial_index,
-            fire_current_threshold=fire_current_threshold
+            fire_current_threshold=fire_current_threshold,
+            temp_sensor_address=temp_sensor_address
         )
         
         # 添加到配置
@@ -266,6 +290,9 @@ class WSHandler:
         try:
             from ..serial_port.serial_manager import serial_manager
             serial_manager.register_zone(zone_id, serial_index, fire_current_threshold)
+            # 注册温度传感器（如果已分配地址）
+            if temp_sensor_address is not None:
+                serial_manager.register_temperature_sensor(zone_id, temp_sensor_address)
         except Exception:
             pass
         
@@ -284,7 +311,9 @@ class WSHandler:
             "roi": roi,
             "enabled": enabled,
             "serial_index": serial_index,
-            "fire_current_threshold": fire_current_threshold
+            "fire_current_threshold": fire_current_threshold,
+            "temp_sensor_address": temp_sensor_address,
+            "temp_sensor_enabled": temp_sensor_address is not None
         }
     
     async def _update_zone(self, params: dict) -> dict:
@@ -311,9 +340,15 @@ class WSHandler:
             if not params["enabled"]:
                 sm.force_idle()
         
+        # 处理温度传感器开关
+        enable_temp_sensor = params.get("enable_temp_sensor")
+        new_temp_sensor_address = None
+        
         # 同步配置
+        old_temp_sensor_address = None
         for cfg in config_manager.config.zones:
             if cfg.id == zone_id:
+                old_temp_sensor_address = cfg.temp_sensor_address
                 if "name" in params:
                     cfg.name = params["name"]
                 if "camera_id" in params:
@@ -327,7 +362,38 @@ class WSHandler:
                 if "fire_current_threshold" in params:
                     cfg.fire_current_threshold = params["fire_current_threshold"]
                 
-                # 更新串口管理器
+                # 处理温度传感器启用/禁用
+                if enable_temp_sensor is not None:
+                    try:
+                        from ..serial_port.serial_manager import serial_manager
+                        
+                        if enable_temp_sensor and old_temp_sensor_address is None:
+                            # 启用温度传感器：自动分配地址
+                            new_address = serial_manager.allocate_sensor_address()
+                            if new_address == 0:
+                                raise ValueError("无可用的传感器地址")
+                            
+                            # 发送命令修改传感器地址 (123 -> 新地址)
+                            DEFAULT_SENSOR_ADDRESS = 123
+                            success = serial_manager.assign_sensor_address(DEFAULT_SENSOR_ADDRESS, new_address)
+                            if success:
+                                new_temp_sensor_address = new_address
+                                cfg.temp_sensor_address = new_address
+                                serial_manager.register_temperature_sensor(zone_id, new_address)
+                                logger.info(f"温度传感器已分配地址: {DEFAULT_SENSOR_ADDRESS} -> {new_address}")
+                            else:
+                                raise ValueError("发送传感器配置命令失败")
+                        
+                        elif not enable_temp_sensor and old_temp_sensor_address is not None:
+                            # 禁用温度传感器：解绑
+                            serial_manager.unregister_temperature_sensor(zone_id)
+                            cfg.temp_sensor_address = None
+                            logger.info(f"温度传感器已解绑: zone={zone_id}")
+                        
+                    except ImportError:
+                        raise ValueError("串口模块不可用")
+                
+                # 更新其他串口配置
                 try:
                     from ..serial_port.serial_manager import serial_manager
                     serial_manager.update_zone_config(
@@ -658,7 +724,9 @@ class WSHandler:
                 "broadcast_interval": config.alarm.broadcast_interval,
                 "warning_message": config.alarm.warning_message,
                 "alarm_message": config.alarm.alarm_message,
-                "action_message": config.alarm.action_message
+                "action_message": config.alarm.action_message,
+                "temp_alarm_threshold": config.alarm.temp_alarm_threshold,
+                "temp_alarm_message": config.alarm.temp_alarm_message
             }
         
         if category in ["all", "system"]:
@@ -708,6 +776,10 @@ class WSHandler:
                 alarm.alarm_message = settings["alarm_message"]
             if "action_message" in settings:
                 alarm.action_message = settings["action_message"]
+            if "temp_alarm_threshold" in settings:
+                alarm.temp_alarm_threshold = float(settings["temp_alarm_threshold"])
+            if "temp_alarm_message" in settings:
+                alarm.temp_alarm_message = settings["temp_alarm_message"]
         
         config_manager.save()
         return {"message": "设置已更新"}

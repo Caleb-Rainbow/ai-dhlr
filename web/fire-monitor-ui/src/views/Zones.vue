@@ -13,11 +13,11 @@ const loading = ref(true);
 const showAddModal = ref(false);
 const showEditModal = ref(false);
 
-const addForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100 });
+const addForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false });
 
 // Edit Zone State
 const currentEditZone = ref<ZoneConfig | null>(null);
-const editForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100 });
+const editForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false });
 const originalZoneName = ref(''); // 用于检测名称是否变化
 
 // ROI Editor State
@@ -76,7 +76,7 @@ const submitAdd = async () => {
     try {
         await ws.request('create_zone', addForm.value);
         showAddModal.value = false;
-        addForm.value = { name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100 };
+        addForm.value = { name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false };
         await loadData();
     } catch(e: unknown) {
         const msg = e instanceof Error ? e.message : '添加失败';
@@ -91,7 +91,8 @@ const openEditZone = (zone: ZoneConfig) => {
         name: zone.name,
         camera_id: zone.camera_id,
         serial_index: zone.serial_index || 0,
-        fire_current_threshold: zone.fire_current_threshold || 100
+        fire_current_threshold: zone.fire_current_threshold || 100,
+        enable_temp_sensor: zone.temp_sensor_address != null
     };
     originalZoneName.value = zone.name; // 保存原始名称用于比较
     roiPoints.value = zone.roi || [];
@@ -463,6 +464,7 @@ const saveEditZone = async () => {
             camera_id: editForm.value.camera_id,
             serial_index: editForm.value.serial_index,
             fire_current_threshold: editForm.value.fire_current_threshold,
+            enable_temp_sensor: editForm.value.enable_temp_sensor,
             roi: roiPoints.value,
             regenerate_voice: nameChanged // 告诉后端是否需要重新合成语音
         });
@@ -607,6 +609,27 @@ onUnmounted(() => {
                 <input v-model.number="addForm.fire_current_threshold" type="number" min="0" placeholder="如: 145" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
                 <p class="text-xs text-text-muted mt-1">145 表示 1.45A，实时电流超过此值则判定为动火</p>
             </div>
+            <!-- 温度传感器开关 -->
+            <div class="flex items-center justify-between p-4 rounded-2xl" style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="addForm.enable_temp_sensor ? 'bg-orange-500/20 text-orange-400' : 'bg-gray-500/20 text-gray-400'">
+                        🌡️
+                    </div>
+                    <div>
+                        <div class="font-medium text-text-primary text-sm">启用温度传感器</div>
+                        <div class="text-xs text-text-muted">{{ addForm.enable_temp_sensor ? '已启用' : '未启用' }}</div>
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="addForm.enable_temp_sensor" class="sr-only peer">
+                    <div class="w-12 h-6 rounded-full peer transition-colors duration-300" :class="addForm.enable_temp_sensor ? 'bg-orange-500' : 'bg-gray-500'">
+                        <div class="absolute top-[2px] w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300" :class="addForm.enable_temp_sensor ? 'left-[26px]' : 'left-[2px]'"></div>
+                    </div>
+                </label>
+            </div>
+            <p v-if="addForm.enable_temp_sensor" class="text-xs text-orange-400 flex items-center gap-1">
+                <span>⚠️</span> 请确保仅接入了一个温度传感器，系统将自动分配地址
+            </p>
             <button @click="submitAdd" class="w-full py-3 bg-primary rounded-xl font-bold mt-4 hover:bg-primary-dark shadow-lg shadow-primary/20 transition-all active:scale-95 press-effect">
                 添加
             </button>
@@ -646,6 +669,31 @@ onUnmounted(() => {
                 </div>
             </div>
             <p class="text-xs text-text-muted">串口索引对应硬件接线顺序 (0=0x01)；电流阈值如 145 表示 1.45A</p>
+            
+            <!-- 温度传感器开关 -->
+            <div class="flex items-center justify-between p-4 rounded-2xl" style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="editForm.enable_temp_sensor ? 'bg-orange-500/20 text-orange-400' : 'bg-gray-500/20 text-gray-400'">
+                        🌡️
+                    </div>
+                    <div>
+                        <div class="font-medium text-text-primary text-sm">启用温度传感器</div>
+                        <div class="text-xs text-text-muted">{{ editForm.enable_temp_sensor ? '已启用' : '未启用' }}</div>
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="editForm.enable_temp_sensor" class="sr-only peer">
+                    <div class="w-12 h-6 rounded-full peer transition-colors duration-300" :class="editForm.enable_temp_sensor ? 'bg-orange-500' : 'bg-gray-500'">
+                        <div class="absolute top-[2px] w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300" :class="editForm.enable_temp_sensor ? 'left-[26px]' : 'left-[2px]'"></div>
+                    </div>
+                </label>
+            </div>
+            <p v-if="editForm.enable_temp_sensor && !currentEditZone?.temp_sensor_address" class="text-xs text-orange-400 flex items-center gap-1">
+                <span>⚠️</span> 请确保仅接入了一个温度传感器，系统将自动分配地址
+            </p>
+            <p v-if="currentEditZone?.temp_sensor_address" class="text-xs text-cyan-400">
+                当前传感器地址: {{ currentEditZone.temp_sensor_address }}
+            </p>
             
             <!-- ROI 区域编辑 -->
             <div class="space-y-2">

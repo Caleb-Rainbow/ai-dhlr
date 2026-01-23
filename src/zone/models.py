@@ -12,8 +12,9 @@ class ZoneState(Enum):
     ACTIVE_WITH_PERSON = "active_with_person"  # 有人动火
     ACTIVE_NO_PERSON = "active_no_person"      # 无人动火（计时中）
     WARNING = "warning"                # 预警中
-    ALARM = "alarm"                    # 报警中（新增）
+    ALARM = "alarm"                    # 报警中
     CUTOFF = "cutoff"                  # 已切电
+    TEMP_ALARM = "temp_alarm"          # 温度报警中
 
 
 @dataclass
@@ -34,6 +35,7 @@ class Zone:
     alarm_remaining: float = 0.0       # 到报警倒计时剩余（秒）
     cutoff_remaining: float = 0.0      # 到切电倒计时剩余（秒）
     current_value: float = 0.0         # 实时电流值（安培 x 100，或原始值）
+    temperature: float = 0.0           # 实时温度值 (°C)
     last_snapshot_path: Optional[str] = None  # 最后截图路径
     
     def to_dict(self) -> dict:
@@ -52,6 +54,7 @@ class Zone:
             "alarm_remaining": round(self.alarm_remaining, 1),
             "cutoff_remaining": round(self.cutoff_remaining, 1),
             "current_value": self.current_value,
+            "temperature": round(self.temperature, 1),
             "last_snapshot_path": self.last_snapshot_path
         }
     
@@ -63,6 +66,7 @@ class Zone:
             ZoneState.ACTIVE_NO_PERSON: "无人看管",
             ZoneState.WARNING: "预警中",
             ZoneState.ALARM: "报警中",
-            ZoneState.CUTOFF: "已切电"
+            ZoneState.CUTOFF: "已切电",
+            ZoneState.TEMP_ALARM: "温度报警"
         }
         return status_texts.get(self.state, "未知")

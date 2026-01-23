@@ -509,6 +509,55 @@ class SerialHelper:
         command = bytes([0x01, 0x06, 0x00, 0x31, 0x00, channel & 0xFF])
         return preamble + append_crc16(command)
     
+    # ==================== 温度传感器命令 ====================
+    
+    def build_get_temperature_command(self, address: int) -> bytes:
+        """
+        构建获取温度值命令
+        
+        温度传感器协议 (MODBUS-RTU):
+        - 地址: 传感器地址 (默认123, 即0x7B)
+        - 功能码: 0x03 (读保持寄存器)
+        - 寄存器地址: 0x0000 (温度实时值)
+        - 寄存器数量: 0x0002 (32位浮点数，占2个寄存器)
+        
+        响应格式: [地址][功能码][字节数=4][4字节IEEE754浮点数][CRC]
+        
+        Args:
+            address: 传感器地址 (1-247, 默认123)
+            
+        Returns:
+            完整命令（含CRC）
+        """
+        command = bytes([address & 0xFF, 0x03, 0x00, 0x00, 0x00, 0x02])
+        return append_crc16(command)
+    
+    def build_set_sensor_address_command(self, old_address: int, new_address: int) -> bytes:
+        """
+        构建设置温度传感器地址命令
+        
+        温度传感器协议 (MODBUS-RTU):
+        - 地址: 当前传感器地址
+        - 功能码: 0x06 (写单个寄存器)
+        - 寄存器地址: 0x004D (从机地址寄存器)
+        - 值: 新地址 (1-247, 避免使用200=万能地址)
+        
+        Args:
+            old_address: 当前传感器地址
+            new_address: 新的传感器地址
+            
+        Returns:
+            完整命令（含CRC）
+        """
+        command = bytes([
+            old_address & 0xFF, 
+            0x06, 
+            0x00, 0x4D,  # 寄存器地址 0x004D
+            (new_address >> 8) & 0xFF, 
+            new_address & 0xFF
+        ])
+        return append_crc16(command)
+    
     # ==================== 便捷发送方法 (异步) ====================
     
     async def get_current(self, index: int) -> bool:
@@ -546,6 +595,16 @@ class SerialHelper:
     async def set_lora_channel(self, channel: int) -> bool:
         """发送设置LoRa信道命令"""
         command = self.build_set_lora_channel_command(channel)
+        return await self.send(command)
+    
+    async def get_temperature(self, address: int) -> bool:
+        """发送获取温度值命令"""
+        command = self.build_get_temperature_command(address)
+        return await self.send(command)
+    
+    async def set_sensor_address(self, old_address: int, new_address: int) -> bool:
+        """发送设置传感器地址命令"""
+        command = self.build_set_sensor_address_command(old_address, new_address)
         return await self.send(command)
     
     def update_config(self, port: str = None, baudrate: int = None):

@@ -208,6 +208,11 @@ class VoicePlayer:
         """播放切电语音"""
         self.play_zone_audio(zone_id, "action", priority=False)
     
+    def speak_temp_alarm(self, zone_id: str, zone_name: str):
+        """播放温度报警语音"""
+        # 优先尝试播放灶台专属的温度报警音频
+        self.play_zone_audio(zone_id, "temp_alarm", priority=False)
+    
     def _clear_queue(self):
         """清空队列"""
         while not self._queue.empty():

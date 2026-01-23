@@ -50,6 +50,7 @@ class ZoneStateMachine:
         self._on_alarm: Optional[Callable[[Zone], None]] = None
         self._on_cutoff: Optional[Callable[[Zone], None]] = None
         self._on_state_change: Optional[Callable[[StateChangeEvent], None]] = None
+        self._on_temp_alarm: Optional[Callable[[Zone, float], None]] = None  # 温度报警回调
         
         # 时间追踪
         self._no_person_start_time: Optional[float] = None
@@ -59,15 +60,18 @@ class ZoneStateMachine:
                       on_warning: Optional[Callable[[Zone], None]] = None,
                       on_alarm: Optional[Callable[[Zone], None]] = None,
                       on_cutoff: Optional[Callable[[Zone], None]] = None,
-                      on_state_change: Optional[Callable[[StateChangeEvent], None]] = None):
+                      on_state_change: Optional[Callable[[StateChangeEvent], None]] = None,
+                      on_temp_alarm: Optional[Callable[[Zone, float], None]] = None):
         """设置回调函数"""
         self._on_warning = on_warning
         self._on_alarm = on_alarm
         self._on_cutoff = on_cutoff
         self._on_state_change = on_state_change
+        self._on_temp_alarm = on_temp_alarm
     
     def update(self, has_person: bool, is_fire_on: bool, 
-               current_frame: Optional[np.ndarray] = None) -> ZoneState:
+               current_frame: Optional[np.ndarray] = None,
+               temperature: Optional[float] = None) -> ZoneState:
         """
         更新状态机
         
@@ -75,6 +79,9 @@ class ZoneStateMachine:
         1. WARNING (预警): warning_time 秒后触发
         2. ALARM (报警): alarm_time 秒后触发
         3. CUTOFF (切电): action_time 秒后触发
+        
+        温度报警逻辑：
+        - 条件：温度超阈值 + 离人 → 触发 TEMP_ALARM
         """
         with self._lock:
             # 获取全局配置 - 使用三阶段报警配置
@@ -83,6 +90,7 @@ class ZoneStateMachine:
             warning_time = alarm_config.warning_time
             alarm_time = alarm_config.alarm_time
             action_time = alarm_config.action_time
+            temp_threshold = alarm_config.temp_alarm_threshold
             
             current_time = time.time()
             dt = current_time - self._last_update_time
@@ -91,6 +99,38 @@ class ZoneStateMachine:
             old_state = self.zone.state
             self.zone.has_person = has_person
             self.zone.is_fire_on = is_fire_on
+            
+            # 更新温度值
+            if temperature is not None:
+                self.zone.temperature = temperature
+            
+            # 温度报警检查 (仅当有温度值且离人时)
+            temp_alarm_triggered = False
+            if temperature is not None and not has_person:
+                if temperature > temp_threshold:
+                    if old_state != ZoneState.TEMP_ALARM:
+                        self._logger.warning(f"温度超阈值 ({temperature:.1f}°C > {temp_threshold}°C)，触发温度报警")
+                        self._transition_to(ZoneState.TEMP_ALARM)
+                        # 触发温度报警回调
+                        if self._on_temp_alarm:
+                            self._on_temp_alarm(self.zone, temperature)
+                    temp_alarm_triggered = True
+            
+            # 如果已触发温度报警，跳过其他状态判断
+            if temp_alarm_triggered:
+                return self.zone.state
+            
+            # 温度报警状态复位：检测到人或温度恢复正常
+            if self.zone.state == ZoneState.TEMP_ALARM:
+                if has_person:
+                    self._logger.info("检测到人员回场，温度报警复位")
+                    self._transition_to(ZoneState.IDLE)
+                    self._reset_timers()
+                elif temperature is not None and temperature <= temp_threshold:
+                    self._logger.info("温度恢复正常，温度报警复位")
+                    self._transition_to(ZoneState.IDLE)
+                    self._reset_timers()
+                return self.zone.state
             
             # 状态机逻辑
             if not is_fire_on:
@@ -376,10 +416,11 @@ class ZoneManager:
                  on_warning: Callable = None,
                  on_alarm: Callable = None,
                  on_cutoff: Callable = None,
-                 on_state_change: Callable = None) -> ZoneStateMachine:
+                 on_state_change: Callable = None,
+                 on_temp_alarm: Callable = None) -> ZoneStateMachine:
         """添加灶台"""
         sm = ZoneStateMachine(config)
-        sm.set_callbacks(on_warning, on_alarm, on_cutoff, on_state_change)
+        sm.set_callbacks(on_warning, on_alarm, on_cutoff, on_state_change, on_temp_alarm)
         self._zones[config.id] = sm
         self._fire_states[config.id] = False  # 默认关火
         self._logger.info(f"添加灶台: {config.id} ({config.name})")
@@ -398,14 +439,18 @@ class ZoneManager:
         """更新灶台状态"""
         sm = self._zones.get(zone_id)
         if sm:
-            # 从 serial_manager 获取实际的动火状态
+            # 从 serial_manager 获取实际的动火状态和温度
+            is_fire_on = self._fire_states.get(zone_id, False)
+            temperature = None
             try:
                 from ..serial_port.serial_manager import serial_manager
                 is_fire_on = serial_manager.is_fire_on(zone_id)
+                temperature = serial_manager.get_temperature(zone_id)
+                if temperature == 0.0:
+                    temperature = None  # 0.0 表示未绑定或未读取到
             except Exception:
-                # 如果 serial_manager 不可用，使用缓存的状态
-                is_fire_on = self._fire_states.get(zone_id, False)
-            return sm.update(has_person, is_fire_on, current_frame)
+                pass
+            return sm.update(has_person, is_fire_on, current_frame, temperature)
         return None
     
     def set_fire_state(self, zone_id: str, is_on: bool):
@@ -428,19 +473,22 @@ class ZoneManager:
     
     def get_all_status(self) -> List[dict]:
         """获取所有灶台状态"""
-        # 获取电流值
+        # 获取电流值和温度值
         currents = {}
+        temperatures = {}
         try:
             from ..serial_port.serial_manager import serial_manager
             currents = serial_manager.get_all_currents()
+            temperatures = serial_manager.get_all_temperatures()
         except Exception:
             pass
             
         result = []
         for sm in self._zones.values():
             status = sm.get_status()
-            # 注入实时电流值
+            # 注入实时电流值和温度值
             status['current_value'] = currents.get(sm.zone.id, 0)
+            status['temperature'] = round(temperatures.get(sm.zone.id, 0.0), 1)
             result.append(status)
             
         return result
@@ -449,10 +497,11 @@ class ZoneManager:
                               on_warning: Callable = None,
                               on_alarm: Callable = None,
                               on_cutoff: Callable = None,
-                              on_state_change: Callable = None):
+                              on_state_change: Callable = None,
+                              on_temp_alarm: Callable = None):
         """从配置初始化"""
         for config in zones:
-            self.add_zone(config, on_warning, on_alarm, on_cutoff, on_state_change)
+            self.add_zone(config, on_warning, on_alarm, on_cutoff, on_state_change, on_temp_alarm)
         self._logger.info(f"从配置加载了 {len(zones)} 个灶台")
 
 

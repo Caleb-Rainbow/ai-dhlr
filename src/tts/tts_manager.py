@@ -20,6 +20,7 @@ class AudioType(Enum):
     WARNING = "warning"     # 预警
     ALARM = "alarm"         # 报警
     ACTION = "action"       # 切电
+    TEMP_ALARM = "temp_alarm"  # 温度报警
     # 巡检语音类型
     PATROL_HAS_PERSON = "patrol_has_person"    # {zone_name}有人
     PATROL_NO_PERSON = "patrol_no_person"      # {zone_name}没人

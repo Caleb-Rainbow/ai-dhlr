@@ -34,6 +34,7 @@ class ZoneConfig:
     enabled: bool = True
     serial_index: int = 0  # 串口分区索引（从0开始，对应地址0x01+index）
     fire_current_threshold: int = 100  # 动火电流阈值（100=1.00A）
+    temp_sensor_address: Optional[int] = None  # 温度传感器地址, None 表示未绑定
 
 
 
@@ -52,6 +53,10 @@ class AlarmConfig:
     warning_message: str = "动火区域离人即将超时，请立即回到工作岗位"
     alarm_message: str = "动火区域离人超时，请立即回到工作岗位"
     action_message: str = "动火区域离人超时，已自动切断炉灶电源，请立即现场处理"
+    
+    # 温度报警配置
+    temp_alarm_threshold: float = 80.0  # 温度报警阈值 (°C)
+    temp_alarm_message: str = "温度过高，请立即处理"
 
 
 @dataclass
@@ -273,7 +278,8 @@ class ConfigManager:
                 roi=roi,
                 enabled=zone_raw.get('enabled', True),
                 serial_index=zone_raw.get('serial_index', 0),
-                fire_current_threshold=zone_raw.get('fire_current_threshold', 100)
+                fire_current_threshold=zone_raw.get('fire_current_threshold', 100),
+                temp_sensor_address=zone_raw.get('temp_sensor_address')  # None 表示未绑定
             ))
         
         # 解析API配置
@@ -320,7 +326,9 @@ class ConfigManager:
             broadcast_interval=alarm_raw.get('broadcast_interval', 15),
             warning_message=alarm_raw.get('warning_message', '动火区域离人即将超时，请立即回到工作岗位'),
             alarm_message=alarm_raw.get('alarm_message', '动火区域离人超时，请立即回到工作岗位'),
-            action_message=alarm_raw.get('action_message', '动火区域离人超时，已自动切断炉灶电源，请立即现场处理')
+            action_message=alarm_raw.get('action_message', '动火区域离人超时，已自动切断炉灶电源，请立即现场处理'),
+            temp_alarm_threshold=alarm_raw.get('temp_alarm_threshold', 80.0),
+            temp_alarm_message=alarm_raw.get('temp_alarm_message', '温度过高，请立即处理')
         )
         
         # 解析TTS配置
@@ -428,7 +436,8 @@ class ConfigManager:
                     'roi': [list(point) for point in zone.roi],
                     'enabled': zone.enabled,
                     'serial_index': zone.serial_index,
-                    'fire_current_threshold': zone.fire_current_threshold
+                    'fire_current_threshold': zone.fire_current_threshold,
+                    'temp_sensor_address': zone.temp_sensor_address
                 }
                 for zone in config.zones
             ],
@@ -462,7 +471,9 @@ class ConfigManager:
                 'broadcast_interval': config.alarm.broadcast_interval,
                 'warning_message': config.alarm.warning_message,
                 'alarm_message': config.alarm.alarm_message,
-                'action_message': config.alarm.action_message
+                'action_message': config.alarm.action_message,
+                'temp_alarm_threshold': config.alarm.temp_alarm_threshold,
+                'temp_alarm_message': config.alarm.temp_alarm_message
             },
             'tts': {
                 'enabled': config.tts.enabled,

@@ -25,7 +25,7 @@ const enabledZones = computed(() => zones.value.filter(z => z.enabled !== false)
 // 指示灯状态计算
 const indicatorFire = computed(() => enabledZones.value.some(z => z.is_fire_on));
 const indicatorAbsence = computed(() => enabledZones.value.some(z => !z.has_person));
-const indicatorAlarm = computed(() => enabledZones.value.some(z => ['warning', 'alarm', 'cutoff'].includes(z.state)));
+const indicatorAlarm = computed(() => enabledZones.value.some(z => ['warning', 'alarm', 'cutoff', 'temp_alarm'].includes(z.state)));
 
 // Fullscreen toggle function
 const toggleFullscreen = () => {
@@ -187,6 +187,7 @@ onUnmounted(() => {
             :class="[
               { 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.2)]': ['alarm', 'cutoff'].includes(zone.state) },
               { 'border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]': zone.state === 'warning' },
+              { 'border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.2)]': zone.state === 'temp_alarm' },
             ]" :style="{ animationDelay: `${index * 0.05}s` }">
             <!-- Background Glow for Alarm -->
             <Transition name="fade">
@@ -239,6 +240,11 @@ onUnmounted(() => {
                     <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
                     已切断电源
                   </div>
+                  <div v-else-if="zone.state === 'temp_alarm'" :key="'temp_alarm'"
+                    class="text-orange-500 font-bold text-sm flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-orange-500 animate-ping"></span>
+                    温度报警
+                  </div>
                   <div v-else :key="zone.state" class="text-text-muted text-xs flex items-center gap-2">
                     <span class="w-1.5 h-1.5 rounded-full transition-colors duration-300"
                       :class="zone.state === 'idle' ? 'bg-gray-600' : 'bg-emerald-500'"></span>
@@ -255,6 +261,13 @@ onUnmounted(() => {
                   <span class="font-mono text-amber-400">
                     {{ zone.is_fire_on ? (zone.current_value ? (zone.current_value / 100).toFixed(2) : '?.??') : '0.00'
                     }}A
+                  </span>
+                </div>
+                <!-- 温度值显示 (仅绑定了传感器时显示) -->
+                <div v-if="zone.temperature" class="text-xs flex items-center gap-1">
+                  <span class="font-mono"
+                    :class="zone.state === 'temp_alarm' ? 'text-orange-500 animate-pulse' : 'text-cyan-400'">
+                    {{ zone.temperature ? zone.temperature.toFixed(1) : '-.--' }}°C
                   </span>
                 </div>
               </div>

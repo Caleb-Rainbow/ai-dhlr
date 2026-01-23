@@ -13,7 +13,9 @@ const alarmSettings = ref<AlarmSettings>({
   broadcast_interval: 10,
   warning_message: "请注意",
   alarm_message: "警告",
-  action_message: "动作"
+  action_message: "动作",
+  temp_alarm_threshold: 80,
+  temp_alarm_message: "温度过高，请立即处理"
 });
 
 // 网络状态
@@ -985,6 +987,26 @@ onUnmounted(() => {
               class="w-full text-center py-3 rounded-xl border border-red-700/30 font-mono focus:border-red-700 outline-none transition-all text-text-primary"
               style="background: var(--theme-bg-input);">
           </div>
+        </div>
+        
+        <!-- 温度报警阈值 -->
+        <div class="pt-4 border-t border-white/10">
+          <h4 class="text-xs text-orange-400 font-bold uppercase tracking-wider mb-3">温度报警</h4>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <label class="text-xs text-text-muted ml-1">温度阈值 (°C)</label>
+              <input v-model.number="alarmSettings.temp_alarm_threshold" type="number" min="0" max="200" step="1"
+                class="w-full rounded-xl px-4 py-3 border border-orange-500/30 font-mono focus:border-orange-500 outline-none transition-all text-text-primary"
+                style="background: var(--theme-bg-input);">
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs text-text-muted ml-1">报警提示语</label>
+              <input v-model="alarmSettings.temp_alarm_message" type="text" placeholder="温度过高"
+                class="w-full rounded-xl px-4 py-3 border border-orange-500/30 focus:border-orange-500 outline-none transition-all text-text-primary"
+                style="background: var(--theme-bg-input);">
+            </div>
+          </div>
+          <p class="text-xs text-text-muted mt-2">当温度传感器读数超过阈值且区域无人时触发温度报警</p>
         </div>
       </div>
     </Transition>

@@ -9,7 +9,7 @@ export interface DeviceInfo {
 export interface ZoneStatus {
     id: string;
     name: string;
-    state: 'idle' | 'active_with_person' | 'active_no_person' | 'warning' | 'alarm' | 'cutoff';
+    state: 'idle' | 'active_with_person' | 'active_no_person' | 'warning' | 'alarm' | 'cutoff' | 'temp_alarm';
     enabled: boolean;
     is_fire_on: boolean;
     has_person: boolean;
@@ -18,6 +18,7 @@ export interface ZoneStatus {
     cutoff_remaining: number;
     camera_id?: string;
     current_value?: number;  // 实时电流值
+    temperature?: number;    // 实时温度值
 }
 
 export interface PerformanceStats {
@@ -52,6 +53,8 @@ export interface ZoneConfig {
     serial_index?: number;  // 串口分区索引
     fire_current_threshold?: number;  // 动火电流阈值
     current_value?: number;  // 实时电流值
+    temp_sensor_address?: number;  // 温度传感器地址
+    temperature?: number;  // 实时温度值
 }
 
 export interface LogFile {
@@ -68,6 +71,8 @@ export interface AlarmSettings {
     warning_message: string;
     alarm_message: string;
     action_message: string;
+    temp_alarm_threshold: number;   // 温度报警阈值
+    temp_alarm_message: string;     // 温度报警消息
 }
 
 export interface NetworkStatus {

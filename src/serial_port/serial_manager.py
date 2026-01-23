@@ -28,6 +28,8 @@ class CommandType(Enum):
     SET_LORA_ID = auto()       # 设置LoRa编号
     GET_LORA_CHANNEL = auto()  # 获取LoRa信道
     SET_LORA_CHANNEL = auto()  # 设置LoRa信道
+    GET_TEMPERATURE = auto()   # 获取温度值
+    SET_SENSOR_ADDRESS = auto()  # 设置传感器地址
 
 
 @dataclass
@@ -62,6 +64,35 @@ class LoraConfig:
     id: int = 0
     channel: int = 0
     last_update: float = 0.0
+
+
+@dataclass
+class ZoneTemperatureInfo:
+    """分区温度信息"""
+    zone_id: str                    # 灶台ID
+    sensor_address: int             # 温度传感器地址 (1-247)
+    temperature: float = 0.0        # 当前温度 (°C)
+    last_update: float = 0.0        # 最后更新时间
+
+
+def parse_ieee754_float(data: bytes) -> float:
+    """
+    解析 IEEE754 单精度浮点数 (大端序)
+    
+    温度传感器返回的4字节数据按 A,B,C,D 顺序排列，
+    直接组合即可还原为物理温度值。
+    
+    Args:
+        data: 4字节数据 (IEEE754 单精度浮点数，大端序)
+        
+    Returns:
+        解析后的浮点数温度值 (°C)
+    """
+    import struct
+    if len(data) != 4:
+        return 0.0
+    # 大端序解析
+    return struct.unpack('>f', data)[0]
 
 
 class SerialManager:
@@ -112,6 +143,12 @@ class SerialManager:
         
         # 电流值更新回调
         self._on_current_update: Optional[Callable[[str, int, bool], None]] = None
+        
+        # 温度传感器信息
+        self._zone_temperatures: Dict[str, ZoneTemperatureInfo] = {}
+        
+        # 温度值更新回调
+        self._on_temperature_update: Optional[Callable[[str, float], None]] = None
         
         # ==================== 全局命令队列 ====================
         # 所有串口命令都通过这个队列依次执行
@@ -246,6 +283,10 @@ class SerialManager:
         if command.type in [CommandType.GET_LORA_ID, CommandType.SET_LORA_ID,
                             CommandType.GET_LORA_CHANNEL, CommandType.SET_LORA_CHANNEL]:
             return 3.0  # LoRa命令超时较长
+        elif command.type == CommandType.GET_TEMPERATURE:
+            return 0.5  # 温度传感器响应时间约300ms
+        elif command.type == CommandType.SET_SENSOR_ADDRESS:
+            return 1.0  # 设置地址需要较长时间
         else:
             return 0.5  # 普通命令超时较短
     
@@ -272,6 +313,13 @@ class SerialManager:
             
             elif command.type == CommandType.SET_LORA_CHANNEL:
                 return await self._helper.set_lora_channel(command.value)
+            
+            elif command.type == CommandType.GET_TEMPERATURE:
+                return await self._helper.get_temperature(command.index)
+            
+            elif command.type == CommandType.SET_SENSOR_ADDRESS:
+                # command.index = old_address, command.value = new_address
+                return await self._helper.set_sensor_address(command.index, command.value)
             
             else:
                 self._logger.warning(f"未知命令类型: {command.type}")
@@ -385,6 +433,23 @@ class SerialManager:
                         if elapsed >= self._cutoff_reset_delay:
                             zone_info.can_check_reset = True
                 
+                # 轮询所有分区温度值（通过命令队列依次执行）
+                with self._lock:
+                    temp_zones = list(self._zone_temperatures.values())
+                
+                for temp_info in temp_zones:
+                    if not self._running:
+                        break
+                    
+                    # 创建获取温度命令并加入队列
+                    command = SerialCommand(
+                        type=CommandType.GET_TEMPERATURE,
+                        index=temp_info.sensor_address,
+                        zone_id=temp_info.zone_id,
+                        expect_response=True
+                    )
+                    await self._enqueue_command(command)
+                
                 # 等待队列中的所有命令完成
                 await self._command_queue.join()
                 
@@ -438,6 +503,11 @@ class SerialManager:
                         self._logger.info(f"LoRa信道: {value}")
                     elif current_cmd.type == CommandType.GET_CURRENT:
                         self._update_current(address, value)
+                    elif current_cmd.type == CommandType.GET_TEMPERATURE:
+                        # 温度传感器返回4字节IEEE754浮点数
+                        if len(data) >= 4:
+                            temperature = parse_ieee754_float(data[:4])
+                            self._update_temperature(address, temperature)
                     else:
                         # 可能是设置LoRa后的读取确认
                         if address == 0x01:
@@ -479,6 +549,120 @@ class SerialManager:
                         except Exception as e:
                             self._logger.error(f"电流更新回调错误: {e}")
                     break
+    
+    def _update_temperature(self, address: int, temperature: float):
+        """更新温度值"""
+        with self._lock:
+            for zone_id, info in self._zone_temperatures.items():
+                if info.sensor_address == address:
+                    info.temperature = temperature
+                    info.last_update = time.time()
+                    
+                    self._logger.debug(f"[{zone_id}] 温度: {temperature:.1f}°C")
+                    
+                    if self._on_temperature_update:
+                        try:
+                            self._on_temperature_update(zone_id, temperature)
+                        except Exception as e:
+                            self._logger.error(f"温度更新回调错误: {e}")
+                    break
+    
+    # ==================== 温度传感器接口 ====================
+    
+    def register_temperature_sensor(self, zone_id: str, sensor_address: int):
+        """注册温度传感器"""
+        with self._lock:
+            self._zone_temperatures[zone_id] = ZoneTemperatureInfo(
+                zone_id=zone_id,
+                sensor_address=sensor_address
+            )
+        self._logger.info(f"注册温度传感器: {zone_id}, 地址: {sensor_address}")
+    
+    def unregister_temperature_sensor(self, zone_id: str):
+        """注销温度传感器"""
+        with self._lock:
+            if zone_id in self._zone_temperatures:
+                del self._zone_temperatures[zone_id]
+        self._logger.info(f"注销温度传感器: {zone_id}")
+    
+    def update_temperature_sensor_config(self, zone_id: str, sensor_address: int):
+        """更新温度传感器配置"""
+        with self._lock:
+            if zone_id in self._zone_temperatures:
+                self._zone_temperatures[zone_id].sensor_address = sensor_address
+    
+    def set_on_temperature_update(self, callback: Callable[[str, float], None]):
+        """设置温度更新回调"""
+        self._on_temperature_update = callback
+    
+    def get_temperature(self, zone_id: str) -> float:
+        """获取分区温度值"""
+        with self._lock:
+            if zone_id in self._zone_temperatures:
+                return self._zone_temperatures[zone_id].temperature
+        return 0.0
+    
+    def get_all_temperatures(self) -> Dict[str, float]:
+        """获取所有分区温度值"""
+        with self._lock:
+            return {
+                zone_id: info.temperature 
+                for zone_id, info in self._zone_temperatures.items()
+            }
+    
+    def get_used_sensor_addresses(self) -> set:
+        """获取已使用的传感器地址"""
+        with self._lock:
+            return {info.sensor_address for info in self._zone_temperatures.values()}
+    
+    def allocate_sensor_address(self) -> int:
+        """
+        分配一个新的传感器地址
+        
+        从 1 开始，跳过已使用的地址和保留地址 (123, 200)
+        
+        Returns:
+            新分配的地址 (1-247，跳过123和200)
+        """
+        used = self.get_used_sensor_addresses()
+        reserved = {123, 200}  # 123=默认地址, 200=万能地址
+        
+        for addr in range(1, 248):
+            if addr not in used and addr not in reserved:
+                return addr
+        
+        # 如果所有地址都用完了，返回0表示无可用地址
+        return 0
+    
+    def assign_sensor_address(self, old_address: int, new_address: int) -> bool:
+        """
+        为传感器分配新地址 (通过命令队列执行)
+        
+        Args:
+            old_address: 当前传感器地址 (通常是123或200)
+            new_address: 新的传感器地址
+            
+        Returns:
+            是否成功提交命令
+        """
+        if self._loop and self._command_queue is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._enqueue_set_sensor_address(old_address, new_address),
+                self._loop
+            )
+            return True
+        return False
+    
+    async def _enqueue_set_sensor_address(self, old_address: int, new_address: int):
+        """将设置传感器地址命令加入队列"""
+        cmd = SerialCommand(
+            type=CommandType.SET_SENSOR_ADDRESS,
+            index=old_address,
+            value=new_address,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd)
+        self._logger.info(f"传感器地址修改命令已加入队列: {old_address} -> {new_address}")
     
     # ==================== 所谓"同步"接口 (读缓存) ====================
     

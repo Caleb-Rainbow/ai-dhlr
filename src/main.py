@@ -79,7 +79,8 @@ class FireSafetySystem:
                 on_warning=self._on_warning,
                 on_alarm=self._on_alarm,
                 on_cutoff=self._on_cutoff,
-                on_state_change=self._on_state_change
+                on_state_change=self._on_state_change,
+                on_temp_alarm=self._on_temp_alarm
             )
             
             # 为每个灶台注册检测状态
@@ -144,6 +145,12 @@ class FireSafetySystem:
                         zone_config.serial_index,
                         zone_config.fire_current_threshold
                     )
+                    # 注册温度传感器（如果已绑定）
+                    if zone_config.temp_sensor_address is not None:
+                        serial_manager.register_temperature_sensor(
+                            zone_config.id,
+                            zone_config.temp_sensor_address
+                        )
                 
                 self._logger.info("串口管理器初始化完成")
             except Exception as e:
@@ -225,6 +232,14 @@ class FireSafetySystem:
             "timestamp": event.timestamp,
             "message": event.message
         })
+    
+    def _on_temp_alarm(self, zone: Zone, temperature: float):
+        """温度报警回调 - 加入播报队列并广播事件"""
+        config = get_config()
+        self._logger.warning(f"[温度报警] {zone.name} 温度过高 ({temperature:.1f}°C > {config.alarm.temp_alarm_threshold}°C)")
+        self._add_to_broadcast_queue(zone.id, zone.name, "temp_alarm")
+        
+        sync_broadcast_alarm_event(zone.id, zone.name, "temp_alarm", None)
     
     def _add_to_broadcast_queue(self, zone_id: str, zone_name: str, audio_type: str):
         """添加或更新灶台到播报队列"""
@@ -320,6 +335,8 @@ class FireSafetySystem:
                             voice_player.speak_alarm(zone_id, zone_name)
                         elif audio_type_real == "action":
                             voice_player.speak_cutoff(zone_id, zone_name)
+                        elif audio_type_real == "temp_alarm":
+                            voice_player.speak_temp_alarm(zone_id, zone_name)
                         
                         # 短暂休眠确保任务加入队列
                         time.sleep(0.1)
@@ -533,7 +550,8 @@ def get_zone_callbacks():
             "on_warning": _system._on_warning,
             "on_alarm": _system._on_alarm,
             "on_cutoff": _system._on_cutoff,
-            "on_state_change": _system._on_state_change
+            "on_state_change": _system._on_state_change,
+            "on_temp_alarm": _system._on_temp_alarm
         }
     return {}
 
