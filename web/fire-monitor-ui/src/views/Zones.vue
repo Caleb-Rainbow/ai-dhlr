@@ -13,12 +13,52 @@ const loading = ref(true);
 const showAddModal = ref(false);
 const showEditModal = ref(false);
 
-const addForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false });
+const addForm = ref({ camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false });
+
+// 根据灶台名称提取编号
+const extractZoneNumber = (zoneName: string): number => {
+    const match = zoneName.match(/(\d+)号灶台/);
+    return match ? parseInt(match[1] || '0') : 0;
+};
+
+// 根据灶台编号计算串口索引（1号灶台 → 0，2号灶台 → 1，以此类推）
+const calculateSerialIndex = (zoneNumber: number): number => {
+    return zoneNumber - 1;
+};
+
+// 自动生成灶台名称
+const generateZoneName = () => {
+    if (zones.value.length === 0) {
+        return '1号灶台';
+    }
+    // 找出所有已存在的灶台编号
+    const existingNumbers = zones.value
+        .map(z => {
+            const match = z.name.match(/(\d+)号灶台/);
+            return match ? parseInt(match[1] || '0') : 0;
+        })
+        .filter(n => n > 0);
+
+    if (existingNumbers.length === 0) {
+        return '1号灶台';
+    }
+
+    // 找出最大的编号并加1
+    const maxNumber = Math.max(...existingNumbers);
+    return `${maxNumber + 1}号灶台`;
+};
+
+// 获取下一个灶台名称和对应的串口索引
+const nextZoneName = ref('');
+const updateNextZoneName = () => {
+    nextZoneName.value = generateZoneName();
+    // 设置串口索引的默认值
+    addForm.value.serial_index = calculateSerialIndex(extractZoneNumber(nextZoneName.value));
+};
 
 // Edit Zone State
 const currentEditZone = ref<ZoneConfig | null>(null);
 const editForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false });
-const originalZoneName = ref(''); // 用于检测名称是否变化
 
 // ROI Editor State
 const roiCanvas = ref<HTMLCanvasElement | null>(null);
@@ -69,14 +109,21 @@ const toggleZone = async (zone: ZoneConfig) => {
 };
 
 const submitAdd = async () => {
-    if(!addForm.value.name || !addForm.value.camera_id) {
-        alert('请填写灶台名称并选择摄像头');
+    if(!addForm.value.camera_id) {
+        alert('请选择摄像头');
         return;
     }
     try {
-        await ws.request('create_zone', addForm.value);
+        const zoneName = nextZoneName.value;
+        await ws.request('create_zone', {
+            name: zoneName,
+            camera_id: addForm.value.camera_id,
+            serial_index: addForm.value.serial_index,
+            fire_current_threshold: addForm.value.fire_current_threshold,
+            enable_temp_sensor: addForm.value.enable_temp_sensor
+        });
         showAddModal.value = false;
-        addForm.value = { name: '', camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false };
+        addForm.value = { camera_id: '', serial_index: 0, fire_current_threshold: 100, enable_temp_sensor: false };
         await loadData();
     } catch(e: unknown) {
         const msg = e instanceof Error ? e.message : '添加失败';
@@ -94,7 +141,6 @@ const openEditZone = (zone: ZoneConfig) => {
         fire_current_threshold: zone.fire_current_threshold || 100,
         enable_temp_sensor: zone.temp_sensor_address != null
     };
-    originalZoneName.value = zone.name; // 保存原始名称用于比较
     roiPoints.value = zone.roi || [];
     showEditModal.value = true;
     
@@ -445,38 +491,37 @@ const findNearestPoint = (x: number, y: number, threshold: number = 0.05): numbe
 
 const saveEditZone = async () => {
     if(!currentEditZone.value) return;
-    if(!editForm.value.name) {
-        alert('灶台名称不能为空');
-        return;
-    }
     if(!editForm.value.camera_id) {
         alert('请选择关联摄像头');
         return;
     }
-    
+
     try {
-        // 检测名称是否变化
-        const nameChanged = editForm.value.name !== originalZoneName.value;
-        
-        await ws.request('update_zone', { 
-            zone_id: currentEditZone.value.id, 
+        await ws.request('update_zone', {
+            zone_id: currentEditZone.value.id,
             name: editForm.value.name,
             camera_id: editForm.value.camera_id,
             serial_index: editForm.value.serial_index,
             fire_current_threshold: editForm.value.fire_current_threshold,
             enable_temp_sensor: editForm.value.enable_temp_sensor,
-            roi: roiPoints.value,
-            regenerate_voice: nameChanged // 告诉后端是否需要重新合成语音
+            roi: roiPoints.value
         });
         showEditModal.value = false;
         await loadData();
-    } catch(e) { 
+    } catch(e) {
         const msg = e instanceof Error ? e.message : '保存失败';
-        alert(msg); 
+        alert(msg);
     }
 };
 
 onMounted(loadData);
+
+// 监听添加模态框打开，更新下一个灶台名称
+watch(showAddModal, (isOpen) => {
+    if (isOpen) {
+        updateNextZoneName();
+    }
+});
 
 // 清理函数：移除canvas事件监听器
 const cleanupCanvas = () => {
@@ -587,7 +632,8 @@ onUnmounted(() => {
         <div class="space-y-4">
             <div class="space-y-1">
                 <label class="text-xs text-text-muted">名称</label>
-                <input v-model="addForm.name" type="text" placeholder="如: 1号灶台" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                <input :value="nextZoneName" type="text" readonly class="w-full rounded-xl px-4 py-3 border outline-none transition-all text-text-primary cursor-not-allowed opacity-70" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                <p class="text-xs text-text-muted mt-1">系统自动生成</p>
             </div>
             <div class="space-y-1">
                 <label class="text-xs text-text-muted">关联摄像头</label>
@@ -642,10 +688,8 @@ onUnmounted(() => {
             <!-- 名称 -->
             <div class="space-y-1">
                 <label class="text-xs text-text-muted">名称</label>
-                <input v-model="editForm.name" type="text" placeholder="如: 1号灶台" class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-                <p v-if="editForm.name !== originalZoneName" class="text-xs text-amber-400 flex items-center gap-1">
-                    <span>⚠️</span> 名称已修改，保存后将重新合成语音文件
-                </p>
+                <input :value="editForm.name" type="text" readonly class="w-full rounded-xl px-4 py-3 border outline-none transition-all text-text-primary cursor-not-allowed opacity-70" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                <p class="text-xs text-text-muted mt-1">系统自动生成，不可修改</p>
             </div>
             <!-- 关联摄像头 -->
             <div class="space-y-1">
