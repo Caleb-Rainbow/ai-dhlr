@@ -147,8 +147,8 @@ async def add_camera(request: CameraAddRequest):
         if not request.id:
             # 获取现有所有ID
             existing_ids = {cam.id for cam in camera_manager.get_all_cameras()}
-            # 查找最小可用整数ID
-            next_id = 1
+            # 查找最小可用整数ID（从0开始）
+            next_id = 0
             while str(next_id) in existing_ids:
                 next_id += 1
             request.id = str(next_id)

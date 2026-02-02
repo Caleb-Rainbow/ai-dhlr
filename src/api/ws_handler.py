@@ -477,13 +477,20 @@ class WSHandler:
         camera_id = params.get("id")
         name = params.get("name")
         cam_type = params.get("type", "rtsp")
-        
-        if not camera_id:
-            raise ValueError("摄像头ID不能为空")
+
         if not name:
             raise ValueError("摄像头名称不能为空")
-        
+
         from ..camera.manager import camera_manager
+
+        # 如果未提供ID，则自动生成（从0开始自增）
+        if not camera_id:
+            existing_ids = {cam.id for cam in camera_manager.get_all_cameras()}
+            next_id = 0
+            while str(next_id) in existing_ids:
+                next_id += 1
+            camera_id = str(next_id)
+
         if camera_manager.get_camera(camera_id):
             raise ValueError(f"摄像头ID '{camera_id}' 已存在")
         

@@ -76,12 +76,6 @@ const openEditModal = async (cam: CameraType) => {
   }
 };
 
-const generateUniqueId = () => {
-  // 生成基于时间戳和随机数的唯一ID
-  const timestamp = Date.now();
-  const random = Math.floor(Math.random() * 1000);
-  return `cam_${timestamp}_${random}`;
-};
 
 const submitForm = async () => {
   if (!form.value.name) return;
@@ -90,12 +84,8 @@ const submitForm = async () => {
     if (isEditing.value) {
       await ws.request('update_camera', { camera_id: form.value.id, ...form.value });
     } else {
-      // 自动生成唯一ID
-      const cameraData = {
-        ...form.value,
-        id: generateUniqueId()
-      };
-      await ws.request('create_camera', cameraData);
+      // ID由后端自动生成（从0开始自增）
+      await ws.request('create_camera', form.value);
     }
     showModal.value = false;
     await loadCameras();

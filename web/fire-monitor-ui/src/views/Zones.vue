@@ -26,6 +26,12 @@ const calculateSerialIndex = (zoneNumber: number): number => {
     return zoneNumber - 1;
 };
 
+// 通过camera_id获取相机名称
+const getCameraName = (cameraId: string): string => {
+    const camera = cameras.value.find(c => c.id === cameraId);
+    return camera?.name || cameraId;
+};
+
 // 自动生成灶台名称
 const generateZoneName = () => {
     if (zones.value.length === 0) {
@@ -595,7 +601,10 @@ onUnmounted(() => {
                       </Transition>
                    </div>
                    <div class="flex items-center gap-2 mt-1">
-                      <span class="text-xs text-text-muted">相机ID: {{ zone.camera_id }}</span>
+                      <span class="text-xs text-text-muted flex items-center gap-1">
+                         <span class="w-3 h-3 rounded bg-blue-500/20 flex items-center justify-center">📷</span>
+                         {{ getCameraName(zone.camera_id) }}
+                      </span>
                       <span class="w-1 h-1 rounded-full bg-text-muted"></span>
                       <span class="text-xs text-amber-400">阈值: {{ ((zone.fire_current_threshold || 100) / 100).toFixed(2) }}A</span>
                    </div>
