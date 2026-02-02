@@ -2,7 +2,6 @@ export interface DeviceInfo {
     version: string;
     device_id?: string;
     name?: string;
-    uptime?: number;
     debug?: boolean;
 }
 

@@ -36,7 +36,8 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
     "type": "request",
     "msg_id": "msg_1704614400000_1",
     "action": "get_zones",
-    "params": {}
+    "params": {},
+    "target": "all"
 }
 ```
 
@@ -46,6 +47,7 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 | msg_id | string | 是 | 消息唯一标识，用于匹配响应 |
 | action | string | 是 | 请求的操作类型 |
 | params | object | 否 | 操作参数 |
+| target | string | 否 | 消息路由目标：`"local"`（仅本地处理）、`"remote"`（转发到远程）、`"all"`（本地+远程，默认） |
 
 ---
 
@@ -163,14 +165,54 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 |--------|------|------|
 | `get_zones` | 获取所有灶台配置 | 无 |
 | `get_zone` | 获取单个灶台 | `zone_id` |
-| `create_zone` | 创建灶台 | `name`, `camera_id`, `roi?`, `enabled?`, `serial_index?`, `fire_current_threshold?` |
-| `update_zone` | 更新灶台 | `zone_id`, `name?`, `camera_id?`, `roi?`, `enabled?`, `serial_index?`, `fire_current_threshold?`, `regenerate_voice?` |
+| `create_zone` | 创建灶台 | `name`, `camera_id`, `roi?`, `enabled?`, `serial_index?`, `fire_current_threshold?`, `enable_temp_sensor?` |
+| `update_zone` | 更新灶台 | `zone_id`, `name?`, `camera_id?`, `roi?`, `enabled?`, `serial_index?`, `fire_current_threshold?`, `enable_temp_sensor?` |
 | `delete_zone` | 删除灶台 | `zone_id` |
 | `reset_zone` | 重置灶台状态 | `zone_id` |
 | `toggle_fire` | 模拟火焰开关 | `zone_id`, `is_on` |
 
-**`update_zone` 特殊参数说明：**
-- `regenerate_voice`: 布尔值，当灶台名称变化时设为 `true`，后端会自动重新合成该灶台的所有语音文件（预警、报警、切电、巡检等）
+**`get_zones` 返回值：**
+```json
+[
+  {
+    "id": "zone_1",
+    "name": "灶台1",
+    "camera_id": "0",
+    "roi": [[100, 100], [200, 100], [200, 200], [100, 200]],
+    "enabled": true,
+    "serial_index": 0,
+    "fire_current_threshold": 100,
+    "current_value": 0
+  }
+]
+```
+
+**`create_zone` 参数说明：**
+- `name`：灶台名称（必填）
+- `camera_id`：摄像头ID（必填）
+- `roi`：感兴趣区域坐标数组，格式 `[[x1,y1], [x2,y2], ...]`（可选，默认为空）
+- `enabled`：是否启用（可选，默认为 `true`）
+- `serial_index`：电流检测分区索引（可选，默认为 `0`）
+- `fire_current_threshold`：火焰电流阈值（可选，默认为 `100`）
+- `enable_temp_sensor`：是否启用温度传感器（可选，默认为 `false`）。启用时会自动分配传感器地址，需确保此时只接入了一个传感器
+
+**返回值：**
+```json
+{
+  "id": "zone_1",
+  "name": "灶台1",
+  "camera_id": "0",
+  "roi": [[100, 100], [200, 100], [200, 200], [100, 200]],
+  "enabled": true,
+  "serial_index": 0,
+  "fire_current_threshold": 100,
+  "temp_sensor_address": 1,
+  "temp_sensor_enabled": true
+}
+```
+
+**`update_zone` 参数说明：**
+- `enable_temp_sensor`：温度传感器开关（可选）。设为 `true` 时自动分配地址，设为 `false` 时解绑传感器
 
 ### 摄像头操作
 
@@ -178,11 +220,20 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 |--------|------|------|
 | `get_cameras` | 获取所有摄像头 | 无 |
 | `get_camera` | 获取单个摄像头 | `camera_id` |
-| `create_camera` | 创建摄像头 | `id`, `name`, `type`, ... |
+| `create_camera` | 创建摄像头 | `name`, `type`, `device?`, `rtsp_url?`, `username?`, `password?`, `width?`, `height?`, `fps?` |
 | `update_camera` | 更新摄像头 | `camera_id`, ... |
 | `delete_camera` | 删除摄像头 | `camera_id` |
 | `get_usb_devices` | 获取 USB 设备列表 | 无 |
 | `preview_camera` | 获取摄像头预览 Base64 | `camera_id` |
+
+**`create_camera` 参数说明：**
+- `name`：摄像头名称（必填）
+- `type`：摄像头类型，`"usb"` 或 `"rtsp"`（默认 `"rtsp"`）
+- `device`：USB设备索引（USB类型必填）
+- `rtsp_url`：RTSP地址（RTSP类型必填）
+- `username`/`password`：RTSP认证信息（可选）
+- `width`/`height`/`fps`：分辨率和帧率（可选，默认 640x480@30fps）
+- `id`：摄像头唯一ID（可选，**不填时系统自动生成从0开始的自增ID**）
 
 ### 状态和设置
 
@@ -226,7 +277,8 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 
 | Action | 说明 | 参数 | 返回 |
 |--------|------|------|------|
-| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open, debug_hex}` |
+| `get_serial_ports` | 获取系统可用的串口列表 | 无 | `[{device, name, description, hwid}, ...]` |
+| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open}` |
 | `update_serial_config` | 更新串口配置 | `enabled?`, `port?`, `baudrate?`, `poll_interval?` | `{message}` |
 | `get_currents` | 获取所有分区电流值 | 无 | `{currents: {zone_id: value, ...}}` |
 | `get_lora_config` | 获取LoRa配置 | 无 | `{id, channel}` |
@@ -266,10 +318,12 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 |--------|------|------|------|
 | `patrol_check_person` | 检测单个灶台的离人状态 | `zone_id` | `{success, has_person, message}` |
 | `patrol_check_fire` | 检测单个灶台的动火状态 | `zone_id` | `{success, is_fire_on, message}` |
-| `patrol_alarm_demo` | 报警演示（预警→报警→切电，每步间隔10秒） | `zone_id` | `{success, message}` |
+| `patrol_alarm_demo` | 报警演示（预警→报警→切电，每步间隔10秒） | `zone_id?` | `{success, message}` |
 | `patrol_cutoff_zone` | 单灶台切电 | `zone_id` | `{success, message}` |
 
-> **注意**：`patrol_alarm_demo` 需要灶台处于动火状态，否则返回错误。
+> **说明**：
+> - `patrol_alarm_demo` 的 `zone_id` 参数为可选。不传时自动选择第一个动火灶台，传值时对指定灶台执行报警演示
+> - 执行报警演示的灶台需要处于动火状态
 
 #### 全局强制动作
 

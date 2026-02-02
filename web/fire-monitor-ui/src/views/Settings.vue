@@ -914,18 +914,11 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-          <!-- 系统版本和运行时间放在一行 -->
-          <div class="grid grid-cols-2 gap-4">
-            <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
-              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              <div class="text-xs text-text-muted mb-1">系统版本</div>
-              <div class="font-mono text-text-primary">{{ deviceInfo.version }}</div>
-            </div>
-            <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
-              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              <div class="text-xs text-text-muted mb-1">运行时间</div>
-              <div class="font-mono text-text-primary">{{ ((deviceInfo.uptime || 0) / 3600).toFixed(1) }} 小时</div>
-            </div>
+          <!-- 系统版本 -->
+          <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift"
+            style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+            <div class="text-xs text-text-muted mb-1">系统版本</div>
+            <div class="font-mono text-text-primary">{{ deviceInfo.version }}</div>
           </div>
         </div>
       </div>
@@ -999,12 +992,13 @@ onUnmounted(() => {
                 class="w-full rounded-xl px-4 py-3 border border-orange-500/30 font-mono focus:border-orange-500 outline-none transition-all text-text-primary"
                 style="background: var(--theme-bg-input);">
             </div>
-            <div class="space-y-1">
+            <!-- 暂时隐藏温度报警提示语输入框 -->
+            <!-- <div class="space-y-1">
               <label class="text-xs text-text-muted ml-1">报警提示语</label>
               <input v-model="alarmSettings.temp_alarm_message" type="text" placeholder="温度过高"
                 class="w-full rounded-xl px-4 py-3 border border-orange-500/30 focus:border-orange-500 outline-none transition-all text-text-primary"
                 style="background: var(--theme-bg-input);">
-            </div>
+            </div> -->
           </div>
           <p class="text-xs text-text-muted mt-2">当温度传感器读数超过阈值且区域无人时触发温度报警</p>
         </div>
@@ -1043,7 +1037,8 @@ onUnmounted(() => {
               style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
           </div>
 
-          <div class="space-y-1">
+          <!-- 暂时隐藏预警、报警、切电提示语输入框 -->
+          <!-- <div class="space-y-1">
             <label class="text-xs text-text-muted ml-1">预警提示语</label>
             <input v-model="alarmSettings.warning_message" type="text"
               class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
@@ -1062,7 +1057,7 @@ onUnmounted(() => {
             <input v-model="alarmSettings.action_message" type="text"
               class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
               style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-          </div>
+          </div> -->
         </div>
       </div>
     </Transition>

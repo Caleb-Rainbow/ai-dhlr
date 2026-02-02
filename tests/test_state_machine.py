@@ -25,6 +25,8 @@ class MockAlarmConfig:
     warning_message: str = "预警"
     alarm_message: str = "报警"
     action_message: str = "切电"
+    temp_alarm_threshold: float = 80.0
+    temp_alarm_message: str = "温度过高"
 
 
 @dataclass

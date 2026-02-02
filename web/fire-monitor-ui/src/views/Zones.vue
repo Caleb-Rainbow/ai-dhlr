@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
-import { CookingPot, Trash2, Pencil, Plus } from 'lucide-vue-next';
+import { Trash2, Pencil, Plus, Camera as CameraIcon } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneConfig, Camera } from '../types';
 import Modal from '../components/Modal.vue';
@@ -584,9 +584,6 @@ onUnmounted(() => {
           >
             
             <div class="flex items-center gap-4">
-               <div class="w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-red-500/20 text-orange-400 border border-white/5">
-                  <CookingPot class="w-6 h-6" />
-               </div>
                 <div>
                    <div class="flex items-center gap-3">
                       <h3 class="font-bold text-text-primary tracking-wide text-lg">{{ zone.name }}</h3>
@@ -602,7 +599,7 @@ onUnmounted(() => {
                    </div>
                    <div class="flex items-center gap-2 mt-1">
                       <span class="text-xs text-text-muted flex items-center gap-1">
-                         <span class="w-3 h-3 rounded bg-blue-500/20 flex items-center justify-center">📷</span>
+                         <CameraIcon class="w-3 h-3 text-blue-400" />
                          {{ getCameraName(zone.camera_id) }}
                       </span>
                       <span class="w-1 h-1 rounded-full bg-text-muted"></span>

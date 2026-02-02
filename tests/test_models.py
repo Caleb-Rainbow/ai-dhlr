@@ -23,15 +23,16 @@ class TestZoneState:
             ("WARNING", "warning"),
             ("ALARM", "alarm"),
             ("CUTOFF", "cutoff"),
+            ("TEMP_ALARM", "temp_alarm"),
         ]
-        
+
         for attr_name, value in expected_states:
             assert hasattr(ZoneState, attr_name), f"ZoneState 缺少 {attr_name}"
             assert getattr(ZoneState, attr_name).value == value
-    
+
     def test_state_count(self):
         """验证状态数量"""
-        assert len(ZoneState) == 6, "ZoneState 应该有6个状态"
+        assert len(ZoneState) == 7, "ZoneState 应该有7个状态"
 
 
 class TestZone:

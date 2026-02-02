@@ -277,10 +277,10 @@ onUnmounted(() => {
           <div v-else-if="form.type === 'rtsp'" key="rtsp" class="space-y-2">
             <div class="space-y-1">
               <label class="text-xs text-text-muted">RTSP地址</label>
-              <input v-model="form.rtsp_url" type="text" placeholder="rtsp://192.168.1.100:554/stream"
+              <input v-model="form.rtsp_url" type="text" placeholder="rtsp://192.168.1.100:554"
                 class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary font-mono text-sm"
                 style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              <p class="text-[10px] text-text-muted opacity-60">示例: rtsp://192.168.1.100:554/live/main</p>
+              <p class="text-[10px] text-text-muted opacity-60">示例: rtsp://192.168.1.100:554</p>
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div class="space-y-1">

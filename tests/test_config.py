@@ -8,10 +8,9 @@
 import pytest
 
 from src.utils.config import (
-    CameraConfig, 
-    ZoneConfig, 
+    CameraConfig,
+    ZoneConfig,
     AlarmConfig,
-    TTSConfig,
     InferenceConfig,
     DetectionConfig,
     ApiConfig,
@@ -176,18 +175,6 @@ class TestSystemConfig:
         config = SystemConfig()
         assert "监测" in config.name or "动火" in config.name
         assert config.debug is True
-
-
-class TestTTSConfig:
-    """测试 TTSConfig 数据类"""
-    
-    def test_default_values(self):
-        """测试默认值"""
-        config = TTSConfig()
-        assert config.enabled is True
-        assert config.engine == "kokoro"
-        assert config.audio_dir == "audio_assets"
-        assert config.idle_timeout == 60
 
 
 class TestRemoteServerConfig:
