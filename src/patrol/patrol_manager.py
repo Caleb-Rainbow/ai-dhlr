@@ -5,13 +5,25 @@
 import time
 import threading
 import asyncio
+import os
 from typing import Optional, Dict, List, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
 from ..utils.logger import get_logger
-from ..tts.tts_manager import tts_manager, AudioType
 from ..output.voice import voice_player
+
+
+# 音频资源目录
+AUDIO_ASSETS_DIR = "audio_assets"
+
+
+def _get_audio_path(zone_id: str, audio_type: str) -> Optional[str]:
+    """获取灶台音频文件路径"""
+    audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
+    if os.path.exists(audio_path):
+        return audio_path
+    return None
 
 
 class PatrolStep(Enum):
@@ -210,10 +222,10 @@ class PatrolManager:
         
         # 播放对应语音
         if has_person:
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_HAS_PERSON)
+            audio_path = _get_audio_path(zone_id, "patrol_has_person")
             message = f"{zone_name}有人"
         else:
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_PERSON)
+            audio_path = _get_audio_path(zone_id, "patrol_no_person")
             message = f"{zone_name}没人"
         
         if audio_path:
@@ -249,10 +261,10 @@ class PatrolManager:
         
         # 播放对应语音
         if is_fire_on:
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_FIRE_ON)
+            audio_path = _get_audio_path(zone_id, "patrol_fire_on")
             message = f"{zone_name}动火"
         else:
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_FIRE)
+            audio_path = _get_audio_path(zone_id, "patrol_no_fire")
             message = f"{zone_name}未动火"
         
         if audio_path:
@@ -311,7 +323,7 @@ class PatrolManager:
         try:
             # 预警
             self._update_progress(PatrolStep.ALARM_DEMO, 25, f"{zone_name}预警中...")
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.WARNING)
+            audio_path = _get_audio_path(zone_id, "warning")
             if audio_path:
                 voice_player.play_file(audio_path, priority=True)
             self._add_result(zone_id, zone_name, "报警演示", "warning", "预警")
@@ -319,7 +331,7 @@ class PatrolManager:
             
             # 报警
             self._update_progress(PatrolStep.ALARM_DEMO, 50, f"{zone_name}报警中...")
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ALARM)
+            audio_path = _get_audio_path(zone_id, "alarm")
             if audio_path:
                 voice_player.play_file(audio_path, priority=True)
             self._add_result(zone_id, zone_name, "报警演示", "warning", "报警")
@@ -327,7 +339,7 @@ class PatrolManager:
             
             # 切电
             self._update_progress(PatrolStep.ALARM_DEMO, 75, f"{zone_name}切电中...")
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ACTION)
+            audio_path = _get_audio_path(zone_id, "action")
             if audio_path:
                 voice_player.play_file(audio_path, priority=True)
             
@@ -362,7 +374,7 @@ class PatrolManager:
         zone_name = sm.zone.name
         
         # 播放切电语音
-        audio_path = tts_manager.get_audio_path(zone_id, AudioType.ACTION)
+        audio_path = _get_audio_path(zone_id, "action")
         if audio_path:
             voice_player.play_file(audio_path, priority=True)
         
@@ -420,7 +432,7 @@ class PatrolManager:
                     f"检测到{zone_name}有人"
                 )
                 # 播放"有人"语音
-                audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_HAS_PERSON)
+                audio_path = _get_audio_path(zone_id, "patrol_has_person")
                 if audio_path:
                     voice_player.play_file(audio_path)
                     time.sleep(2)  # 等待语音播放
@@ -436,7 +448,7 @@ class PatrolManager:
                 has_person = sm.zone.has_person
                 if not has_person:
                     # 播放"人员离开"语音
-                    audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_PERSON)
+                    audio_path = _get_audio_path(zone_id, "patrol_no_person")
                     if audio_path:
                         voice_player.play_file(audio_path)
                         time.sleep(1.5)
@@ -469,7 +481,7 @@ class PatrolManager:
                     f"检测到{zone_name}动火中"
                 )
                 # 播放"动火中"语音
-                audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_FIRE_ON)
+                audio_path = _get_audio_path(zone_id, "patrol_fire_on")
                 if audio_path:
                     voice_player.play_file(audio_path)
                     time.sleep(2)
@@ -485,7 +497,7 @@ class PatrolManager:
                 is_fire_on = serial_manager.is_fire_on(zone_id)
                 if not is_fire_on:
                     # 播放"未动火"语音
-                    audio_path = tts_manager.get_audio_path(zone_id, AudioType.PATROL_NO_FIRE)
+                    audio_path = _get_audio_path(zone_id, "patrol_no_fire")
                     if audio_path:
                         voice_player.play_file(audio_path)
                         time.sleep(1.5)
@@ -552,7 +564,7 @@ class PatrolManager:
         try:
             # 演示预警
             self._update_progress(PatrolStep.ALARM_DEMO, 30, f"正在演示{zone_name}预警...")
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.WARNING)
+            audio_path = _get_audio_path(zone_id, "warning")
             if audio_path:
                 voice_player.play_file(audio_path, priority=True)
             self._add_result(zone_id, zone_name, "报警演示", "warning", "预警演示")
@@ -560,7 +572,7 @@ class PatrolManager:
             
             # 演示报警
             self._update_progress(PatrolStep.ALARM_DEMO, 60, f"正在演示{zone_name}报警...")
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ALARM)
+            audio_path = _get_audio_path(zone_id, "alarm")
             if audio_path:
                 voice_player.play_file(audio_path, priority=True)
             self._add_result(zone_id, zone_name, "报警演示", "warning", "报警演示")
@@ -568,7 +580,7 @@ class PatrolManager:
             
             # 演示切电
             self._update_progress(PatrolStep.ALARM_DEMO, 90, f"正在演示{zone_name}切电...")
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ACTION)
+            audio_path = _get_audio_path(zone_id, "action")
             if audio_path:
                 voice_player.play_file(audio_path, priority=True)
             # 模拟切电（不实际执行）
@@ -608,7 +620,7 @@ class PatrolManager:
                                 f"触发{zone_name}预警...")
             
             # 播放预警语音
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.WARNING)
+            audio_path = _get_audio_path(zone_id, "warning")
             if audio_path:
                 voice_player.play_file(audio_path)
             
@@ -644,7 +656,7 @@ class PatrolManager:
                                 f"触发{zone_name}报警...")
             
             # 播放报警语音
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ALARM)
+            audio_path = _get_audio_path(zone_id, "alarm")
             if audio_path:
                 voice_player.play_file(audio_path)
             
@@ -681,7 +693,7 @@ class PatrolManager:
                                 f"触发{zone_name}切电...")
             
             # 播放切电语音
-            audio_path = tts_manager.get_audio_path(zone_id, AudioType.ACTION)
+            audio_path = _get_audio_path(zone_id, "action")
             if audio_path:
                 voice_player.play_file(audio_path)
             

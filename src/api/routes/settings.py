@@ -30,22 +30,6 @@ class SystemInfo(BaseModel):
     debug: bool
 
 
-class TTSSettings(BaseModel):
-    """TTS设置"""
-    enabled: bool
-    engine: str
-    audio_dir: str
-    idle_timeout: int
-
-
-class TTSStatus(BaseModel):
-    """TTS状态"""
-    enabled: bool
-    service_loaded: bool
-    pending_count: int
-    synthesis_status: Dict[str, str]
-
-
 class NetworkStatus(BaseModel):
     """网络状态"""
     interface_type: str  # "wifi" | "ethernet" | "unknown"
@@ -113,18 +97,7 @@ async def update_alarm_settings(settings: AlarmSettings):
     alarm.alarm_message = settings.alarm_message
     alarm.action_message = settings.action_message
     config_manager.save()
-    
-    # 更新TTS管理器的消息模板
-    try:
-        from ...tts.tts_manager import tts_manager
-        tts_manager.update_messages(
-            warning_message=settings.warning_message,
-            alarm_message=settings.alarm_message,
-            action_message=settings.action_message
-        )
-    except Exception:
-        pass
-    
+
     return {"success": True, "message": "报警设置已更新"}
 
 
@@ -140,84 +113,6 @@ async def get_system_info():
         device_id=system.device_id or "未生成",
         debug=system.debug
     )
-
-
-# ==================== TTS设置 ====================
-
-@router.get("/tts", response_model=TTSSettings)
-async def get_tts_settings():
-    """获取TTS设置"""
-    tts = config_manager.config.tts
-    return TTSSettings(
-        enabled=tts.enabled,
-        engine=tts.engine,
-        audio_dir=tts.audio_dir,
-        idle_timeout=tts.idle_timeout
-    )
-
-
-@router.get("/tts/status", response_model=TTSStatus)
-async def get_tts_status():
-    """获取TTS状态"""
-    tts_config = config_manager.config.tts
-    
-    synthesis_status = {}
-    service_loaded = False
-    pending_count = 0
-    
-    try:
-        from ...tts.tts_manager import tts_manager
-        service_loaded = tts_manager.is_service_loaded()
-        pending_count = tts_manager.get_pending_count()
-        synthesis_status = tts_manager.get_all_synthesis_status()
-    except Exception:
-        pass
-    
-    return TTSStatus(
-        enabled=tts_config.enabled,
-        service_loaded=service_loaded,
-        pending_count=pending_count,
-        synthesis_status=synthesis_status
-    )
-
-
-@router.get("/tts/zone/{zone_id}/status")
-async def get_zone_synthesis_status(zone_id: str):
-    """获取指定灶台的语音合成状态"""
-    try:
-        from ...tts.tts_manager import tts_manager
-        status = tts_manager.get_synthesis_status(zone_id)
-        has_files = tts_manager.has_audio_files(zone_id)
-        return {
-            "zone_id": zone_id,
-            "status": status,
-            "has_audio_files": has_files
-        }
-    except Exception as e:
-        return {
-            "zone_id": zone_id,
-            "status": "none",
-            "has_audio_files": False,
-            "error": str(e)
-        }
-
-
-@router.post("/tts/zone/{zone_id}/synthesize")
-async def trigger_zone_synthesis(zone_id: str):
-    """触发指定灶台的语音合成"""
-    try:
-        # 获取灶台信息
-        from ...zone.state_machine import zone_manager
-        zone = zone_manager.get_zone(zone_id)
-        if not zone:
-            return {"success": False, "message": "灶台不存在"}
-        
-        from ...tts.tts_manager import tts_manager
-        tts_manager.submit_synthesis_task(zone_id, zone.zone.name)
-        
-        return {"success": True, "message": f"已提交灶台 {zone_id} 的语音合成任务"}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
 
 
 # ==================== 网络状态 ====================

@@ -42,21 +42,15 @@ class MockSerialManager:
     """模拟串口管理器"""
     def __init__(self):
         self._fire_states = {}
-    
+
     def set_fire_state(self, zone_id: str, is_on: bool):
         self._fire_states[zone_id] = is_on
-    
+
     def is_fire_on(self, zone_id: str) -> bool:
         return self._fire_states.get(zone_id, False)
-    
+
     def cutoff(self, zone_id: str) -> bool:
         return True
-
-
-class MockTTSManager:
-    """模拟TTS管理器"""
-    def get_audio_path(self, zone_id: str, audio_type) -> str:
-        return f"/mock/audio/{zone_id}/{audio_type.value}.wav"
 
 
 class MockVoicePlayer:
@@ -92,37 +86,29 @@ def mock_serial_manager():
 
 
 @pytest.fixture
-def mock_tts_manager():
-    """提供模拟TTS管理器"""
-    return MockTTSManager()
-
-
-@pytest.fixture
 def mock_voice_player():
     """提供模拟语音播放器"""
     return MockVoicePlayer()
 
 
 @pytest.fixture
-def patrol_manager_with_mocks(mock_zone_manager, mock_serial_manager, mock_tts_manager, mock_voice_player):
+def patrol_manager_with_mocks(mock_zone_manager, mock_serial_manager, mock_voice_player):
     """创建带有模拟依赖的巡检管理器"""
     with patch('src.patrol.patrol_manager.get_logger') as mock_logger, \
-         patch('src.patrol.patrol_manager.tts_manager', mock_tts_manager), \
          patch('src.patrol.patrol_manager.voice_player', mock_voice_player):
-        
+
         mock_logger.return_value = MagicMock()
-        
+
         # 重置单例
         from src.patrol.patrol_manager import PatrolManager
         PatrolManager._instance = None
-        
+
         patrol_mgr = PatrolManager()
-        
+
         yield {
             'patrol_manager': patrol_mgr,
             'zone_manager': mock_zone_manager,
             'serial_manager': mock_serial_manager,
-            'tts_manager': mock_tts_manager,
             'voice_player': mock_voice_player
         }
 

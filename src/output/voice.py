@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from ..utils.logger import get_logger
 
 
+# 音频资源目录
+AUDIO_ASSETS_DIR = "audio_assets"
+
+
 @dataclass
 class PlaybackTask:
     """播放任务"""
@@ -176,25 +180,19 @@ class VoicePlayer:
     def play_zone_audio(self, zone_id: str, audio_type: str, priority: bool = False):
         """
         播放灶台预合成音频
-        
+
         Args:
             zone_id: 灶台ID
-            audio_type: 音频类型 (warning/alarm/action)
+            audio_type: 音频类型 (warning/alarm/action/temp_alarm/patrol_has_person等)
             priority: 是否优先播放(清空队列)
         """
-        # 尝试从TTS管理器获取预合成音频路径
-        try:
-            from ..tts.tts_manager import tts_manager, AudioType
-            
-            audio_type_enum = AudioType[audio_type.upper()]
-            audio_path = tts_manager.get_audio_path(zone_id, audio_type_enum)
-            
-            if audio_path:
-                self.play_file(audio_path, priority=priority)
-            else:
-                 self._logger.warning(f"未找到音频文件: zone={zone_id}, type={audio_type}")
-        except Exception as e:
-            self._logger.debug(f"获取预合成音频失败: {e}")
+        # 直接从audio_assets目录读取音频文件
+        audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
+
+        if os.path.exists(audio_path):
+            self.play_file(audio_path, priority=priority)
+        else:
+            self._logger.warning(f"未找到音频文件: zone={zone_id}, type={audio_type}, path={audio_path}")
     
     def speak_warning(self, zone_id: str, zone_name: str):
         """播放预警语音"""

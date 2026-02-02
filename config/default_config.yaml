@@ -70,13 +70,6 @@ voice:
   rate: 150
   volume: 1.0
 
-# TTS语音合成配置
-tts:
-  enabled: true
-  engine: "kokoro"  # kokoro 或 pyttsx3
-  audio_dir: "audio_assets"
-  idle_timeout: 150  # 空闲超时销毁时间（秒）
-
 # 日志配置
 logging:
   level: "INFO"

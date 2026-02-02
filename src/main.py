@@ -92,26 +92,6 @@ class FireSafetySystem:
                 enabled=config.voice.enabled,
                 volume=config.voice.volume
             )
-            # 初始化TTS管理器（Kokoro智能生命周期管理）
-            if config.tts.enabled:
-                try:
-                    from src.tts.tts_manager import tts_manager
-                    tts_manager.initialize(
-                        audio_dir=config.tts.audio_dir,
-                        idle_timeout=config.tts.idle_timeout,
-                        warning_message=config.alarm.warning_message,
-                        alarm_message=config.alarm.alarm_message,
-                        action_message=config.alarm.action_message
-                    )
-                    
-                    # 检查已配置灶台的语音文件，如缺失则提交合成任务
-                    for zone_config in config.zones:
-                        if not tts_manager.has_audio_files(zone_config.id):
-                            tts_manager.submit_synthesis_task(zone_config.id, zone_config.name)
-                    
-                    self._logger.info("TTS管理器初始化完成")
-                except Exception as e:
-                    self._logger.warning(f"TTS管理器初始化失败: {e}")
             
             # 生成或获取设备ID
             try:

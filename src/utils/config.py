@@ -45,27 +45,18 @@ class AlarmConfig:
     warning_time: int = 90      # 预警时间
     alarm_time: int = 180       # 报警时间
     action_time: int = 300      # 切电时间
-    
+
     # 语音播报间隔（秒）
     broadcast_interval: int = 15  # 重复播报间隔
-    
+
     # 三阶段消息配置
     warning_message: str = "动火区域离人即将超时，请立即回到工作岗位"
     alarm_message: str = "动火区域离人超时，请立即回到工作岗位"
     action_message: str = "动火区域离人超时，已自动切断炉灶电源，请立即现场处理"
-    
+
     # 温度报警配置
     temp_alarm_threshold: float = 80.0  # 温度报警阈值 (°C)
     temp_alarm_message: str = "温度过高，请立即处理"
-
-
-@dataclass
-class TTSConfig:
-    """TTS语音合成配置"""
-    enabled: bool = True
-    engine: str = "kokoro"      # kokoro 或 pyttsx3
-    audio_dir: str = "audio_assets"
-    idle_timeout: int = 60      # 空闲超时销毁时间（秒）
 
 
 @dataclass
@@ -163,16 +154,13 @@ class AppConfig:
     logging: LoggingConfig
     gpio: GpioConfig
     alarm: AlarmConfig = None      # 三阶段报警配置
-    tts: TTSConfig = None          # TTS配置
     remote: RemoteServerConfig = None  # 远程服务器配置
     serial: SerialConfig = None    # 串口配置
-    
+
     def __post_init__(self):
         """初始化可选配置"""
         if self.alarm is None:
             self.alarm = AlarmConfig()
-        if self.tts is None:
-            self.tts = TTSConfig()
         if self.remote is None:
             self.remote = RemoteServerConfig()
         if self.serial is None:
@@ -330,16 +318,7 @@ class ConfigManager:
             temp_alarm_threshold=alarm_raw.get('temp_alarm_threshold', 80.0),
             temp_alarm_message=alarm_raw.get('temp_alarm_message', '温度过高，请立即处理')
         )
-        
-        # 解析TTS配置
-        tts_raw = raw.get('tts', {})
-        tts = TTSConfig(
-            enabled=tts_raw.get('enabled', True),
-            engine=tts_raw.get('engine', 'kokoro'),
-            audio_dir=tts_raw.get('audio_dir', 'audio_assets'),
-            idle_timeout=tts_raw.get('idle_timeout', 60)
-        )
-        
+
         # 解析远程服务器配置
         remote_raw = raw.get('remote', {})
         remote = RemoteServerConfig(
@@ -373,7 +352,6 @@ class ConfigManager:
             logging=logging_config,
             gpio=gpio,
             alarm=alarm,
-            tts=tts,
             remote=remote,
             serial=serial
         )
@@ -474,12 +452,6 @@ class ConfigManager:
                 'action_message': config.alarm.action_message,
                 'temp_alarm_threshold': config.alarm.temp_alarm_threshold,
                 'temp_alarm_message': config.alarm.temp_alarm_message
-            },
-            'tts': {
-                'enabled': config.tts.enabled,
-                'engine': config.tts.engine,
-                'audio_dir': config.tts.audio_dir,
-                'idle_timeout': config.tts.idle_timeout
             },
             'remote': {
                 'enabled': config.remote.enabled,

@@ -295,15 +295,7 @@ class WSHandler:
                 serial_manager.register_temperature_sensor(zone_id, temp_sensor_address)
         except Exception:
             pass
-        
-        # 提交语音合成任务
-        try:
-            from ..tts.tts_manager import tts_manager
-            tts_manager.submit_synthesis_task(zone_id, name)
-            logger.info(f"新灶台 {zone_id} 已提交语音合成任务")
-        except Exception as e:
-            logger.warning(f"提交语音合成任务失败: {e}")
-        
+
         return {
             "id": zone_id,
             "name": name,
@@ -406,18 +398,7 @@ class WSHandler:
                 break
         
         config_manager.save()
-        
-        # 如果名称变化，重新合成语音文件
-        new_name = params.get("name")
-        regenerate_voice = params.get("regenerate_voice", False)
-        if new_name and regenerate_voice:
-            try:
-                from ..tts.tts_manager import tts_manager
-                tts_manager.submit_synthesis_task(zone_id, new_name)
-                logger.info(f"灶台 {zone_id} 名称变化，已提交语音合成任务")
-            except Exception as e:
-                logger.warning(f"提交语音合成任务失败: {e}")
-        
+
         return {"id": zone_id, "message": "更新成功"}
     
     async def _delete_zone(self, params: dict) -> dict:
@@ -442,15 +423,7 @@ class WSHandler:
         # 从配置移除
         config_manager.config.zones = [z for z in config_manager.config.zones if z.id != zone_id]
         config_manager.save()
-        
-        # 删除灶台的音频文件
-        try:
-            from ..tts.tts_manager import tts_manager
-            tts_manager.delete_audio_files(zone_id)
-            logger.info(f"已删除灶台 {zone_id} 的音频文件")
-        except Exception as e:
-            logger.warning(f"删除音频文件失败: {e}")
-        
+
         return {"id": zone_id, "name": zone_name, "message": "删除成功"}
     
     # ==================== 摄像头处理器 ====================
@@ -736,21 +709,13 @@ class WSHandler:
                 "device_id": config.system.device_id,
                 "debug": config.system.debug
             }
-        
-        if category in ["all", "tts"]:
-            result["tts"] = {
-                "enabled": config.tts.enabled,
-                "engine": config.tts.engine,
-                "audio_dir": config.tts.audio_dir,
-                "idle_timeout": config.tts.idle_timeout
-            }
-        
+
         if category in ["all", "voice"]:
             result["voice"] = {
                 "enabled": config.voice.enabled,
                 "volume": config.voice.volume
             }
-        
+
         return result
     
     async def _update_settings(self, params: dict) -> dict:

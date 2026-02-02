@@ -274,15 +274,7 @@ async def create_zone(request: ZoneCreateRequest):
         
         # 保存配置
         config_manager.save()
-        
-        # 触发语音预合成
-        try:
-            from ...tts.tts_manager import tts_manager
-            if config_manager.config.tts.enabled:
-                tts_manager.submit_synthesis_task(zone_id, request.name)
-        except Exception:
-            pass  # TTS失败不影响主流程
-        
+
         return {
             "success": True, 
             "message": f"灶台 '{request.name}' 创建成功",
@@ -382,16 +374,7 @@ async def create_or_update_zone_full(request: ZoneConfigRequest):
         
         # 保存到配置文件
         config_manager.save()
-        
-        # 触发语音预合成（新建灶台或名称变更时）
-        try:
-            from ...tts.tts_manager import tts_manager
-            if config_manager.config.tts.enabled:
-                if is_new or not tts_manager.has_audio_files(request.id):
-                    tts_manager.submit_synthesis_task(request.id, request.name)
-        except Exception:
-            pass  # TTS失败不影响主流程
-        
+
         return {
             "success": True, 
             "message": message,
@@ -545,14 +528,7 @@ async def delete_zone(zone_id: str):
         config_manager.save()
         
         deleted = original_count > len(config_manager.config.zones)
-        
-        # 删除灶台的音频文件
-        try:
-            from ...tts.tts_manager import tts_manager
-            tts_manager.delete_audio_files(zone_id)
-        except Exception:
-            pass  # 删除音频文件失败不影响主流程
-        
+
         return {
             "success": True, 
             "message": f"灶台 '{zone_name}' 已删除",
