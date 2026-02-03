@@ -259,8 +259,7 @@ onUnmounted(() => {
                 <div class="text-xs text-text-muted flex items-center gap-1">
                   <Zap class="w-3 h-3 text-amber-400" />
                   <span class="font-mono text-amber-400">
-                    {{ zone.is_fire_on ? (zone.current_value ? (zone.current_value / 100).toFixed(2) : '?.??') : '0.00'
-                    }}A
+                    {{ zone.current_value != null ? (zone.current_value / 100).toFixed(2) : '?.??' }}A
                   </span>
                 </div>
                 <!-- 温度值显示 (仅绑定了传感器时显示) -->

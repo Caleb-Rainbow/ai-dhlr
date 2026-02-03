@@ -278,7 +278,7 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 | Action | 说明 | 参数 | 返回 |
 |--------|------|------|------|
 | `get_serial_ports` | 获取系统可用的串口列表 | 无 | `[{device, name, description, hwid}, ...]` |
-| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open}` |
+| `get_serial_config` | 获取串口配置 | 无 | `{enabled, port, baudrate, poll_interval, is_open, debug_hex}` |
 | `update_serial_config` | 更新串口配置 | `enabled?`, `port?`, `baudrate?`, `poll_interval?` | `{message}` |
 | `get_currents` | 获取所有分区电流值 | 无 | `{currents: {zone_id: value, ...}}` |
 | `get_lora_config` | 获取LoRa配置 | 无 | `{id, channel}` |

@@ -1082,9 +1082,11 @@ class WSHandler:
         config = config_manager.config.serial
         
         is_open = False
+        debug_hex = False
         try:
             from ..serial_port.serial_manager import serial_manager
             is_open = serial_manager._helper.is_open if serial_manager._helper else False
+            debug_hex = serial_manager.get_debug_hex()
         except Exception:
             pass
         
@@ -1093,7 +1095,8 @@ class WSHandler:
             "port": config.port,
             "baudrate": config.baudrate,
             "poll_interval": config.poll_interval,
-            "is_open": is_open
+            "is_open": is_open,
+            "debug_hex": debug_hex
         }
     
     async def _update_serial_config(self, params: dict) -> dict:
