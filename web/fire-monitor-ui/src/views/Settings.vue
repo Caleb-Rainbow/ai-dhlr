@@ -25,7 +25,8 @@ const networkStatus = ref<NetworkStatus>({
   ip_address: '',
   signal_strength: -1,
   gateway: '',
-  is_connected: false
+  is_connected: false,
+  is_internet_connected: false
 });
 
 // 远程服务器配置
@@ -510,6 +511,20 @@ onUnmounted(() => {
           style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
           <div class="text-xs text-text-muted mb-1">IP 地址</div>
           <div class="font-mono text-text-primary">{{ networkStatus.ip_address || '未连接' }}</div>
+        </div>
+        <!-- 互联网状态 -->
+        <div class="p-3 rounded-2xl border transition-all duration-300 hover-lift col-span-2"
+          style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+          <div class="text-xs text-text-muted mb-1">互联网状态</div>
+          <div class="flex items-center gap-2">
+            <Globe class="w-5 h-5" :class="networkStatus.is_internet_connected ? 'text-success' : 'text-red-400'" />
+            <span class="font-medium" :class="networkStatus.is_internet_connected ? 'text-success' : 'text-red-400'">
+              {{ networkStatus.is_internet_connected ? '已接入外网' : '未接入外网' }}
+            </span>
+            <span v-if="!networkStatus.is_connected" class="text-xs text-text-muted">
+              （需先连接局域网）
+            </span>
+          </div>
         </div>
         <div v-if="networkStatus.interface_type === 'wifi'"
           class="p-3 rounded-2xl border col-span-2 transition-all duration-300 hover-lift"

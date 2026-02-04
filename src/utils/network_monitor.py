@@ -23,7 +23,8 @@ class NetworkStatus:
     ip_address: str = ""             # IP 地址
     signal_strength: int = -1        # WiFi 信号强度 (0-100)，以太网为 -1
     gateway: str = ""                # 网关地址
-    is_connected: bool = False       # 是否联网
+    is_connected: bool = False       # 是否联网（局域网）
+    is_internet_connected: bool = False  # 是否接入互联网（外网）
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -166,7 +167,38 @@ class NetworkMonitor:
         ip = self.get_local_ip()
         if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172."):
             return ("ethernet", "本地连接", "192.168.1.1")
-        return ("unknown", "", "")
+        return (\"unknown\", \"\", \"\")
+    
+    def _check_internet_connection(self, timeout: float = 2.0) -> bool:
+        """
+        检测是否接入互联网（外网）
+        通过尝试连接外网DNS服务器来判断
+        
+        Args:
+            timeout: 超时时间（秒）
+            
+        Returns:
+            True 如果可以访问外网，否则 False
+        """
+        test_hosts = [
+            ("223.5.5.5", 53),     # 阿里DNS
+            ("119.29.29.29", 53),  # 腾讯DNS
+            ("8.8.8.8", 53),       # Google DNS (备用)
+        ]
+        
+        for host, port in test_hosts:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                
+                if result == 0:
+                    return True
+            except Exception:
+                continue
+        
+        return False
     
     def update_status(self) -> NetworkStatus:
         """更新并返回当前网络状态"""
@@ -176,11 +208,17 @@ class NetworkMonitor:
             ip_address=self._status.ip_address,
             signal_strength=self._status.signal_strength,
             gateway=self._status.gateway,
-            is_connected=self._status.is_connected
+            is_connected=self._status.is_connected,
+            is_internet_connected=self._status.is_internet_connected
         )
         
         ip = self.get_local_ip()
         is_connected = ip != "127.0.0.1"
+        
+        # 只有在局域网连接时才检测外网
+        is_internet_connected = False
+        if is_connected:
+            is_internet_connected = self._check_internet_connection()
         
         if self._is_linux:
             iface, gateway = self._get_default_gateway_linux()
@@ -196,13 +234,15 @@ class NetworkMonitor:
             ip_address=ip,
             signal_strength=signal,
             gateway=gateway,
-            is_connected=is_connected
+            is_connected=is_connected,
+            is_internet_connected=is_internet_connected
         )
         
         # 检查状态是否变化
         if (old_status.ip_address != self._status.ip_address or 
             old_status.interface_type != self._status.interface_type or
-            old_status.is_connected != self._status.is_connected):
+            old_status.is_connected != self._status.is_connected or
+            old_status.is_internet_connected != self._status.is_internet_connected):
             self._notify_callbacks()
         
         return self._status
