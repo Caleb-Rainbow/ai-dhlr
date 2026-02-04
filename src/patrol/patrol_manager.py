@@ -19,11 +19,31 @@ AUDIO_ASSETS_DIR = "audio_assets"
 
 
 def _get_audio_path(zone_id: str, audio_type: str) -> Optional[str]:
-    """获取灶台音频文件路径"""
-    audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
+    """获取灶台音频文件路径
+    
+    在不分区模式下(zone_mode='single')，使用 no_zone 目录的音频
+    """
+    # 检查监测模式
+    try:
+        from .utils.config import config_manager
+        zone_mode = config_manager.config.system.zone_mode
+    except Exception:
+        try:
+            from ..utils.config import config_manager
+            zone_mode = config_manager.config.system.zone_mode
+        except Exception:
+            zone_mode = "zoned"  # 默认分区模式
+    
+    # 根据模式选择音频目录
+    if zone_mode == "single":
+        audio_path = os.path.join(AUDIO_ASSETS_DIR, "no_zone", f"{audio_type}.wav")
+    else:
+        audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
+    
     if os.path.exists(audio_path):
         return audio_path
     return None
+
 
 
 class PatrolStep(Enum):

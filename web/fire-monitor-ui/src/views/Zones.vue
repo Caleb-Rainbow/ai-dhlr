@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { Trash2, Pencil, Plus, Camera as CameraIcon } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneConfig, Camera } from '../types';
@@ -9,6 +9,19 @@ import Skeleton from '../components/Skeleton.vue';
 const zones = ref<ZoneConfig[]>([]);
 const cameras = ref<Camera[]>([]);
 const loading = ref(true);
+
+// 监测模式: "zoned" = 分区监测, "single" = 不分区监测
+const zoneMode = ref<'zoned' | 'single'>('zoned');
+
+// 不分区模式的限制
+const isSingleMode = computed(() => zoneMode.value === 'single');
+const canAddZone = computed(() => {
+    if (isSingleMode.value) {
+        // 不分区模式下最多只能有1个灶台
+        return zones.value.length === 0;
+    }
+    return true;
+});
 
 const showAddModal = ref(false);
 const showEditModal = ref(false);
@@ -34,6 +47,11 @@ const getCameraName = (cameraId: string): string => {
 
 // 自动生成灶台名称
 const generateZoneName = () => {
+    // 不分区模式使用固定名称
+    if (isSingleMode.value) {
+        return '灶台区域';
+    }
+
     if (zones.value.length === 0) {
         return '1号灶台';
     }
@@ -58,8 +76,12 @@ const generateZoneName = () => {
 const nextZoneName = ref('');
 const updateNextZoneName = () => {
     nextZoneName.value = generateZoneName();
-    // 设置串口索引的默认值
-    addForm.value.serial_index = calculateSerialIndex(extractZoneNumber(nextZoneName.value));
+    // 设置串口索引的默认值（不分区模式下默认为0）
+    if (isSingleMode.value) {
+        addForm.value.serial_index = 0;
+    } else {
+        addForm.value.serial_index = calculateSerialIndex(extractZoneNumber(nextZoneName.value));
+    }
 };
 
 // Edit Zone State
@@ -78,12 +100,14 @@ const isDragging = ref(false);
 // Actions
 const loadData = async () => {
     try {
-        const [z, c] = await Promise.all([
+        const [z, c, modeData] = await Promise.all([
             ws.request<ZoneConfig[]>('get_zones'),
-            ws.request<Camera[]>('get_cameras')
+            ws.request<Camera[]>('get_cameras'),
+            ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode').catch(() => ({ zone_mode: 'zoned' as const, zone_count: 0 }))
         ]);
         zones.value = z;
         cameras.value = c;
+        zoneMode.value = modeData.zone_mode;
     } catch (e) {
         console.error(e);
     } finally {
@@ -559,9 +583,16 @@ onUnmounted(() => {
 <template>
     <div class="space-y-6 pb-20 pt-6">
         <div class="flex items-center justify-between">
-            <h2
-                class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary to-text-secondary">
-                灶台配置</h2>
+            <div class="flex items-center gap-3">
+                <h2
+                    class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary to-text-secondary">
+                    灶台配置</h2>
+                <!-- 监测模式标签 -->
+                <span v-if="isSingleMode"
+                    class="px-2 py-0.5 text-xs rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    不分区模式
+                </span>
+            </div>
         </div>
 
         <!-- 使用单一 Transition 和 mode="out-in" 确保骨架屏先消失再显示内容 -->
@@ -638,9 +669,14 @@ onUnmounted(() => {
         <Teleport to="#portal-target" defer>
             <Transition name="pop">
                 <div v-if="!loading" class="absolute bottom-24 right-6 pointer-events-auto">
-                    <button @click="showAddModal = true"
-                        class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-blue-600 text-white rounded-2xl flex items-center justify-center shadow-[0_8px_25px_rgba(79,70,229,0.4)] hover:shadow-[0_10px_30px_rgba(79,70,229,0.5)] active:scale-95 transition-all border border-white/10 group hover-glow">
-                        <Plus class="w-7 h-7 group-hover:rotate-90 transition-transform duration-300" />
+                    <button @click="canAddZone && (showAddModal = true)" :disabled="!canAddZone"
+                        class="w-14 h-14 text-white rounded-2xl flex items-center justify-center transition-all border border-white/10 group"
+                        :class="canAddZone
+                            ? 'bg-gradient-to-br from-indigo-500 to-blue-600 shadow-[0_8px_25px_rgba(79,70,229,0.4)] hover:shadow-[0_10px_30px_rgba(79,70,229,0.5)] active:scale-95 hover-glow'
+                            : 'bg-gray-500 opacity-50 cursor-not-allowed'"
+                        :title="canAddZone ? '添加灶台' : (isSingleMode ? '不分区模式只能添加一个灶台' : '添加灶台')">
+                        <Plus class="w-7 h-7"
+                            :class="canAddZone ? 'group-hover:rotate-90 transition-transform duration-300' : ''" />
                     </button>
                 </div>
             </Transition>

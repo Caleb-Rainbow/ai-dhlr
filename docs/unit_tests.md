@@ -95,12 +95,6 @@ tests/
 |----------|------|
 | `test_default_values` | 验证系统配置默认值（系统名称包含"监测"或"动火"、调试模式开启） |
 
-### TestTTSConfig - TTS 配置测试
-
-| 测试方法 | 描述 |
-|----------|------|
-| `test_default_values` | 验证 TTS 配置默认值（引擎 kokoro、音频目录 audio_assets、空闲超时 60s） |
-
 ### TestRemoteServerConfig - 远程服务器配置测试
 
 | 测试方法 | 描述 |
@@ -263,11 +257,11 @@ pytest tests/ --cov=src --cov-report=html
 
 | 测试文件 | 测试类数量 | 测试方法数量 |
 |----------|------------|--------------|
-| `test_config.py` | 11 | 16 |
+| `test_config.py` | 10 | 15 |
 | `test_models.py` | 3 | 8 |
 | `test_serial_helper.py` | 4 | 14 |
 | `test_state_machine.py` | 4 | 13 |
-| **总计** | **22** | **51** |
+| **总计** | **21** | **50** |
 
 ---
 

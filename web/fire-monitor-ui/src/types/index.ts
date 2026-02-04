@@ -3,6 +3,7 @@ export interface DeviceInfo {
     device_id?: string;
     name?: string;
     debug?: boolean;
+    zone_mode?: 'zoned' | 'single';  // 监测模式: zoned=分区监测, single=不分区监测
 }
 
 export interface ZoneStatus {

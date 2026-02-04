@@ -117,6 +117,7 @@ class SystemConfig:
     version: str = "0.1.0"
     debug: bool = True
     device_id: str = ""  # 设备唯一ID，首次运行时自动生成
+    zone_mode: str = "zoned"  # 监测模式: "zoned"=分区监测, "single"=不分区监测
 
 
 @dataclass
@@ -220,7 +221,8 @@ class ConfigManager:
             name=system_raw.get('name', '动火离人安全监测系统'),
             version=system_raw.get('version', '0.1.0'),
             debug=system_raw.get('debug', True),
-            device_id=system_raw.get('device_id', '')
+            device_id=system_raw.get('device_id', ''),
+            zone_mode=system_raw.get('zone_mode', 'zoned')
         )
         
         # 解析推理配置
@@ -379,7 +381,8 @@ class ConfigManager:
                 'name': config.system.name,
                 'version': config.system.version,
                 'debug': config.system.debug,
-                'device_id': config.system.device_id
+                'device_id': config.system.device_id,
+                'zone_mode': config.system.zone_mode
             },
             'inference': {
                 'engine': config.inference.engine,

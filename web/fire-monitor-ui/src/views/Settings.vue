@@ -110,6 +110,12 @@ const savingDeviceId = ref(false);
 const updatingSystem = ref(false);
 const updateResult = ref<{ success: boolean; message: string } | null>(null);
 
+// 监测模式状态
+const zoneMode = ref<'zoned' | 'single'>('zoned');
+const zoneCount = ref(0);
+const switchingZoneMode = ref(false);
+const zoneModeError = ref('');
+
 // Theme management
 const { theme, toggleTheme } = useTheme();
 const isDarkMode = computed(() => theme.value === 'dark');
@@ -180,6 +186,13 @@ const loadData = async () => {
     gpioConfig.value = gpio;
     await loadGpioPins();
   } catch (e) { console.error('Failed to load gpio config', e); }
+
+  // 加载监测模式配置
+  try {
+    const modeData = await ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode');
+    zoneMode.value = modeData.zone_mode;
+    zoneCount.value = modeData.zone_count;
+  } catch (e) { console.error('Failed to load zone mode', e); }
 };
 
 // 加载可用GPIO引脚列表
@@ -407,6 +420,34 @@ const triggerSystemUpdate = async () => {
     }, 5000);
   } finally {
     updatingSystem.value = false;
+  }
+};
+
+// 切换监测模式
+const setZoneMode = async (newMode: 'zoned' | 'single') => {
+  if (switchingZoneMode.value) return;
+  if (newMode === zoneMode.value) return;
+
+  switchingZoneMode.value = true;
+  zoneModeError.value = '';
+
+  try {
+    await ws.request<{ zone_mode: string; message: string }>('set_zone_mode', {
+      zone_mode: newMode
+    });
+    zoneMode.value = newMode;
+    zoneModeError.value = '';
+    // 刷新灶台数量
+    const modeData = await ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode');
+    zoneCount.value = modeData.zone_count;
+  } catch (e: any) {
+    zoneModeError.value = e.message || '切换失败';
+    // 5秒后清除错误
+    setTimeout(() => {
+      zoneModeError.value = '';
+    }, 5000);
+  } finally {
+    switchingZoneMode.value = false;
   }
 };
 
@@ -812,6 +853,74 @@ onUnmounted(() => {
     </div>
 
 
+    <!-- Zone Mode Settings - 监测模式设置 -->
+    <div
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+      <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+        <ShieldAlert class="w-4 h-4" /> 监测模式
+      </h3>
+      <div class="space-y-4">
+        <!-- 模式说明 -->
+        <div class="text-sm text-text-muted">
+          选择设备的监测模式。分区监测支持多个独立灶台区域，不分区监测仅使用单一监测区域。
+        </div>
+
+        <!-- 模式选择 -->
+        <div class="grid grid-cols-2 gap-3">
+          <button @click="setZoneMode('zoned')" :disabled="switchingZoneMode"
+            class="p-4 rounded-2xl border transition-all duration-300 text-left" :class="zoneMode === 'zoned'
+              ? 'border-primary/50 bg-primary/10'
+              : 'border-[var(--theme-border-input)] bg-[var(--theme-bg-input)] hover:border-primary/30'"
+            :style="{ opacity: switchingZoneMode ? 0.7 : 1 }">
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                :class="zoneMode === 'zoned' ? 'border-primary bg-primary' : 'border-text-muted'">
+                <div v-if="zoneMode === 'zoned'" class="w-2 h-2 bg-white rounded-full"></div>
+              </div>
+              <div>
+                <div class="font-medium text-text-primary">分区监测</div>
+                <div class="text-xs text-text-muted">支持多个独立灶台区域</div>
+              </div>
+            </div>
+          </button>
+
+          <button @click="setZoneMode('single')" :disabled="switchingZoneMode"
+            class="p-4 rounded-2xl border transition-all duration-300 text-left" :class="zoneMode === 'single'
+              ? 'border-primary/50 bg-primary/10'
+              : 'border-[var(--theme-border-input)] bg-[var(--theme-bg-input)] hover:border-primary/30'"
+            :style="{ opacity: switchingZoneMode ? 0.7 : 1 }">
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                :class="zoneMode === 'single' ? 'border-primary bg-primary' : 'border-text-muted'">
+                <div v-if="zoneMode === 'single'" class="w-2 h-2 bg-white rounded-full"></div>
+              </div>
+              <div>
+                <div class="font-medium text-text-primary">不分区监测</div>
+                <div class="text-xs text-text-muted">单一监测区域</div>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <!-- 切换中提示 -->
+        <div v-if="switchingZoneMode" class="flex items-center gap-2 text-sm text-primary">
+          <Loader class="w-4 h-4 animate-spin" />
+          <span>正在切换监测模式...</span>
+        </div>
+
+        <!-- 错误提示 -->
+        <div v-if="zoneModeError" class="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
+          {{ zoneModeError }}
+        </div>
+
+        <!-- 当前灶台数量提示 -->
+        <div v-if="zoneCount > 0" class="text-xs text-warning">
+          当前有 {{ zoneCount }} 个灶台区域。切换监测模式需要先删除所有灶台区域。
+        </div>
+      </div>
+    </div>
+
+
     <!-- Theme Settings -->
     <div
       class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
@@ -981,7 +1090,7 @@ onUnmounted(() => {
               style="background: var(--theme-bg-input);">
           </div>
         </div>
-        
+
         <!-- 温度报警阈值 -->
         <div class="pt-4 border-t border-white/10">
           <h4 class="text-xs text-orange-400 font-bold uppercase tracking-wider mb-3">温度报警</h4>

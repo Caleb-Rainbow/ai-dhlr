@@ -186,8 +186,20 @@ class VoicePlayer:
             audio_type: 音频类型 (warning/alarm/action/temp_alarm/patrol_has_person等)
             priority: 是否优先播放(清空队列)
         """
-        # 直接从audio_assets目录读取音频文件
-        audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
+        # 检查监测模式，决定音频文件路径
+        try:
+            from ..utils.config import config_manager
+            zone_mode = config_manager.config.system.zone_mode
+        except Exception:
+            zone_mode = "zoned"  # 默认分区模式
+        
+        # 根据模式选择音频目录
+        if zone_mode == "single":
+            # 不分区模式使用 no_zone 目录
+            audio_path = os.path.join(AUDIO_ASSETS_DIR, "no_zone", f"{audio_type}.wav")
+        else:
+            # 分区模式使用灶台ID目录
+            audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
 
         if os.path.exists(audio_path):
             self.play_file(audio_path, priority=priority)

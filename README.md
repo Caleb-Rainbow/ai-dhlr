@@ -21,7 +21,6 @@
 ### 高级功能
 - **边缘设备支持**：支持RK3568等边缘设备部署
 - **双推理引擎**：支持PyTorch和RKNN两种推理引擎
-- **TTS语音合成**：支持自定义语音消息
 - **GPIO控制**：支持模拟和真实GPIO控制
 - **性能监控**：实时监控系统性能
 - **设备管理**：自动生成设备唯一ID
@@ -191,12 +190,6 @@ voice:
   enabled: true
   volume: 1.0
 
-tts:
-  enabled: true
-  engine: kokoro
-  audio_dir: audio_assets
-  idle_timeout: 60
-
 gpio:
   simulated: true
 
@@ -304,8 +297,6 @@ src/
 ├── patrol/           # 巡检功能
 ├── serial_port/      # 串口通信
 ├── static/           # 静态文件
-├── tts/              # 语音合成
-│   └── assets/       # TTS模型资源
 ├── utils/            # 工具类
 ├── zone/             # 区域管理
 ├── main.py           # 主入口

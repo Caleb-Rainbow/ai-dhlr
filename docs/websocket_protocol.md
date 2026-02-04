@@ -265,6 +265,57 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 - `volume`：音量值范围为 0.0（静音）到 1.0（最大音量）
 - 设置后会立即生效并持久化到配置文件
 
+### 监测模式
+
+| Action | 说明 | 参数 | 返回 |
+|--------|------|------|------|
+| `get_zone_mode` | 获取当前监测模式 | 无 | `{zone_mode, zone_count}` |
+| `set_zone_mode` | 设置监测模式 | `zone_mode` | `{zone_mode, message}` |
+
+**监测模式说明：**
+- `zone_mode`：监测模式，可选值：
+  - `"zoned"`：分区监测（默认），支持多个独立灶台区域
+  - `"single"`：不分区监测，仅支持单一监测区域
+- `zone_count`：当前灶台数量
+
+**切换限制：**
+- 切换监测模式前必须删除所有灶台区域，否则会返回错误
+- 不分区模式下，灶台数量限制为 1，灶台名称固定为"灶台区域"
+
+**示例请求：**
+```json
+{
+  "type": "request",
+  "msg_id": "xxx",
+  "action": "set_zone_mode",
+  "params": {
+    "zone_mode": "single"
+  }
+}
+```
+
+**成功响应：**
+```json
+{
+  "type": "response",
+  "msg_id": "xxx",
+  "success": true,
+  "data": {
+    "zone_mode": "single",
+    "message": "已切换到不分区监测模式"
+  }
+}
+```
+
+**失败响应（存在灶台时）：**
+```json
+{
+  "type": "response",
+  "msg_id": "xxx",
+  "success": false,
+  "error": "请先删除全部灶台区域后再切换到不分区监测模式"
+}
+```
 
 ### 日志
 

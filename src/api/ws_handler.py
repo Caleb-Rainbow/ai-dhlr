@@ -86,6 +86,9 @@ class WSHandler:
             # 音量相关
             "get_volume": self._get_volume,
             "set_volume": self._set_volume,
+            # 监测模式相关
+            "get_zone_mode": self._get_zone_mode,
+            "set_zone_mode": self._set_zone_mode,
             
             # 控制相关
             "reset_zone": self._reset_zone,
@@ -714,7 +717,8 @@ class WSHandler:
                 "name": config.system.name,
                 "version": config.system.version,
                 "device_id": config.system.device_id,
-                "debug": config.system.debug
+                "debug": config.system.debug,
+                "zone_mode": config.system.zone_mode
             }
 
         if category in ["all", "voice"]:
@@ -805,6 +809,49 @@ class WSHandler:
             logger.warning(f"更新播放器音量失败: {e}")
         
         return {"volume": volume, "message": "音量已更新"}
+    
+    async def _get_zone_mode(self, params: dict) -> dict:
+        """获取当前监测模式"""
+        config = config_manager.config
+        return {
+            "zone_mode": config.system.zone_mode,
+            "zone_count": len(config.zones)
+        }
+    
+    async def _set_zone_mode(self, params: dict) -> dict:
+        """设置监测模式
+        
+        Args:
+            zone_mode: "zoned" (分区监测) 或 "single" (不分区监测)
+        """
+        zone_mode = params.get("zone_mode")
+        
+        if zone_mode not in ["zoned", "single"]:
+            raise ValueError("zone_mode 必须是 'zoned' 或 'single'")
+        
+        config = config_manager.config
+        old_mode = config.system.zone_mode
+        
+        # 如果从 zoned 切换到 single，检查是否存在灶台
+        if old_mode == "zoned" and zone_mode == "single":
+            if len(config.zones) > 0:
+                raise ValueError("请先删除全部灶台区域后再切换到不分区监测模式")
+        
+        # 如果从 single 切换到 zoned，检查是否存在灶台
+        if old_mode == "single" and zone_mode == "zoned":
+            if len(config.zones) > 0:
+                raise ValueError("请先删除灶台区域后再切换到分区监测模式")
+        
+        # 保存配置
+        config.system.zone_mode = zone_mode
+        config_manager.save()
+        
+        logger.info(f"监测模式已切换: {old_mode} -> {zone_mode}")
+        
+        return {
+            "zone_mode": zone_mode,
+            "message": f"已切换到{'分区监测' if zone_mode == 'zoned' else '不分区监测'}模式"
+        }
     
     async def _get_network(self, params: dict) -> dict:
         """获取网络状态"""
