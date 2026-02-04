@@ -167,7 +167,7 @@ class NetworkMonitor:
         ip = self.get_local_ip()
         if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172."):
             return ("ethernet", "本地连接", "192.168.1.1")
-        return (\"unknown\", \"\", \"\")
+        return ("unknown", "", "")
     
     def _check_internet_connection(self, timeout: float = 2.0) -> bool:
         """
