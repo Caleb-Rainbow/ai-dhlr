@@ -12,10 +12,6 @@ from dataclasses import dataclass
 from ..utils.logger import get_logger
 
 
-# 音频资源目录
-AUDIO_ASSETS_DIR = "audio_assets"
-
-
 @dataclass
 class PlaybackTask:
     """播放任务"""
@@ -180,13 +176,16 @@ class VoicePlayer:
     def play_zone_audio(self, zone_id: str, audio_type: str, priority: bool = False):
         """
         播放灶台预合成音频
-
+        
         Args:
             zone_id: 灶台ID
-            audio_type: 音频类型 (warning/alarm/action/temp_alarm/patrol_has_person等)
+            audio_type: 音频类型 (warning/alarm/action/temp_alarm)
             priority: 是否优先播放(清空队列)
         """
-        # 检查监测模式，决定音频文件路径
+        # 音频资源目录
+        AUDIO_ASSETS_DIR = "audio_assets"
+        
+        # 检查监测模式
         try:
             from ..utils.config import config_manager
             zone_mode = config_manager.config.system.zone_mode
@@ -195,12 +194,11 @@ class VoicePlayer:
         
         # 根据模式选择音频目录
         if zone_mode == "single":
-            # 不分区模式使用 no_zone 目录
             audio_path = os.path.join(AUDIO_ASSETS_DIR, "no_zone", f"{audio_type}.wav")
         else:
-            # 分区模式使用灶台ID目录
             audio_path = os.path.join(AUDIO_ASSETS_DIR, zone_id, f"{audio_type}.wav")
-
+        
+        # 播放音频
         if os.path.exists(audio_path):
             self.play_file(audio_path, priority=priority)
         else:
@@ -220,7 +218,6 @@ class VoicePlayer:
     
     def speak_temp_alarm(self, zone_id: str, zone_name: str):
         """播放温度报警语音"""
-        # 优先尝试播放灶台专属的温度报警音频
         self.play_zone_audio(zone_id, "temp_alarm", priority=False)
     
     def _clear_queue(self):
