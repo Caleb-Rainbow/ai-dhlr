@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
 
-from .routes import cameras, zones, status, settings
 from .websocket import ws_manager, broadcast_status_update, message_dispatcher
 from ..zone.state_machine import zone_manager
 from ..utils.logger import get_logger
@@ -70,8 +69,18 @@ async def lifespan(app: FastAPI):
         from ..utils.config import config_manager
         if config_manager.config.remote.enabled:
             from .websocket_client import remote_ws_client
+            from .ws_handler import ws_handler
+
+            # 注册远程消息处理器
+            async def handle_remote_request(message: dict):
+                """处理来自远程服务器的请求"""
+                if message.get('type') == 'request':
+                    response = await ws_handler.handle_request(message)
+                    await remote_ws_client.send(response)
+
+            await remote_ws_client.add_message_handler(handle_remote_request)
             asyncio.create_task(remote_ws_client.start())
-            logger.info("远程 WebSocket 客户端已启动")
+            logger.info("远程 WebSocket 客户端已启动，消息处理器已注册")
     except Exception as e:
         logger.warning(f"远程 WebSocket 客户端启动失败: {e}")
     
@@ -124,12 +133,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
-    # 注册API路由
-    app.include_router(cameras.router)
-    app.include_router(zones.router)
-    app.include_router(status.router)
-    app.include_router(settings.router)
     
     # WebSocket端点
     @app.websocket("/ws/status")

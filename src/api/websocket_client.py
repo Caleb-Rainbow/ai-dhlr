@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 import aiohttp
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, Dict, Any, List, Awaitable
 from dataclasses import dataclass
 from urllib.parse import urlparse, urljoin
 
@@ -37,7 +37,7 @@ class RemoteWebSocketClient:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
-        self._message_handlers: List[Callable[[dict], None]] = []
+        self._message_handlers: List[Callable[[dict], Awaitable[None]]] = []
         self._heartbeat_interval = 10.0  # 心跳间隔（秒）
         self._max_reconnect_delay = 30.0  # 最大重连延迟（秒）
     
@@ -49,11 +49,11 @@ class RemoteWebSocketClient:
     def is_connected(self) -> bool:
         return self._state.is_connected and self._ws is not None and not self._ws.closed
     
-    def add_message_handler(self, handler: Callable[[dict], None]):
-        """添加消息处理器"""
+    async def add_message_handler(self, handler: Callable[[dict], Awaitable[None]]):
+        """添加异步消息处理器"""
         self._message_handlers.append(handler)
-    
-    def remove_message_handler(self, handler: Callable[[dict], None]):
+
+    async def remove_message_handler(self, handler: Callable[[dict], Awaitable[None]]):
         """移除消息处理器"""
         if handler in self._message_handlers:
             self._message_handlers.remove(handler)
@@ -341,7 +341,7 @@ class RemoteWebSocketClient:
         # 通知所有消息处理器
         for handler in self._message_handlers:
             try:
-                handler(message)
+                await handler(message)
             except Exception as e:
                 logger.error(f"消息处理器执行失败: {e}")
     

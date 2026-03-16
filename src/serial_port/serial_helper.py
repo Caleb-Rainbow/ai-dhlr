@@ -428,17 +428,55 @@ class SerialHelper:
     def build_reset_relay_command(self, index: int) -> bytes:
         """
         构建继电器还原命令
-        
+
         Args:
             index: 分区索引（从0开始）
-            
+
         Returns:
             完整命令（含CRC）
         """
         address = 0x01 + index
         command = bytes([address, 0x05, 0x00, 0x00, 0x00, 0x00])
         return append_crc16(command)
-    
+
+    def build_set_gas_valve_command(self, position: int = 0) -> bytes:
+        """
+        构建打开燃气阀命令（切气）
+
+        协议格式: [0x01][0x05][0x00][position][0xFF][0x00][CRC]
+        - 设备地址固定为 0x01
+        - 功能码: 0x05 (写单个线圈)
+        - 寄存器地址: position (固定为0)
+        - 数据: 0xFF 0x00 (打开)
+
+        Args:
+            position: 阀位置（固定为0）
+
+        Returns:
+            完整命令（含CRC）
+        """
+        command = bytes([0x01, 0x05, 0x00, position & 0xFF, 0xFF, 0x00])
+        return append_crc16(command)
+
+    def build_reset_gas_valve_command(self, position: int = 0) -> bytes:
+        """
+        构建关闭燃气阀命令（复位）
+
+        协议格式: [0x01][0x05][0x00][position][0x00][0x00][CRC]
+        - 设备地址固定为 0x01
+        - 功能码: 0x05 (写单个线圈)
+        - 寄存器地址: position (固定为0)
+        - 数据: 0x00 0x00 (关闭)
+
+        Args:
+            position: 阀位置（固定为0）
+
+        Returns:
+            完整命令（含CRC）
+        """
+        command = bytes([0x01, 0x05, 0x00, position & 0xFF, 0x00, 0x00])
+        return append_crc16(command)
+
     def build_get_lora_id_command(self) -> bytes:
         """
         构建获取LoRa编号命令
@@ -574,7 +612,17 @@ class SerialHelper:
         """发送继电器还原命令"""
         command = self.build_reset_relay_command(index)
         return await self.send(command)
-    
+
+    async def set_gas_valve(self, position: int = 0) -> bool:
+        """发送打开燃气阀命令（切气）"""
+        command = self.build_set_gas_valve_command(position)
+        return await self.send(command)
+
+    async def reset_gas_valve(self, position: int = 0) -> bool:
+        """发送关闭燃气阀命令（复位）"""
+        command = self.build_reset_gas_valve_command(position)
+        return await self.send(command)
+
     async def get_lora_id(self) -> bool:
         """发送获取LoRa编号命令"""
         command = self.build_get_lora_id_command()

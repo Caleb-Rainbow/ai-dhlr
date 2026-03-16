@@ -24,6 +24,8 @@ class CommandType(Enum):
     GET_CURRENT = auto()       # 获取电流
     SET_RELAY = auto()         # 切电
     RESET_RELAY = auto()       # 复位继电器
+    SET_GAS_VALVE = auto()     # 打开燃气阀（切气）
+    RESET_GAS_VALVE = auto()   # 关闭燃气阀（复位）
     GET_LORA_ID = auto()       # 获取LoRa编号
     SET_LORA_ID = auto()       # 设置LoRa编号
     GET_LORA_CHANNEL = auto()  # 获取LoRa信道
@@ -301,7 +303,13 @@ class SerialManager:
             
             elif command.type == CommandType.RESET_RELAY:
                 return await self._helper.reset_relay(command.index)
-            
+
+            elif command.type == CommandType.SET_GAS_VALVE:
+                return await self._helper.set_gas_valve(command.index)
+
+            elif command.type == CommandType.RESET_GAS_VALVE:
+                return await self._helper.reset_gas_valve(command.index)
+
             elif command.type == CommandType.GET_LORA_ID:
                 return await self._helper.get_lora_id()
             
@@ -787,8 +795,8 @@ class SerialManager:
         return False
     
     async def _enqueue_cutoff_commands(self, serial_index: int, zone_id: str):
-        """将切电和复位命令加入队列"""
-        # 切电命令
+        """将切电和切气命令加入队列"""
+        # 1. 切电命令
         cmd1 = SerialCommand(
             type=CommandType.SET_RELAY,
             index=serial_index,
@@ -797,19 +805,42 @@ class SerialManager:
         )
         await self._enqueue_command(cmd1)
         self._logger.info(f"[{zone_id}] 切电命令已加入队列")
-        
-        # 等待100ms后发送复位命令
-        await asyncio.sleep(0.1)
-        
-        # 复位命令
+
+        # 2. 切气命令（打开燃气阀）
         cmd2 = SerialCommand(
+            type=CommandType.SET_GAS_VALVE,
+            index=0,  # position 固定为0
+            zone_id=zone_id,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd2)
+        self._logger.info(f"[{zone_id}] 切气命令已加入队列")
+
+        # 3. 等待100ms后发送切电复位命令
+        await asyncio.sleep(0.1)
+
+        # 4. 切电复位命令
+        cmd3 = SerialCommand(
             type=CommandType.RESET_RELAY,
             index=serial_index,
             zone_id=zone_id,
             expect_response=True
         )
-        await self._enqueue_command(cmd2)
-        self._logger.info(f"[{zone_id}] 复位命令已加入队列")
+        await self._enqueue_command(cmd3)
+        self._logger.info(f"[{zone_id}] 切电复位命令已加入队列")
+
+        # 5. 等待1秒后发送切气复位命令
+        await asyncio.sleep(1.0)
+
+        # 6. 切气复位命令（关闭燃气阀）
+        cmd4 = SerialCommand(
+            type=CommandType.RESET_GAS_VALVE,
+            index=0,  # position 固定为0
+            zone_id=zone_id,
+            expect_response=True
+        )
+        await self._enqueue_command(cmd4)
+        self._logger.info(f"[{zone_id}] 切气复位命令已加入队列")
 
     def set_lora_id(self, lora_id: int) -> bool:
         """设置LoRa编号 (通过命令队列执行)"""
