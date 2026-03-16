@@ -25,14 +25,53 @@ _status_broadcast_task = None
 SNAPSHOT_DIR = Path(__file__).parent.parent.parent / "snapshots"
 
 
+def _status_hash(statuses: list) -> str:
+    """生成状态哈希，用于检测状态变化"""
+    if not statuses:
+        return ""
+    # 使用关键字段生成哈希，忽略频繁变化的字段（如 last_seen_time）
+    import hashlib
+    import json
+    key_fields = []
+    for s in statuses:
+        key_fields.append({
+            "id": s.get("id"),
+            "state": s.get("state"),
+            "fire_on": s.get("fire_on"),
+            "elapsed_time": int(s.get("elapsed_time", 0)),  # 整数比较，避免秒级变化
+        })
+    return hashlib.md5(json.dumps(key_fields, sort_keys=True).encode()).hexdigest()
+
+
 async def status_broadcast_loop():
-    """定期广播状态更新"""
+    """定期广播状态更新
+
+    优化：仅在状态变化时广播，减少不必要的网络传输。
+    """
+    last_status_hash = None
+    consecutive_unchanged = 0
+
     while True:
         try:
             statuses = zone_manager.get_all_status()
+            current_hash = _status_hash(statuses)
+
             if ws_manager.active_connections:
-                await broadcast_status_update(statuses)
-            await asyncio.sleep(1.0)  # 每秒更新一次
+                # 状态变化时广播，或每10秒强制广播一次（保持心跳）
+                if current_hash != last_status_hash:
+                    await broadcast_status_update(statuses)
+                    last_status_hash = current_hash
+                    consecutive_unchanged = 0
+                    logger.debug("状态变化，广播状态更新")
+                else:
+                    consecutive_unchanged += 1
+                    # 每10秒强制广播一次，作为心跳检测
+                    if consecutive_unchanged >= 10:
+                        await broadcast_status_update(statuses)
+                        consecutive_unchanged = 0
+                        logger.debug("心跳广播状态更新")
+
+            await asyncio.sleep(1.0)  # 每秒检查一次
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -137,13 +176,15 @@ def create_app() -> FastAPI:
     # WebSocket端点
     @app.websocket("/ws/status")
     async def websocket_endpoint(websocket: WebSocket):
-        await ws_manager.connect(websocket)
+        if not await ws_manager.connect(websocket):
+            # 连接被拒绝（达到连接数限制）
+            return
         try:
             while True:
                 # 接收客户端消息
                 data = await websocket.receive_text()
                 logger.debug(f"收到WebSocket消息: {data}")
-                
+
                 # 解析并处理消息
                 try:
                     import json

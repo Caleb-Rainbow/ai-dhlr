@@ -15,18 +15,46 @@ logger = get_logger()
 
 
 class LocalConnectionManager:
-    """本地 WebSocket 连接管理器"""
-    
-    def __init__(self):
+    """本地 WebSocket 连接管理器
+
+    支持并行广播，优化多客户端场景下的性能。
+    """
+
+    # 默认最大连接数（适合2GB内存的边缘设备）
+    DEFAULT_MAX_CONNECTIONS = 10
+
+    def __init__(self, max_connections: int = None):
         self.active_connections: Set[WebSocket] = set()
         self._lock = asyncio.Lock()
-    
-    async def connect(self, websocket: WebSocket):
-        """接受新连接"""
-        await websocket.accept()
+        self.max_connections = max_connections or self.DEFAULT_MAX_CONNECTIONS
+
+    async def connect(self, websocket: WebSocket) -> bool:
+        """接受新连接
+
+        Returns:
+            True 如果连接成功，False 如果达到连接数限制
+        """
         async with self._lock:
+            if len(self.active_connections) >= self.max_connections:
+                logger.warning(f"WebSocket连接数已达上限 ({self.max_connections})，拒绝新连接")
+                # 发送拒绝消息后关闭
+                await websocket.accept()
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "error": "connection_limit_reached",
+                        "message": f"连接数已达上限 ({self.max_connections})"
+                    }))
+                    await websocket.close(code=1013, reason="Connection limit reached")
+                except Exception:
+                    pass
+                return False
+
             self.active_connections.add(websocket)
-        logger.info(f"本地WebSocket客户端已连接，当前连接数: {len(self.active_connections)}")
+
+        await websocket.accept()
+        logger.info(f"本地WebSocket客户端已连接，当前连接数: {len(self.active_connections)}/{self.max_connections}")
+        return True
     
     async def disconnect(self, websocket: WebSocket):
         """断开连接"""
@@ -35,23 +63,42 @@ class LocalConnectionManager:
         logger.info(f"本地WebSocket客户端已断开，当前连接数: {len(self.active_connections)}")
     
     async def broadcast(self, message: Dict[str, Any]):
-        """广播消息给所有本地客户端"""
+        """并行广播消息给所有本地客户端
+
+        使用 asyncio.gather 实现并行发送，将 O(N) 延迟降至 O(1)。
+        适合 RK3566 等边缘设备的多客户端场景。
+        """
         if not self.active_connections:
             return
-        
+
         json_message = json.dumps(message, ensure_ascii=False)
-        
-        async with self._lock:
-            disconnected = set()
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(json_message)
-                except Exception as e:
-                    logger.warning(f"发送本地WebSocket消息失败: {e}")
-                    disconnected.add(connection)
-            
-            # 移除断开的连接
-            self.active_connections -= disconnected
+
+        # 复制连接列表，避免在发送过程中被修改
+        connections = list(self.active_connections)
+
+        async def safe_send(conn: WebSocket) -> Optional[WebSocket]:
+            """安全发送消息，返回需要断开的连接"""
+            try:
+                await conn.send_text(json_message)
+                return None
+            except Exception as e:
+                logger.warning(f"发送本地WebSocket消息失败: {e}")
+                return conn
+
+        # 并行发送所有消息
+        results = await asyncio.gather(
+            *[safe_send(conn) for conn in connections],
+            return_exceptions=True
+        )
+
+        # 收集需要断开的连接
+        disconnected = {r for r in results if isinstance(r, WebSocket)}
+
+        # 移除断开的连接
+        if disconnected:
+            async with self._lock:
+                self.active_connections -= disconnected
+                logger.info(f"已移除 {len(disconnected)} 个断开的连接")
     
     async def send_personal(self, websocket: WebSocket, message: Dict[str, Any]):
         """发送消息给指定客户端"""

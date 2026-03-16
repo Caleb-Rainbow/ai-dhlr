@@ -581,20 +581,22 @@ class WSHandler:
         return camera_manager.get_available_usb_cameras()
     
     async def _preview_camera(self, params: dict) -> dict:
-        """获取摄像头预览帧 (Base64 编码)"""
-        import base64
+        """获取摄像头预览帧 (Base64 编码)
+
+        使用帧缓存优化多客户端预览场景，减少重复编码开销。
+        """
         camera_id = params.get("camera_id")
         if not camera_id:
             raise ValueError("缺少 camera_id 参数")
-        
+
         from ..camera.manager import camera_manager
-        from ..camera.stream import get_snapshot
-        
+        from ..camera.frame_cache import frame_cache
+
         # 检查摄像头状态
         camera = camera_manager.get_camera(camera_id)
         if not camera:
             raise ValueError(f"摄像头 {camera_id} 不存在")
-        
+
         # 如果摄像头离线或错误状态，尝试触发重连
         if not camera.is_online:
             self.logger.info(f"预览时检测到摄像头离线，触发重连: {camera_id}")
@@ -605,11 +607,20 @@ class WSHandler:
             # 再次检查状态
             if not camera.is_online:
                 raise ValueError(f"摄像头离线，正在尝试重连...")
-        
-        snapshot = get_snapshot(camera_id, quality=80)
-        if snapshot:
-            b64 = base64.b64encode(snapshot).decode('utf-8')
-            return {"image": f"data:image/jpeg;base64,{b64}"}
+
+        # 获取原始帧
+        frame = camera.get_snapshot()
+        if frame is None:
+            raise ValueError("获取预览失败，请稍后重试")
+
+        # 使用帧缓存进行编码（减少多客户端重复编码开销）
+        result = frame_cache.get_or_encode(camera_id, frame, quality=80)
+        if result:
+            base64_str, from_cache = result
+            if from_cache:
+                self.logger.debug(f"预览帧从缓存获取: {camera_id}")
+            return {"image": f"data:image/jpeg;base64,{base64_str}"}
+
         raise ValueError("获取预览失败，请稍后重试")
     
     async def _get_snapshot_image(self, params: dict) -> dict:
