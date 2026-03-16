@@ -82,6 +82,7 @@ export interface NetworkStatus {
     signal_strength: number;
     gateway: string;
     is_connected: boolean;
+    is_internet_connected: boolean;  // 是否接入互联网（外网）
 }
 
 export interface RemoteServerConfig {
