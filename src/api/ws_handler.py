@@ -608,10 +608,21 @@ class WSHandler:
             if not camera.is_online:
                 raise ValueError(f"摄像头离线，正在尝试重连...")
 
-        # 获取原始帧
+        # 获取原始帧，如果帧缓冲区为空则等待
         frame = camera.get_snapshot()
+
+        # 如果帧为空，等待帧可用（最多等待2秒）
         if frame is None:
-            raise ValueError("获取预览失败，请稍后重试")
+            self.logger.debug(f"帧缓冲区为空，等待帧可用: {camera_id}")
+            import asyncio
+            for _ in range(20):  # 最多等待2秒
+                await asyncio.sleep(0.1)
+                frame = camera.get_snapshot()
+                if frame is not None:
+                    break
+
+        if frame is None:
+            raise ValueError("获取预览失败，摄像头可能正在初始化")
 
         # 使用帧缓存进行编码（减少多客户端重复编码开销）
         result = frame_cache.get_or_encode(camera_id, frame, quality=80)

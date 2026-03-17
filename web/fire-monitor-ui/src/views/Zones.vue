@@ -169,15 +169,37 @@ const loadCameraPreview = async (cameraId: string) => {
         const result = await ws.request<{ image: string }>('preview_camera', { camera_id: cameraId });
         roiImage.value = result.image;
 
+        // 等待 Vue 完成 DOM 更新，确保 canvas 元素已渲染
+        await new Promise(resolve => setTimeout(resolve, 0));
+
         // 初始化 canvas
         const img = new Image();
         img.crossOrigin = "anonymous";
         img.src = result.image;
+
         img.onload = () => {
-            initCanvas(img);
+            // 再次检查 canvas 是否已渲染
+            if (roiCanvas.value) {
+                initCanvas(img);
+            } else {
+                // 如果 canvas 还没渲染，等待一小段时间重试
+                setTimeout(() => {
+                    if (roiCanvas.value) {
+                        initCanvas(img);
+                    } else {
+                        console.error('Canvas 元素未找到');
+                    }
+                }, 100);
+            }
+        };
+
+        img.onerror = () => {
+            console.error('图片加载失败');
+            roiImage.value = '';
         };
     } catch (e) {
         console.error('加载摄像头预览失败:', e);
+        roiImage.value = '';
     } finally {
         previewLoading.value = false;
     }
@@ -829,7 +851,12 @@ onUnmounted(() => {
                     <div
                         class="relative bg-black rounded-xl overflow-hidden select-none touch-none border border-white/10 aspect-video flex items-center justify-center">
                         <Transition name="fade">
-                            <div v-if="!roiImage" class="text-text-muted text-xs animate-pulse">加载画面中...</div>
+                            <div v-if="previewLoading" class="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+                                <div class="w-10 h-10 border-3 border-white/20 border-t-primary rounded-full animate-spin"></div>
+                            </div>
+                        </Transition>
+                        <Transition name="fade">
+                            <div v-if="!roiImage && !previewLoading" class="text-text-muted text-xs animate-pulse">加载画面中...</div>
                         </Transition>
                         <canvas ref="roiCanvas" @click="onCanvasClick"
                             class="max-w-full max-h-full block cursor-crosshair"></canvas>
