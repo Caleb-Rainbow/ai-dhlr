@@ -116,8 +116,6 @@ const zoneMode = ref<'zoned' | 'single'>('zoned');
 const zoneCount = ref(0);
 const switchingZoneMode = ref(false);
 const zoneModeError = ref('');
-const defaultSerialIndex = ref(1);
-const savingDefaultSerialIndex = ref(false);
 
 // Theme management
 const { theme, toggleTheme } = useTheme();
@@ -196,12 +194,6 @@ const loadData = async () => {
     zoneMode.value = modeData.zone_mode;
     zoneCount.value = modeData.zone_count;
   } catch (e) { console.error('Failed to load zone mode', e); }
-
-  // 加载默认串口索引
-  try {
-    const serialIndexData = await ws.request<{ default_serial_index: number }>('get_default_serial_index');
-    defaultSerialIndex.value = serialIndexData.default_serial_index;
-  } catch (e) { console.error('Failed to load default serial index', e); }
 };
 
 // 加载可用GPIO引脚列表
@@ -457,23 +449,6 @@ const setZoneMode = async (newMode: 'zoned' | 'single') => {
     }, 5000);
   } finally {
     switchingZoneMode.value = false;
-  }
-};
-
-// 保存默认串口索引
-const saveDefaultSerialIndex = async () => {
-  if (savingDefaultSerialIndex.value) return;
-
-  savingDefaultSerialIndex.value = true;
-
-  try {
-    await ws.request<{ default_serial_index: number; message: string }>('set_default_serial_index', {
-      default_serial_index: defaultSerialIndex.value
-    });
-  } catch (e: any) {
-    console.error('Failed to save default serial index', e);
-  } finally {
-    savingDefaultSerialIndex.value = false;
   }
 };
 
@@ -954,30 +929,8 @@ onUnmounted(() => {
         </div>
 
         <!-- 当前灶台数量提示 -->
-        <div v-if="zoneCount > 0" class="text-xs text-warning">
-          当前有 {{ zoneCount }} 个灶台区域。切换监测模式需要先删除所有灶台区域。
-        </div>
-
-        <!-- 不分区模式默认串口索引配置 -->
-        <div v-if="zoneMode === 'single'" class="p-4 rounded-2xl space-y-3"
-          style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
-          <div class="flex items-center justify-between">
-            <div>
-              <div class="font-medium text-text-primary text-sm">默认串口索引</div>
-              <div class="text-xs text-text-muted">不分区模式下的默认串口索引</div>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <input v-model.number="defaultSerialIndex" type="number" min="1"
-              class="flex-1 rounded-xl px-4 py-2 border outline-none focus:border-primary/50 transition-all text-text-primary text-sm"
-              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            <button @click="saveDefaultSerialIndex" :disabled="savingDefaultSerialIndex"
-              class="px-4 py-2 bg-primary hover:bg-primary-light text-white rounded-xl text-sm font-medium transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2">
-              <Loader v-if="savingDefaultSerialIndex" class="w-4 h-4 animate-spin" />
-              <span>{{ savingDefaultSerialIndex ? '保存中...' : '保存' }}</span>
-            </button>
-          </div>
-          <p class="text-xs text-text-muted">索引从1开始，1对应MODBUS地址0x01</p>
+        <div v-if="zoneCount > 0" class="text-xs text-text-muted">
+          当前有 {{ zoneCount }} 个灶台区域。切换模式后将保留现有灶台配置。
         </div>
       </div>
     </div>

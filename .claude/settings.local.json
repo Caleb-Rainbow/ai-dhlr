@@ -4,7 +4,8 @@
       "Bash(npm run build:*)",
       "Bash(pytest:*)",
       "Bash(cd:*)",
-      "Bash(python -m pytest tests/ -v --tb=short)"
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -m py_compile src/utils/config.py src/api/ws_handler.py)"
     ]
   }
 }

@@ -89,8 +89,6 @@ class WSHandler:
             # 监测模式相关
             "get_zone_mode": self._get_zone_mode,
             "set_zone_mode": self._set_zone_mode,
-            "get_default_serial_index": self._get_default_serial_index,
-            "set_default_serial_index": self._set_default_serial_index,
 
             # 控制相关
             "reset_zone": self._reset_zone,
@@ -710,8 +708,7 @@ class WSHandler:
             "device_id": config.system.device_id,
             "platform": platform.system(),
             "python_version": platform.python_version(),
-            "zone_mode": config.system.zone_mode,
-            "default_serial_index": config.system.default_serial_index
+            "zone_mode": config.system.zone_mode
         }
     
     async def _get_performance(self, params: dict) -> dict:
@@ -866,16 +863,9 @@ class WSHandler:
         config = config_manager.config
         old_mode = config.system.zone_mode
         
-        # 如果从 zoned 切换到 single，检查是否存在灶台
-        if old_mode == "zoned" and zone_mode == "single":
-            if len(config.zones) > 0:
-                raise ValueError("请先删除全部灶台区域后再切换到不分区监测模式")
-        
-        # 如果从 single 切换到 zoned，检查是否存在灶台
-        if old_mode == "single" and zone_mode == "zoned":
-            if len(config.zones) > 0:
-                raise ValueError("请先删除灶台区域后再切换到分区监测模式")
-        
+        # 模式切换时不再要求删除灶台，允许保留灶台配置
+        # 不分区模式下使用灶台配置中的 serial_index 和 fire_current_threshold
+
         # 保存配置
         config.system.zone_mode = zone_mode
         config_manager.save()
@@ -885,40 +875,6 @@ class WSHandler:
         return {
             "zone_mode": zone_mode,
             "message": f"已切换到{'分区监测' if zone_mode == 'zoned' else '不分区监测'}模式"
-        }
-
-    async def _get_default_serial_index(self, params: dict) -> dict:
-        """获取不分区模式默认串口索引"""
-        config = config_manager.config
-        return {
-            "default_serial_index": config.system.default_serial_index
-        }
-
-    async def _set_default_serial_index(self, params: dict) -> dict:
-        """设置不分区模式默认串口索引
-
-        Args:
-            default_serial_index: 默认串口索引（从1开始，1对应地址0x01）
-        """
-        default_serial_index = params.get("default_serial_index")
-
-        if default_serial_index is None:
-            raise ValueError("缺少 default_serial_index 参数")
-
-        # 验证值
-        default_serial_index = int(default_serial_index)
-        if default_serial_index < 1:
-            raise ValueError("串口索引必须从1开始")
-
-        # 更新配置
-        config_manager.config.system.default_serial_index = default_serial_index
-        config_manager.save()
-
-        logger.info(f"默认串口索引已设置为: {default_serial_index}")
-
-        return {
-            "default_serial_index": default_serial_index,
-            "message": f"默认串口索引已设置为 {default_serial_index}"
         }
 
     async def _get_network(self, params: dict) -> dict:

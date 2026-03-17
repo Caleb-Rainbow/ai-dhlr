@@ -79,8 +79,8 @@ const updateNextZoneName = () => {
     nextZoneName.value = generateZoneName();
     // 设置串口索引的默认值
     if (isSingleMode.value) {
-        // 不分区模式下使用配置的默认值
-        addForm.value.serial_index = deviceInfo.value?.default_serial_index || 1;
+        // 不分区模式下使用默认值1
+        addForm.value.serial_index = 1;
     } else {
         addForm.value.serial_index = calculateSerialIndex(extractZoneNumber(nextZoneName.value));
     }

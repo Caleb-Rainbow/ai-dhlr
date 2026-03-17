@@ -4,7 +4,6 @@ export interface DeviceInfo {
     name?: string;
     debug?: boolean;
     zone_mode?: 'zoned' | 'single';  // 监测模式: zoned=分区监测, single=不分区监测
-    default_serial_index?: number;  // 不分区模式默认串口索引
 }
 
 export interface ZoneStatus {

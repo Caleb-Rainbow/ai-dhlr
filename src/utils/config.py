@@ -118,7 +118,6 @@ class SystemConfig:
     debug: bool = True
     device_id: str = ""  # 设备唯一ID，首次运行时自动生成
     zone_mode: str = "zoned"  # 监测模式: "zoned"=分区监测, "single"=不分区监测
-    default_serial_index: int = 1  # 不分区模式默认串口索引（从1开始，1对应地址0x01）
 
 
 @dataclass
@@ -224,8 +223,7 @@ class ConfigManager:
             version=system_raw.get('version', '0.1.0'),
             debug=system_raw.get('debug', True),
             device_id=system_raw.get('device_id', ''),
-            zone_mode=system_raw.get('zone_mode', 'zoned'),
-            default_serial_index=system_raw.get('default_serial_index', 1)
+            zone_mode=system_raw.get('zone_mode', 'zoned')
         )
         
         # 解析推理配置
@@ -407,8 +405,7 @@ class ConfigManager:
                 'version': config.system.version,
                 'debug': config.system.debug,
                 'device_id': config.system.device_id,
-                'zone_mode': config.system.zone_mode,
-                'default_serial_index': config.system.default_serial_index
+                'zone_mode': config.system.zone_mode
             },
             'inference': {
                 'engine': config.inference.engine,
