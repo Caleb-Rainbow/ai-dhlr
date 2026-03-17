@@ -403,7 +403,22 @@ class SerialManager:
     def set_on_current_update(self, callback: Callable[[str, int, bool], None]):
         """设置电流更新回调"""
         self._on_current_update = callback
-    
+
+    def _is_zone_enabled(self, zone_id: str) -> bool:
+        """
+        检查灶台是否启用
+
+        Args:
+            zone_id: 灶台ID
+
+        Returns:
+            True 表示启用，False 表示禁用。
+            如果找不到灶台状态机，默认返回 True（向后兼容）
+        """
+        from ..zone.state_machine import zone_manager
+        sm = zone_manager.get_zone(zone_id)
+        return sm.zone.enabled if sm else True
+
     async def _poll_loop(self):
         """轮询循环 (Async Task)"""
         self._logger.info("串口轮询任务已启动")
@@ -425,7 +440,11 @@ class SerialManager:
                 for zone_info in zones:
                     if not self._running:
                         break
-                    
+
+                    # 检查灶台是否启用，跳过已禁用的灶台
+                    if not self._is_zone_enabled(zone_info.zone_id):
+                        continue
+
                     # 创建获取电流命令并加入队列
                     command = SerialCommand(
                         type=CommandType.GET_CURRENT,
@@ -434,7 +453,7 @@ class SerialManager:
                         expect_response=True
                     )
                     await self._enqueue_command(command)
-                    
+
                     # 检查是否可以进行电流复位判断
                     if zone_info.cutoff_time is not None:
                         elapsed = time.time() - zone_info.cutoff_time
@@ -448,7 +467,11 @@ class SerialManager:
                 for temp_info in temp_zones:
                     if not self._running:
                         break
-                    
+
+                    # 检查灶台是否启用，跳过已禁用的灶台
+                    if not self._is_zone_enabled(temp_info.zone_id):
+                        continue
+
                     # 创建获取温度命令并加入队列
                     command = SerialCommand(
                         type=CommandType.GET_TEMPERATURE,

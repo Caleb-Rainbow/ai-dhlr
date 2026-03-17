@@ -799,9 +799,9 @@ class WSHandler:
         if not device_id:
             raise ValueError("设备ID不能为空")
         
-        # 验证格式：只允许大写字母和数字，长度为16位
-        if not re.match(r'^[A-Z0-9]{1,32}$', device_id):
-            raise ValueError("设备ID格式无效，只允许大写字母和数字，长度1-32位")
+        # 验证格式：只允许字母和数字，长度为1-32位
+        if not re.match(r'^[A-Za-z0-9]{1,32}$', device_id):
+            raise ValueError("设备ID格式无效，只允许字母和数字，长度1-32位")
         
         # 保存到配置
         config_manager.config.system.device_id = device_id
