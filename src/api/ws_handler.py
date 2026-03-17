@@ -793,22 +793,17 @@ class WSHandler:
     
     async def _set_device_id(self, params: dict) -> dict:
         """设置设备ID"""
-        import re
         device_id = params.get("device_id", "").strip()
-        
+
         if not device_id:
             raise ValueError("设备ID不能为空")
-        
-        # 验证格式：只允许字母和数字，长度为1-32位
-        if not re.match(r'^[A-Za-z0-9]{1,32}$', device_id):
-            raise ValueError("设备ID格式无效，只允许字母和数字，长度1-32位")
-        
+
         # 保存到配置
         config_manager.config.system.device_id = device_id
         config_manager.save()
-        
+
         logger.info(f"设备ID已更新为: {device_id}")
-        
+
         return {"device_id": device_id, "message": "设备ID已更新"}
     
     async def _get_volume(self, params: dict) -> dict:
