@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npm run build:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(cd:*)",
+      "Bash(python -m pytest tests/ -v --tb=short)"
     ]
   }
 }

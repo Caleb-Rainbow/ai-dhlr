@@ -119,3 +119,29 @@ export interface GpioConfig {
     pin_absence: string;
     pin_alarm: string;
 }
+
+// 报警记录上报消息
+export interface AlarmRecordUpload {
+    type: 'alarm_record_upload';
+    msg_id: string;
+    timestamp: number;  // 毫秒时间戳
+    device_id: string;
+    data: {
+        zone_id: string;
+        zone_name: string;
+        alarm_type: 'warning' | 'alarm' | 'cutoff' | 'temp_alarm';
+        image?: string;
+        message?: string;
+        occurred_at: number;  // 毫秒时间戳
+        local_snapshot_path?: string;
+    };
+}
+
+// 报警记录确认
+export interface AlarmRecordAck {
+    type: 'alarm_record_ack';
+    msg_id: string;
+    success: boolean;
+    record_id?: number;
+    error?: string;
+}

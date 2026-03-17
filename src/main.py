@@ -26,7 +26,7 @@ from src.zone.state_machine import zone_manager, ZoneState, StateChangeEvent
 from src.zone.models import Zone
 from src.output.voice import voice_player
 from src.api.server import create_app
-from src.api.websocket import sync_broadcast_state_change, sync_broadcast_alarm_event
+from src.api.websocket import sync_broadcast_state_change, sync_broadcast_alarm_event, sync_upload_alarm_record
 from src.patrol.patrol_manager import patrol_manager
 
 
@@ -163,35 +163,62 @@ class FireSafetySystem:
         config = get_config()
         self._logger.warning(f"[预警] {zone.name} 无人看管超过 {config.alarm.warning_time} 秒")
         self._add_to_broadcast_queue(zone.id, zone.name, "warning")
-        
+
         image_base64 = self._frame_to_base64(frame) if frame is not None else None
         sync_broadcast_alarm_event(zone.id, zone.name, "warning", image_base64)
+
+        # 上报到远程服务器
+        sync_upload_alarm_record(
+            zone_id=zone.id,
+            zone_name=zone.name,
+            alarm_type="warning",
+            image_base64=image_base64,
+            message=f"{zone.name} 无人看管超过 {config.alarm.warning_time} 秒"
+        )
     
     def _on_alarm(self, zone: Zone, frame = None):
         """报警回调（第二阶段）- 更新播报内容"""
         config = get_config()
         self._logger.warning(f"[报警] {zone.name} 无人看管超过 {config.alarm.alarm_time} 秒")
         self._add_to_broadcast_queue(zone.id, zone.name, "alarm")
-        
+
         image_base64 = self._frame_to_base64(frame) if frame is not None else None
         sync_broadcast_alarm_event(zone.id, zone.name, "alarm", image_base64)
+
+        # 上报到远程服务器
+        sync_upload_alarm_record(
+            zone_id=zone.id,
+            zone_name=zone.name,
+            alarm_type="alarm",
+            image_base64=image_base64,
+            message=f"{zone.name} 无人看管超过 {config.alarm.alarm_time} 秒"
+        )
     
     def _on_cutoff(self, zone: Zone, frame = None):
         """切电回调（第三阶段）- 执行切电并更新播报内容"""
         config = get_config()
         self._logger.warning(f"[切电] {zone.name} 无人看管超过 {config.alarm.action_time} 秒，执行切电")
-        
+
         # 使用串口管理器执行切电（实际硬件）
         try:
             from src.serial_port.serial_manager import serial_manager
             serial_manager.cutoff(zone.id)
         except Exception as e:
             self._logger.warning(f"串口切电失败: {e}")
-        
+
         self._add_to_broadcast_queue(zone.id, zone.name, "action")
-        
+
         image_base64 = self._frame_to_base64(frame) if frame is not None else None
         sync_broadcast_alarm_event(zone.id, zone.name, "cutoff", image_base64)
+
+        # 上报到远程服务器
+        sync_upload_alarm_record(
+            zone_id=zone.id,
+            zone_name=zone.name,
+            alarm_type="cutoff",
+            image_base64=image_base64,
+            message=f"{zone.name} 无人看管超过 {config.alarm.action_time} 秒，已切电"
+        )
     
     def _on_state_change(self, event: StateChangeEvent):
         """状态变化回调 - 根据状态决定是否停止播报"""
@@ -218,8 +245,17 @@ class FireSafetySystem:
         config = get_config()
         self._logger.warning(f"[温度报警] {zone.name} 温度过高 ({temperature:.1f}°C > {config.alarm.temp_alarm_threshold}°C)")
         self._add_to_broadcast_queue(zone.id, zone.name, "temp_alarm")
-        
+
         sync_broadcast_alarm_event(zone.id, zone.name, "temp_alarm", None)
+
+        # 上报到远程服务器
+        sync_upload_alarm_record(
+            zone_id=zone.id,
+            zone_name=zone.name,
+            alarm_type="temp_alarm",
+            image_base64=None,
+            message=f"{zone.name} 温度过高 ({temperature:.1f}°C > {config.alarm.temp_alarm_threshold}°C)"
+        )
     
     def _add_to_broadcast_queue(self, zone_id: str, zone_name: str, audio_type: str):
         """添加或更新灶台到播报队列"""

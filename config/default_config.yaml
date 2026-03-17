@@ -111,3 +111,9 @@ remote:
   password: ""
   token: ""
   token_expires: 0
+
+  # 离线缓存配置
+  offline_cache:
+    enabled: true
+    max_size: 100
+    cache_dir: "cache"

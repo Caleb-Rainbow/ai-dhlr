@@ -187,12 +187,15 @@ class RemoteWebSocketClient:
             self._state.is_connecting = False
             self._state.reconnect_attempts = 0
             self._state.last_heartbeat = time.time()
-            
+
             logger.info("远程 WebSocket 连接成功")
-            
+
             # 启动心跳和接收任务
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             self._receive_task = asyncio.create_task(self._receive_loop())
+
+            # 补发离线缓存的消息
+            asyncio.create_task(self._resend_cached_messages())
             
             return True
             
@@ -260,21 +263,12 @@ class RemoteWebSocketClient:
         """心跳循环"""
         while self._running and self.is_connected:
             try:
-                # 发送心跳包
-                heartbeat = {
-                    "type": "heartbeat",
-                    "timestamp": int(time.time() * 1000),
-                    "device_id": config_manager.config.system.device_id
+                # 发送心跳包（按照协议规范）
+                ping = {
+                    "type": "ping"
                 }
-                
-                # 可选：附加网络状态到心跳包
-                try:
-                    from ..utils.network_monitor import network_monitor
-                    heartbeat["network"] = network_monitor.status.to_dict()
-                except Exception:
-                    pass
-                
-                await self.send(heartbeat)
+
+                await self.send(ping)
                 self._state.last_heartbeat = time.time()
                 
                 await asyncio.sleep(self._heartbeat_interval)
@@ -322,12 +316,17 @@ class RemoteWebSocketClient:
     async def _handle_message(self, message: dict):
         """处理收到的消息"""
         msg_type = message.get('type', '')
-        
+
         # 处理心跳响应
         if msg_type == 'pong':
             self._state.last_heartbeat = time.time()
             return
-        
+
+        # 处理报警记录确认
+        if msg_type == 'alarm_record_ack':
+            await self._handle_alarm_ack(message)
+            return
+
         # 处理 401 错误（Token 失效）
         if msg_type == 'error' and message.get('code') == 401:
             logger.warning("收到 401 错误，Token 可能已失效")
@@ -337,36 +336,87 @@ class RemoteWebSocketClient:
             config_manager.save()
             asyncio.create_task(self._reconnect())
             return
-        
+
         # 通知所有消息处理器
         for handler in self._message_handlers:
             try:
                 await handler(message)
             except Exception as e:
                 logger.error(f"消息处理器执行失败: {e}")
-    
+
+    async def _handle_alarm_ack(self, data: dict):
+        """处理报警记录确认"""
+        msg_id = data.get('msg_id')
+        success = data.get('success', False)
+
+        if success:
+            record_id = data.get('record_id')
+            logger.info(f"报警记录上传成功: msg_id={msg_id}, record_id={record_id}")
+        else:
+            error = data.get('error', '未知错误')
+            logger.warning(f"报警记录上传失败: msg_id={msg_id}, error={error}")
+
     async def _reconnect(self):
         """重连逻辑（指数退避）"""
         if not self._running:
             return
-        
+
         self._state.reconnect_attempts += 1
-        
+
         # 计算延迟（指数退避：1, 2, 4, 8, 16, 30...）
         delay = min(2 ** (self._state.reconnect_attempts - 1), self._max_reconnect_delay)
-        
+
         logger.info(f"将在 {delay} 秒后尝试第 {self._state.reconnect_attempts} 次重连...")
-        
+
         await asyncio.sleep(delay)
-        
+
         if not self._running:
             return
-        
+
         # 尝试重连
         success = await self.connect()
         if not success and self._running:
             # 继续重连
             asyncio.create_task(self._reconnect())
+
+    async def _resend_cached_messages(self):
+        """补发离线缓存的消息"""
+        try:
+            from .offline_cache import offline_cache
+
+            if offline_cache.is_empty:
+                return
+
+            cached_messages = offline_cache.peek_all()
+            if not cached_messages:
+                return
+
+            logger.info(f"开始补发 {len(cached_messages)} 条缓存消息")
+
+            failed_messages = []
+            for msg in cached_messages:
+                try:
+                    success = await self.send(msg)
+                    if success:
+                        # 成功发送后从缓存中移除
+                        offline_cache.pop_all()  # 由于队列特性，需要全部取出后重新放入失败的
+                    else:
+                        failed_messages.append(msg)
+                    await asyncio.sleep(0.1)  # 避免发送过快
+                except Exception as e:
+                    logger.error(f"补发消息失败: {e}")
+                    failed_messages.append(msg)
+
+            # 清空已发送的，放回失败的
+            offline_cache.clear()
+            if failed_messages:
+                offline_cache.push_back(failed_messages)
+                logger.warning(f"补发完成，{len(failed_messages)} 条消息失败已重新缓存")
+            else:
+                logger.info("缓存消息补发完成")
+
+        except Exception as e:
+            logger.error(f"补发缓存消息时发生错误: {e}")
     
     async def start(self):
         """启动客户端"""

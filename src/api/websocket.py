@@ -5,6 +5,7 @@ WebSocket 消息分发中心
 import asyncio
 import json
 import time
+import uuid
 from typing import Set, Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -316,7 +317,7 @@ async def broadcast_status_update(statuses: list):
 async def broadcast_network_status(network_status: dict):
     """广播网络状态变化"""
     message = {
-        "type": "network_status",
+        "type": "network_interface",
         "data": network_status
     }
     await message_dispatcher.broadcast_to_all(message)
@@ -356,7 +357,8 @@ def _get_alarm_type_name(alarm_type: str) -> str:
     names = {
         "warning": "预警",
         "alarm": "报警",
-        "cutoff": "切电"
+        "cutoff": "切电",
+        "temp_alarm": "温度报警"
     }
     return names.get(alarm_type, alarm_type)
 
@@ -450,14 +452,14 @@ def sync_broadcast_patrol_event(event_type: str, data: dict):
     """
     同步版本的巡检事件广播
     用于从非异步上下文调用
-    
+
     注意: 必须在主事件循环中发送 WebSocket 消息，因为 WebSocket 连接
     是在主事件循环中创建的。在新事件循环中操作 WebSocket 会导致问题。
     """
     try:
         # 获取主事件循环
         loop = message_dispatcher.get_main_loop()
-        
+
         if loop is not None and loop.is_running():
             # 将协程提交到主事件循环执行
             future = asyncio.run_coroutine_threadsafe(
@@ -477,3 +479,121 @@ def sync_broadcast_patrol_event(event_type: str, data: dict):
             logger.warning(f"无法广播巡检事件: 主事件循环不可用 (type={event_type})")
     except Exception as e:
         logger.error(f"同步广播巡检事件失败: {e}", exc_info=True)
+
+
+async def upload_alarm_record(
+    zone_id: str,
+    zone_name: str,
+    alarm_type: str,
+    image_base64: str = None,
+    message: str = None,
+    snapshot_path: str = None
+):
+    """
+    上报报警记录到服务器
+
+    Args:
+        zone_id: 灶台ID
+        zone_name: 灶台名称
+        alarm_type: 报警类型 "warning" | "alarm" | "cutoff" | "temp_alarm"
+        image_base64: 截图 Base64 编码
+        message: 报警消息
+        snapshot_path: 本地截图路径
+    """
+    from .offline_cache import offline_cache
+
+    config = config_manager.config
+    if not config.remote.enabled:
+        return  # 远程连接未启用，跳过
+
+    current_time = int(time.time() * 1000)
+    message_data = {
+        "type": "alarm_record_upload",
+        "msg_id": str(uuid.uuid4()),
+        "timestamp": current_time,
+        "device_id": config.system.device_id,
+        "data": {
+            "zone_id": zone_id,
+            "zone_name": zone_name,
+            "alarm_type": alarm_type,
+            "image": f"data:image/jpeg;base64,{image_base64}" if image_base64 else None,
+            "message": message,
+            "occurred_at": current_time,
+            "local_snapshot_path": snapshot_path
+        }
+    }
+
+    # 检查远程连接状态
+    if message_dispatcher.remote_client and message_dispatcher.remote_client.is_connected:
+        # 已连接，直接发送
+        await message_dispatcher.send_to_remote(message_data)
+        logger.info(f"报警记录已上报到服务器: zone={zone_id}, type={alarm_type}")
+    else:
+        # 未连接，缓存消息
+        offline_cache.push(message_data)
+
+
+def sync_upload_alarm_record(
+    zone_id: str,
+    zone_name: str,
+    alarm_type: str,
+    image_base64: str = None,
+    message: str = None,
+    snapshot_path: str = None
+):
+    """
+    上报报警记录到服务器（从非异步上下文调用）
+
+    Args:
+        zone_id: 灶台ID
+        zone_name: 灶台名称
+        alarm_type: 报警类型 "warning" | "alarm" | "cutoff" | "temp_alarm"
+        image_base64: 截图 Base64 编码
+        message: 报警消息
+        snapshot_path: 本地截图路径
+    """
+    try:
+        # 获取主事件循环
+        loop = message_dispatcher.get_main_loop()
+
+        if loop is not None and loop.is_running():
+            # 将协程提交到主事件循环执行
+            future = asyncio.run_coroutine_threadsafe(
+                upload_alarm_record(
+                    zone_id, zone_name, alarm_type,
+                    image_base64, message, snapshot_path
+                ),
+                loop
+            )
+            # 不等待结果，让它在后台执行
+            def handle_exception(fut):
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.error(f"上报报警记录失败: {e}")
+            future.add_done_callback(handle_exception)
+        else:
+            # 如果没有可用的事件循环，缓存消息
+            from .offline_cache import offline_cache
+            config = config_manager.config
+            if config.remote.enabled:
+                current_time = int(time.time() * 1000)
+                message_data = {
+                    "type": "alarm_record_upload",
+                    "msg_id": str(uuid.uuid4()),
+                    "timestamp": current_time,
+                    "device_id": config.system.device_id,
+                    "data": {
+                        "zone_id": zone_id,
+                        "zone_name": zone_name,
+                        "alarm_type": alarm_type,
+                        "image": f"data:image/jpeg;base64,{image_base64}" if image_base64 else None,
+                        "message": message,
+                        "occurred_at": current_time,
+                        "local_snapshot_path": snapshot_path
+                    }
+                }
+                offline_cache.push(message_data)
+                logger.info(f"远程连接断开，报警记录已缓存（当前缓存: {offline_cache.size} 条）")
+    except Exception as e:
+        logger.error(f"同步上报报警记录失败: {e}", exc_info=True)

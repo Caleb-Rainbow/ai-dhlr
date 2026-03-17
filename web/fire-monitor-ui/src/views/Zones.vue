@@ -92,6 +92,7 @@ const editForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_th
 const roiCanvas = ref<HTMLCanvasElement | null>(null);
 const roiPoints = ref<number[][]>([]);
 const roiImage = ref('');
+const previewLoading = ref(false);
 
 // Drag State
 const selectedPointIndex = ref<number | null>(null);
@@ -161,6 +162,27 @@ const submitAdd = async () => {
     }
 };
 
+// 使用 WebSocket 获取摄像头预览
+const loadCameraPreview = async (cameraId: string) => {
+    previewLoading.value = true;
+    try {
+        const result = await ws.request<{ image: string }>('preview_camera', { camera_id: cameraId });
+        roiImage.value = result.image;
+
+        // 初始化 canvas
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = result.image;
+        img.onload = () => {
+            initCanvas(img);
+        };
+    } catch (e) {
+        console.error('加载摄像头预览失败:', e);
+    } finally {
+        previewLoading.value = false;
+    }
+};
+
 // Edit Zone Logic
 const openEditZone = (zone: ZoneConfig) => {
     currentEditZone.value = zone;
@@ -172,41 +194,18 @@ const openEditZone = (zone: ZoneConfig) => {
         enable_temp_sensor: zone.temp_sensor_address != null
     };
     roiPoints.value = zone.roi || [];
+    roiImage.value = ''; // 清空旧图片
     showEditModal.value = true;
 
-    // 先设置图片URL，然后等待模态框渲染后初始化canvas
-    const imageUrl = `/cameras/${zone.camera_id}/preview?t=${Date.now()}`;
-    roiImage.value = imageUrl;
-
-    // 预加载图片，确保图片加载完成后再初始化canvas
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = imageUrl;
-    img.onload = () => {
-        // 等待模态框渲染完成
-        setTimeout(() => {
-            initCanvas(img);
-        }, 150);
-    };
-    img.onerror = () => {
-        console.error('Failed to load camera preview image');
-    };
+    // 使用 WebSocket 获取摄像头预览
+    loadCameraPreview(zone.camera_id);
 };
 
 // 当摄像头变化时刷新预览
 const onCameraChange = () => {
     if (!editForm.value.camera_id) return;
-
-    const imageUrl = `/cameras/${editForm.value.camera_id}/preview?t=${Date.now()}`;
-    roiImage.value = imageUrl;
     roiPoints.value = []; // 切换摄像头时清空ROI
-
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = imageUrl;
-    img.onload = () => {
-        initCanvas(img);
-    };
+    loadCameraPreview(editForm.value.camera_id);
 };
 
 // 缓存预加载的图片

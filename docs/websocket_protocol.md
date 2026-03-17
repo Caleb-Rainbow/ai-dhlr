@@ -123,21 +123,91 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 | data | object | 是 | 报警事件数据 |
 | data.zone_id | string | 是 | 灶台ID |
 | data.zone_name | string | 是 | 灶台名称 |
-| data.alarm_type | string | 是 | 报警类型：warning（预警）、alarm（报警）、cutoff（切电） |
+| data.alarm_type | string | 是 | 报警类型：warning（预警）、alarm（报警）、cutoff（切电）、temp_alarm（温度报警） |
 | data.image | string | 否 | 抓拍图片Base64编码（JPEG格式），格式为 `data:image/jpeg;base64,...` |
 | data.message | string | 否 | 事件消息描述 |
 
-**网络状态**
+**网络接口信息**
 ```json
 {
-    "type": "network_status",
+    "type": "network_interface",
     "data": {
-        "local_connected": true,
-        "remote_connected": false,
-        "remote_server": "wss://vis.example.com/dhlr/socket"
+        "interface_type": "wifi",
+        "interface_name": "wlan0",
+        "ip_address": "192.168.1.100",
+        "signal_strength": 75,
+        "gateway": "192.168.1.1",
+        "is_connected": true,
+        "is_internet_connected": true
     }
 }
 ```
+
+| 字段 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| type | string | 是 | 固定为 "network_interface" |
+| data | object | 是 | 网络接口信息 |
+| data.interface_type | string | 是 | 接口类型：`"wifi"`、`"ethernet"`、`"unknown"` |
+| data.interface_name | string | 是 | 接口名称（如 `wlan0`、`eth0`） |
+| data.ip_address | string | 是 | IP 地址 |
+| data.signal_strength | number | 否 | WiFi 信号强度（0-100，仅 WiFi 有效） |
+| data.gateway | string | 是 | 网关地址 |
+| data.is_connected | boolean | 是 | 是否已连接到局域网 |
+| data.is_internet_connected | boolean | 是 | 是否已接入互联网（外网） |
+
+> **注意**：此消息为 `get_network` action 的返回值格式，用于表示设备的网络接口状态。
+
+**报警记录上报**
+```json
+{
+    "type": "alarm_record_upload",
+    "msg_id": "uuid-string",
+    "timestamp": 1704614400000,
+    "device_id": "DHLR-001",
+    "data": {
+        "zone_id": "zone_1",
+        "zone_name": "1号灶台",
+        "alarm_type": "warning",
+        "image": "data:image/jpeg;base64,...",
+        "message": "1号灶台 无人看管超过 90 秒",
+        "occurred_at": 1704614400000,
+        "local_snapshot_path": null
+    }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| type | string | 是 | 固定为 "alarm_record_upload" |
+| msg_id | string | 是 | 消息唯一标识 |
+| timestamp | number | 是 | 消息发送时间（毫秒时间戳） |
+| device_id | string | 是 | 设备ID |
+| data | object | 是 | 报警记录数据 |
+| data.zone_id | string | 是 | 灶台ID |
+| data.zone_name | string | 是 | 灶台名称 |
+| data.alarm_type | string | 是 | 报警类型：warning（预警）、alarm（报警）、cutoff（切电）、temp_alarm（温度报警） |
+| data.image | string | 否 | 抓拍图片Base64编码（JPEG格式），格式为 `data:image/jpeg;base64,...` |
+| data.message | string | 否 | 报警消息描述 |
+| data.occurred_at | number | 是 | 报警发生时间（毫秒时间戳） |
+| data.local_snapshot_path | string | 否 | 本地截图路径 |
+
+**报警记录确认**
+```json
+{
+    "type": "alarm_record_ack",
+    "msg_id": "与请求相同的uuid",
+    "success": true,
+    "record_id": 12345
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| type | string | 是 | 固定为 "alarm_record_ack" |
+| msg_id | string | 是 | 对应请求的 msg_id |
+| success | boolean | 是 | 是否成功接收 |
+| record_id | number | 否 | 服务器存储的记录ID（成功时） |
+| error | string | 否 | 错误信息（失败时） |
 
 ---
 
@@ -154,6 +224,65 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 ```json
 { "type": "pong", "timestamp": 1704614400000 }
 ```
+
+**心跳间隔说明：**
+
+| 链路类型 | 心跳间隔 | 说明 |
+|---------|---------|------|
+| 本地链路（前端 → 后端） | 30 秒 | Web 客户端连接本地后端服务 |
+| 远程链路（后端 → 远程服务器） | 10 秒 | 后端连接远程服务器，需要更频繁的心跳以保持连接活跃 |
+
+> 不同心跳间隔的原因：本地链路网络稳定，较长间隔减少开销；远程链路通过公网，较短间隔可更快检测连接断开。
+
+---
+
+### 5. 错误消息 (error)
+
+服务端发送的错误通知，用于通知客户端连接限制等错误。
+
+```json
+{
+    "type": "error",
+    "error": "connection_limit_reached",
+    "message": "连接数已达上限 (10)"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| type | string | 是 | 固定为 "error" |
+| error | string | 是 | 错误代码 |
+| message | string | 是 | 错误描述 |
+| code | number | 否 | HTTP 状态码（如 401 表示 Token 失效） |
+
+**常见错误代码：**
+
+| 错误代码 | 说明 |
+|---------|------|
+| `connection_limit_reached` | 连接数已达上限 |
+| `unauthorized` | 未授权（Token 无效或已过期） |
+
+**错误消息格式说明：**
+
+1. **连接限制错误**：使用 `error` 字段标识错误类型
+   ```json
+   {
+       "type": "error",
+       "error": "connection_limit_reached",
+       "message": "连接数已达上限 (10)"
+   }
+   ```
+
+2. **认证失败（401 错误）**：使用 `code` 字段标识 HTTP 状态码
+   ```json
+   {
+       "type": "error",
+       "code": 401,
+       "message": "Token 无效或已过期"
+   }
+   ```
+
+> **注意**：401 错误通过 `code: 401` 字段标识，而非 `error: "unauthorized"`。客户端收到 401 错误后应清除本地 Token 并重新登录。
 
 ---
 
@@ -248,7 +377,7 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 | `set_device_id` | 设置设备ID | `device_id` |
 | `get_network` | 获取网络状态 | 无 |
 | `get_remote_config` | 获取远程配置 | 无 |
-| `update_remote_config` | 更新远程配置 | `enabled`, `server_url`, ... |
+| `update_remote_config` | 更新远程配置 | `enabled`, `server_url`, `websocket_path`, `login_path`, `username`, `password` |
 | `verify_remote_login` | 校验远程登录 | `server_url`, `username`, `password` |
 
 **`set_device_id` 参数说明：**
