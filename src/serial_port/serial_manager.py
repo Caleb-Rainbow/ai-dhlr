@@ -537,7 +537,7 @@ class SerialManager:
     
     def _update_current(self, address: int, value: int):
         """更新电流值"""
-        serial_index = address - 0x01
+        serial_index = address
         
         with self._lock:
             for zone_id, info in self._zone_currents.items():

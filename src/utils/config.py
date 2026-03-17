@@ -32,7 +32,7 @@ class ZoneConfig:
     camera_id: str
     roi: List[Tuple[float, float]]  # 归一化坐标列表
     enabled: bool = True
-    serial_index: int = 0  # 串口分区索引（从0开始，对应地址0x01+index）
+    serial_index: int = 1  # 串口分区索引（从1开始，1对应地址0x01）
     fire_current_threshold: int = 100  # 动火电流阈值（100=1.00A）
     temp_sensor_address: Optional[int] = None  # 温度传感器地址, None 表示未绑定
 
@@ -118,6 +118,7 @@ class SystemConfig:
     debug: bool = True
     device_id: str = ""  # 设备唯一ID，首次运行时自动生成
     zone_mode: str = "zoned"  # 监测模式: "zoned"=分区监测, "single"=不分区监测
+    default_serial_index: int = 1  # 不分区模式默认串口索引（从1开始，1对应地址0x01）
 
 
 @dataclass
@@ -209,8 +210,9 @@ class ConfigManager:
         
         with open(config_path, 'r', encoding='utf-8') as f:
             raw_config = yaml.safe_load(f)
-        
+
         self._config = self._parse_config(raw_config)
+        self._config = self._migrate_config(self._config)
         return self._config
     
     def _parse_config(self, raw: Dict[str, Any]) -> AppConfig:
@@ -222,7 +224,8 @@ class ConfigManager:
             version=system_raw.get('version', '0.1.0'),
             debug=system_raw.get('debug', True),
             device_id=system_raw.get('device_id', ''),
-            zone_mode=system_raw.get('zone_mode', 'zoned')
+            zone_mode=system_raw.get('zone_mode', 'zoned'),
+            default_serial_index=system_raw.get('default_serial_index', 1)
         )
         
         # 解析推理配置
@@ -357,7 +360,29 @@ class ConfigManager:
             remote=remote,
             serial=serial
         )
-    
+
+    def _migrate_config(self, config: AppConfig) -> AppConfig:
+        """
+        配置迁移（处理旧版本配置兼容）
+
+        迁移规则：
+        - 旧版本 serial_index 从 0 开始，新版本从 1 开始
+        - serial_index = 0 自动迁移为 1
+        """
+        migrated = False
+        for zone in config.zones:
+            if zone.serial_index == 0:
+                zone.serial_index = 1
+                print(f"Zone {zone.id} serial_index migrated: 0 -> 1")
+                migrated = True
+
+        # 如果有迁移，自动保存
+        if migrated:
+            self.save()
+            print("Configuration migrated and saved.")
+
+        return config
+
     @property
     def config(self) -> AppConfig:
         """获取当前配置"""
@@ -382,7 +407,8 @@ class ConfigManager:
                 'version': config.system.version,
                 'debug': config.system.debug,
                 'device_id': config.system.device_id,
-                'zone_mode': config.system.zone_mode
+                'zone_mode': config.system.zone_mode,
+                'default_serial_index': config.system.default_serial_index
             },
             'inference': {
                 'engine': config.inference.engine,

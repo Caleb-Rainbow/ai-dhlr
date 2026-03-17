@@ -76,7 +76,7 @@ class TestZoneConfig:
             roi=[(0, 0), (1, 0), (1, 1), (0, 1)]
         )
         assert config.enabled is True
-        assert config.serial_index == 0
+        assert config.serial_index == 1
         assert config.fire_current_threshold == 100
     
     def test_custom_values(self):

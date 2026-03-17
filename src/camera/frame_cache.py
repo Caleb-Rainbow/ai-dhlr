@@ -67,6 +67,16 @@ class FrameCache:
         if frame is None:
             return None
 
+        # 检查帧尺寸是否有效
+        try:
+            height, width = frame.shape[:2]
+            if height <= 0 or width <= 0:
+                logger.warning(f"帧尺寸无效: {camera_id}, shape={frame.shape}")
+                return None
+        except (AttributeError, IndexError):
+            logger.warning(f"帧数据格式无效: {camera_id}")
+            return None
+
         current_time = time.time()
         cache_key = f"{camera_id}_{quality}"
 

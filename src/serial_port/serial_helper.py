@@ -400,28 +400,28 @@ class SerialHelper:
     def build_get_current_command(self, index: int) -> bytes:
         """
         构建获取电流值命令
-        
+
         Args:
-            index: 分区索引（从0开始）
-            
+            index: 分区索引（从1开始，1对应地址0x01）
+
         Returns:
             完整命令（含CRC）
         """
-        address = 0x01 + index
+        address = index
         command = bytes([address, 0x03, 0x00, 0xA0, 0x00, 0x01])
         return append_crc16(command)
     
     def build_set_relay_command(self, index: int) -> bytes:
         """
         构建设置继电器命令（切电）
-        
+
         Args:
-            index: 分区索引（从0开始）
-            
+            index: 分区索引（从1开始，1对应地址0x01）
+
         Returns:
             完整命令（含CRC）
         """
-        address = 0x01 + index
+        address = index
         command = bytes([address, 0x05, 0x00, 0x00, 0xFF, 0x00])
         return append_crc16(command)
     
@@ -430,12 +430,12 @@ class SerialHelper:
         构建继电器还原命令
 
         Args:
-            index: 分区索引（从0开始）
+            index: 分区索引（从1开始，1对应地址0x01）
 
         Returns:
             完整命令（含CRC）
         """
-        address = 0x01 + index
+        address = index
         command = bytes([address, 0x05, 0x00, 0x00, 0x00, 0x00])
         return append_crc16(command)
 

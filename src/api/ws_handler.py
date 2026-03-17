@@ -89,7 +89,9 @@ class WSHandler:
             # 监测模式相关
             "get_zone_mode": self._get_zone_mode,
             "set_zone_mode": self._set_zone_mode,
-            
+            "get_default_serial_index": self._get_default_serial_index,
+            "set_default_serial_index": self._set_default_serial_index,
+
             # 控制相关
             "reset_zone": self._reset_zone,
             "toggle_fire": self._toggle_fire,
@@ -615,14 +617,21 @@ class WSHandler:
         if frame is None:
             self.logger.debug(f"帧缓冲区为空，等待帧可用: {camera_id}")
             import asyncio
-            for _ in range(20):  # 最多等待2秒
+            for i in range(20):  # 最多等待2秒
                 await asyncio.sleep(0.1)
                 frame = camera.get_snapshot()
                 if frame is not None:
+                    self.logger.debug(f"帧可用，等待了 {(i+1) * 100}ms: {camera_id}")
                     break
 
         if frame is None:
+            self.logger.warning(f"获取预览失败，帧缓冲区为空: {camera_id}")
             raise ValueError("获取预览失败，摄像头可能正在初始化")
+
+        # 检查帧尺寸是否有效
+        if frame.shape[0] == 0 or frame.shape[1] == 0:
+            self.logger.warning(f"帧尺寸无效: {camera_id}, shape={frame.shape}")
+            raise ValueError("获取预览失败，帧尺寸无效")
 
         # 使用帧缓存进行编码（减少多客户端重复编码开销）
         result = frame_cache.get_or_encode(camera_id, frame, quality=80)
@@ -632,7 +641,8 @@ class WSHandler:
                 self.logger.debug(f"预览帧从缓存获取: {camera_id}")
             return {"image": f"data:image/jpeg;base64,{base64_str}"}
 
-        raise ValueError("获取预览失败，请稍后重试")
+        self.logger.error(f"帧编码失败: {camera_id}")
+        raise ValueError("获取预览失败，帧编码错误")
     
     async def _get_snapshot_image(self, params: dict) -> dict:
         """获取告警快照图片 (Base64 编码)"""
@@ -699,7 +709,9 @@ class WSHandler:
             "version": config.system.version,
             "device_id": config.system.device_id,
             "platform": platform.system(),
-            "python_version": platform.python_version()
+            "python_version": platform.python_version(),
+            "zone_mode": config.system.zone_mode,
+            "default_serial_index": config.system.default_serial_index
         }
     
     async def _get_performance(self, params: dict) -> dict:
@@ -874,7 +886,41 @@ class WSHandler:
             "zone_mode": zone_mode,
             "message": f"已切换到{'分区监测' if zone_mode == 'zoned' else '不分区监测'}模式"
         }
-    
+
+    async def _get_default_serial_index(self, params: dict) -> dict:
+        """获取不分区模式默认串口索引"""
+        config = config_manager.config
+        return {
+            "default_serial_index": config.system.default_serial_index
+        }
+
+    async def _set_default_serial_index(self, params: dict) -> dict:
+        """设置不分区模式默认串口索引
+
+        Args:
+            default_serial_index: 默认串口索引（从1开始，1对应地址0x01）
+        """
+        default_serial_index = params.get("default_serial_index")
+
+        if default_serial_index is None:
+            raise ValueError("缺少 default_serial_index 参数")
+
+        # 验证值
+        default_serial_index = int(default_serial_index)
+        if default_serial_index < 1:
+            raise ValueError("串口索引必须从1开始")
+
+        # 更新配置
+        config_manager.config.system.default_serial_index = default_serial_index
+        config_manager.save()
+
+        logger.info(f"默认串口索引已设置为: {default_serial_index}")
+
+        return {
+            "default_serial_index": default_serial_index,
+            "message": f"默认串口索引已设置为 {default_serial_index}"
+        }
+
     async def _get_network(self, params: dict) -> dict:
         """获取网络状态"""
         from ..utils.network_monitor import network_monitor

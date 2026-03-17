@@ -2,12 +2,13 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { Trash2, Pencil, Plus, Camera as CameraIcon } from 'lucide-vue-next';
 import { ws } from '../api/ws';
-import type { ZoneConfig, Camera } from '../types';
+import type { ZoneConfig, Camera, DeviceInfo } from '../types';
 import Modal from '../components/Modal.vue';
 import Skeleton from '../components/Skeleton.vue';
 
 const zones = ref<ZoneConfig[]>([]);
 const cameras = ref<Camera[]>([]);
+const deviceInfo = ref<DeviceInfo | null>(null);
 const loading = ref(true);
 
 // 监测模式: "zoned" = 分区监测, "single" = 不分区监测
@@ -26,7 +27,7 @@ const canAddZone = computed(() => {
 const showAddModal = ref(false);
 const showEditModal = ref(false);
 
-const addForm = ref({ camera_id: '', serial_index: 0, fire_current_threshold: 1.00, enable_temp_sensor: false });
+const addForm = ref({ camera_id: '', serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false });
 
 // 根据灶台名称提取编号
 const extractZoneNumber = (zoneName: string): number => {
@@ -34,9 +35,9 @@ const extractZoneNumber = (zoneName: string): number => {
     return match ? parseInt(match[1] || '0') : 0;
 };
 
-// 根据灶台编号计算串口索引（1号灶台 → 0，2号灶台 → 1，以此类推）
+// 根据灶台编号计算串口索引（1号灶台 → 1，2号灶台 → 2，以此类推）
 const calculateSerialIndex = (zoneNumber: number): number => {
-    return zoneNumber - 1;
+    return zoneNumber;
 };
 
 // 通过camera_id获取相机名称
@@ -76,9 +77,10 @@ const generateZoneName = () => {
 const nextZoneName = ref('');
 const updateNextZoneName = () => {
     nextZoneName.value = generateZoneName();
-    // 设置串口索引的默认值（不分区模式下默认为0）
+    // 设置串口索引的默认值
     if (isSingleMode.value) {
-        addForm.value.serial_index = 0;
+        // 不分区模式下使用配置的默认值
+        addForm.value.serial_index = deviceInfo.value?.default_serial_index || 1;
     } else {
         addForm.value.serial_index = calculateSerialIndex(extractZoneNumber(nextZoneName.value));
     }
@@ -86,13 +88,14 @@ const updateNextZoneName = () => {
 
 // Edit Zone State
 const currentEditZone = ref<ZoneConfig | null>(null);
-const editForm = ref({ name: '', camera_id: '', serial_index: 0, fire_current_threshold: 1.00, enable_temp_sensor: false });
+const editForm = ref({ name: '', camera_id: '', serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false });
 
 // ROI Editor State
 const roiCanvas = ref<HTMLCanvasElement | null>(null);
 const roiPoints = ref<number[][]>([]);
 const roiImage = ref('');
 const previewLoading = ref(false);
+const cachedImage = ref<HTMLImageElement | null>(null);
 
 // Drag State
 const selectedPointIndex = ref<number | null>(null);
@@ -101,14 +104,16 @@ const isDragging = ref(false);
 // Actions
 const loadData = async () => {
     try {
-        const [z, c, modeData] = await Promise.all([
+        const [z, c, modeData, device] = await Promise.all([
             ws.request<ZoneConfig[]>('get_zones'),
             ws.request<Camera[]>('get_cameras'),
-            ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode').catch(() => ({ zone_mode: 'zoned' as const, zone_count: 0 }))
+            ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode').catch(() => ({ zone_mode: 'zoned' as const, zone_count: 0 })),
+            ws.request<DeviceInfo>('get_device').catch(() => null)
         ]);
         zones.value = z;
         cameras.value = c;
         zoneMode.value = modeData.zone_mode;
+        deviceInfo.value = device;
     } catch (e) {
         console.error(e);
     } finally {
@@ -154,7 +159,7 @@ const submitAdd = async () => {
             enable_temp_sensor: addForm.value.enable_temp_sensor
         });
         showAddModal.value = false;
-        addForm.value = { camera_id: '', serial_index: 0, fire_current_threshold: 1.00, enable_temp_sensor: false };
+        addForm.value = { camera_id: '', serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false };
         await loadData();
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : '添加失败';
@@ -164,42 +169,72 @@ const submitAdd = async () => {
 
 // 使用 WebSocket 获取摄像头预览
 const loadCameraPreview = async (cameraId: string) => {
+    // 清空旧的缓存图片，避免使用过期的缓存
+    cachedImage.value = null;
+    roiImage.value = '';
     previewLoading.value = true;
+
     try {
         const result = await ws.request<{ image: string }>('preview_camera', { camera_id: cameraId });
-        roiImage.value = result.image;
 
-        // 等待 Vue 完成 DOM 更新，确保 canvas 元素已渲染
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // 验证返回的图片数据
+        if (!result.image || !result.image.startsWith('data:image')) {
+            throw new Error('返回的图片数据格式无效');
+        }
+
+        // 初始化 canvas（等待 Vue 完成 DOM 更新）
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        const img = new Image();
+
+        // 使用 Promise 等待图片加载完成
+        await new Promise<void>((resolve, reject) => {
+            img.onload = () => {
+                // 检查图片尺寸是否有效
+                if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+                    reject(new Error('图片尺寸无效'));
+                    return;
+                }
+                resolve();
+            };
+            img.onerror = () => {
+                reject(new Error('图片加载失败'));
+            };
+            // 设置超时，防止无限等待
+            setTimeout(() => reject(new Error('图片加载超时')), 10000);
+
+            img.crossOrigin = "anonymous";
+            img.src = result.image;
+        });
+
+        // 图片加载成功，设置数据
+        roiImage.value = result.image;
+        cachedImage.value = img;
 
         // 初始化 canvas
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = result.image;
+        if (roiCanvas.value) {
+            initCanvas(img);
+        } else {
+            // Canvas 还没渲染，等待重试
+            let retryCount = 0;
+            const maxRetry = 10;
+            const tryInitCanvas = () => {
+                if (roiCanvas.value) {
+                    initCanvas(img);
+                } else if (retryCount < maxRetry) {
+                    retryCount++;
+                    setTimeout(tryInitCanvas, 50);
+                } else {
+                    console.error('Canvas 元素未找到，重试次数已用尽');
+                }
+            };
+            setTimeout(tryInitCanvas, 50);
+        }
 
-        img.onload = () => {
-            // 再次检查 canvas 是否已渲染
-            if (roiCanvas.value) {
-                initCanvas(img);
-            } else {
-                // 如果 canvas 还没渲染，等待一小段时间重试
-                setTimeout(() => {
-                    if (roiCanvas.value) {
-                        initCanvas(img);
-                    } else {
-                        console.error('Canvas 元素未找到');
-                    }
-                }, 100);
-            }
-        };
-
-        img.onerror = () => {
-            console.error('图片加载失败');
-            roiImage.value = '';
-        };
     } catch (e) {
         console.error('加载摄像头预览失败:', e);
         roiImage.value = '';
+        cachedImage.value = null;
     } finally {
         previewLoading.value = false;
     }
@@ -216,7 +251,6 @@ const openEditZone = (zone: ZoneConfig) => {
         enable_temp_sensor: zone.temp_sensor_address != null
     };
     roiPoints.value = zone.roi || [];
-    roiImage.value = ''; // 清空旧图片
     showEditModal.value = true;
 
     // 使用 WebSocket 获取摄像头预览
@@ -230,12 +264,12 @@ const onCameraChange = () => {
     loadCameraPreview(editForm.value.camera_id);
 };
 
-// 缓存预加载的图片
-const cachedImage = ref<HTMLImageElement | null>(null);
-
 const initCanvas = (preloadedImg?: HTMLImageElement) => {
     const canvas = roiCanvas.value;
-    if (!canvas) return;
+    if (!canvas) {
+        console.warn('initCanvas: Canvas 元素未找到');
+        return;
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -249,23 +283,32 @@ const initCanvas = (preloadedImg?: HTMLImageElement) => {
     canvas.removeEventListener('touchend', onTouchEnd);
     canvas.removeEventListener('touchcancel', onTouchEnd);
 
-    if (preloadedImg) {
+    if (preloadedImg && preloadedImg.naturalWidth > 0 && preloadedImg.naturalHeight > 0) {
         // 使用预加载的图片
         cachedImage.value = preloadedImg;
-        canvas.width = preloadedImg.naturalWidth || 640;
-        canvas.height = preloadedImg.naturalHeight || 480;
+        canvas.width = preloadedImg.naturalWidth;
+        canvas.height = preloadedImg.naturalHeight;
         drawRoi();
-    } else {
+    } else if (roiImage.value) {
         // 重新加载图片
         const img = new Image();
         img.crossOrigin = "anonymous";
         img.src = roiImage.value;
         img.onload = () => {
-            cachedImage.value = img;
-            canvas.width = img.naturalWidth || 640;
-            canvas.height = img.naturalHeight || 480;
-            drawRoi();
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                cachedImage.value = img;
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                drawRoi();
+            } else {
+                console.error('initCanvas: 图片尺寸无效');
+            }
         };
+        img.onerror = () => {
+            console.error('initCanvas: 图片加载失败');
+        };
+    } else {
+        console.error('initCanvas: 没有可用的图片数据');
     }
 
     // 添加事件监听器
@@ -285,24 +328,35 @@ const drawRoi = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // 清空画布
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     // 使用缓存的图片绘制背景
-    if (cachedImage.value && cachedImage.value.complete) {
+    if (cachedImage.value && cachedImage.value.complete && cachedImage.value.naturalWidth > 0) {
         ctx.drawImage(cachedImage.value, 0, 0, canvas.width, canvas.height);
-    } else {
-        // 如果缓存图片不可用，尝试重新加载
+        drawRoiPoints(ctx, canvas);
+    } else if (roiImage.value) {
+        // 缓存图片不可用，尝试重新加载
         const img = new Image();
         img.crossOrigin = "anonymous";
         img.src = roiImage.value;
         img.onload = () => {
-            cachedImage.value = img;
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            // 重新绘制ROI点
-            drawRoiPoints(ctx, canvas);
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                cachedImage.value = img;
+                // 确保 canvas 还在
+                if (roiCanvas.value) {
+                    const currentCtx = roiCanvas.value.getContext('2d');
+                    if (currentCtx) {
+                        currentCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        drawRoiPoints(currentCtx, roiCanvas.value);
+                    }
+                }
+            }
         };
-        return; // 等待图片加载
+        img.onerror = () => {
+            console.error('drawRoi: 图片重新加载失败');
+        };
     }
-
-    drawRoiPoints(ctx, canvas);
 };
 
 const drawRoiPoints = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
@@ -728,10 +782,10 @@ onUnmounted(() => {
                 </div>
                 <div class="space-y-1">
                     <label class="text-xs text-text-muted">串口分区索引</label>
-                    <input v-model.number="addForm.serial_index" type="number" min="0" placeholder="从0开始"
+                    <input v-model.number="addForm.serial_index" type="number" min="1" placeholder="从1开始"
                         class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
                         style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-                    <p class="text-xs text-text-muted mt-1">对应硬件接线顺序，索引0对应地址0x01</p>
+                    <p class="text-xs text-text-muted mt-1">对应硬件接线顺序，索引1对应地址0x01</p>
                 </div>
                 <div class="space-y-1">
                     <label class="text-xs text-text-muted">动火电流阈值 (A)</label>
@@ -801,7 +855,7 @@ onUnmounted(() => {
                 <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1">
                         <label class="text-xs text-text-muted">串口索引</label>
-                        <input v-model.number="editForm.serial_index" type="number" min="0" placeholder="0"
+                        <input v-model.number="editForm.serial_index" type="number" min="1" placeholder="1"
                             class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
                             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
                     </div>
@@ -813,7 +867,7 @@ onUnmounted(() => {
                             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
                     </div>
                 </div>
-                <p class="text-xs text-text-muted">串口索引对应硬件接线顺序 (0=0x01)；电流阈值单位为安培</p>
+                <p class="text-xs text-text-muted">串口索引对应硬件接线顺序 (1=0x01)；电流阈值单位为安培</p>
 
                 <!-- 温度传感器开关 -->
                 <div class="flex items-center justify-between p-4 rounded-2xl"

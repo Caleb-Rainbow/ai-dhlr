@@ -86,33 +86,33 @@ class TestCommandBuilder:
         # 使用模拟端口，不会真正打开
         return SerialHelper(port="/dev/null", baudrate=9600)
     
-    def test_build_get_current_command_index_0(self, helper):
-        """测试构建获取电流命令 (索引0)"""
-        cmd = helper.build_get_current_command(0)
-        
-        # 地址: 0x01, 功能码: 0x03, 起始地址: 0x00A0, 数量: 0x0001
+    def test_build_get_current_command_index_1(self, helper):
+        """测试构建获取电流命令 (索引1，对应地址0x01)"""
+        cmd = helper.build_get_current_command(1)
+
+        # 索引1直接对应地址: 0x01, 功能码: 0x03, 起始地址: 0x00A0, 数量: 0x0001
         expected_base = bytes([0x01, 0x03, 0x00, 0xA0, 0x00, 0x01])
         expected = append_crc16(expected_base)
-        
+
         assert cmd == expected
         assert len(cmd) == 8  # 6字节命令 + 2字节CRC
-    
-    def test_build_get_current_command_index_1(self, helper):
-        """测试构建获取电流命令 (索引1)"""
-        cmd = helper.build_get_current_command(1)
-        
-        # 地址应该是 0x02
+
+    def test_build_get_current_command_index_2(self, helper):
+        """测试构建获取电流命令 (索引2，对应地址0x02)"""
+        cmd = helper.build_get_current_command(2)
+
+        # 索引2直接对应地址: 0x02
         assert cmd[0] == 0x02
         assert cmd[1] == 0x03  # 功能码
-    
+
     def test_build_set_relay_command(self, helper):
         """测试构建设置继电器命令"""
-        cmd = helper.build_set_relay_command(0)
-        
-        # 地址: 0x01, 功能码: 0x05, 线圈地址: 0x0000, 值: 0xFF00
+        cmd = helper.build_set_relay_command(1)
+
+        # 索引1直接对应地址: 0x01, 功能码: 0x05, 线圈地址: 0x0000, 值: 0xFF00
         expected_base = bytes([0x01, 0x05, 0x00, 0x00, 0xFF, 0x00])
         expected = append_crc16(expected_base)
-        
+
         assert cmd == expected
     
     def test_build_get_lora_id_command(self, helper):
