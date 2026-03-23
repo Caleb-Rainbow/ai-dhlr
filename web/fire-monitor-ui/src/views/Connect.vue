@@ -3,11 +3,9 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { Server, Monitor, ArrowRight, Loader, AlertCircle, Flame } from 'lucide-vue-next';
 import { useConnectConfig } from '../composables/useConnectConfig';
-import { useTheme } from '../composables/useTheme';
 
 const router = useRouter();
 const { loadConfig, saveConfig } = useConnectConfig();
-const { theme } = useTheme();
 
 // Form state
 const deviceId = ref('');
