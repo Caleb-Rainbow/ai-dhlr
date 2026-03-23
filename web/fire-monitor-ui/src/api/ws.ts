@@ -1,6 +1,7 @@
 /**
  * WebSocket 客户端封装
  * 实现请求-响应模式和事件监听
+ * 支持本地模式和远程模式
  */
 
 type EventHandler = (data: any) => void;
@@ -22,6 +23,42 @@ interface WSMessage {
     event?: string;
 }
 
+interface ConnectionMode {
+    isRemote: boolean;
+    deviceId: string;
+    serverUrl: string;
+}
+
+/**
+ * 检测连接模式
+ * - 本地模式: 直接连接设备端 Python 服务
+ * - 远程模式: 连接 Java 服务器，由服务器转发到设备
+ */
+function detectConnectionMode(): ConnectionMode {
+    // 解析 URL 参数
+    const urlParams = new URLSearchParams(window.location.search);
+    const serverParam = urlParams.get('server');
+
+    // 检查路由是否是远程模式 /device/:deviceId
+    const pathMatch = window.location.hash.match(/#\/device\/([^/]+)/);
+
+    if (pathMatch && serverParam) {
+        // 远程模式
+        return {
+            isRemote: true,
+            deviceId: pathMatch[1],
+            serverUrl: decodeURIComponent(serverParam)
+        };
+    }
+
+    // 本地模式
+    return {
+        isRemote: false,
+        deviceId: '',
+        serverUrl: ''
+    };
+}
+
 class WebSocketClient {
     private ws: WebSocket | null = null;
     private url: string;
@@ -35,15 +72,46 @@ class WebSocketClient {
     private isManualClose = false;
     private messageIdCounter = 0;
 
-    constructor() {
-        // 构建 WebSocket URL
-        // 开发环境：通过 Vite 代理连接
-        // 生产环境：使用当前页面的 host
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        this.url = `${protocol}//${host}/ws/status`;
+    // 连接模式
+    public readonly mode: ConnectionMode;
 
-        console.log('[WS] WebSocket URL:', this.url);
+    constructor() {
+        this.mode = detectConnectionMode();
+
+        if (this.mode.isRemote) {
+            // 远程模式: 连接 Java 服务器
+            // URL 格式: ws://host/ws/dhlr/client/{deviceId}
+            const serverUrl = this.mode.serverUrl;
+            let wsUrl: string;
+
+            if (serverUrl.startsWith('ws://') || serverUrl.startsWith('wss://')) {
+                // 已经是完整的 WebSocket URL
+                // 需要添加路径 /ws/dhlr/client/{deviceId}
+                const baseUrl = serverUrl.replace(/\/+$/, ''); // 移除末尾斜杠
+                wsUrl = `${baseUrl}/ws/dhlr/client/${this.mode.deviceId}`;
+            } else {
+                // HTTP URL，转换为 WebSocket
+                const wsProtocol = serverUrl.startsWith('https://') ? 'wss://' : 'ws://';
+                const host = serverUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+                wsUrl = `${wsProtocol}${host}/ws/dhlr/client/${this.mode.deviceId}`;
+            }
+
+            this.url = wsUrl;
+            console.log('[WS] 远程模式，连接到 Java 服务器:', this.url);
+        } else {
+            // 本地模式: 连接设备端 Python 服务
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            this.url = `${protocol}//${host}/ws/status`;
+            console.log('[WS] 本地模式，连接到设备端:', this.url);
+        }
+    }
+
+    /**
+     * 是否是远程模式
+     */
+    get isRemoteMode(): boolean {
+        return this.mode.isRemote;
     }
 
     /**
@@ -223,6 +291,10 @@ class WebSocketClient {
                 this.emit('state_change', message.data);
             } else if (message.type === 'pong') {
                 // 心跳响应，忽略
+            } else if (message.type === 'alarm_notify') {
+                // 报警通知（远程模式特有）
+                console.log('[WS] 收到报警通知:', message);
+                this.emit('alarm_notify', message);
             } else {
                 // 其他消息类型
                 console.log('[WS] 其他消息类型:', message.type);
