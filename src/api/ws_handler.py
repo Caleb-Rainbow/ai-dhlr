@@ -128,6 +128,9 @@ class WSHandler:
             
             # 系统更新
             "trigger_update": self._trigger_update,
+
+            # 依赖安装
+            "install_dependencies": self._install_dependencies,
         }
     
     async def handle_request(self, message: dict) -> dict:
@@ -1398,6 +1401,66 @@ class WSHandler:
         except Exception as e:
             logger.error(f"更新失败: {e}")
             raise ValueError(f"更新失败: {e}")
+
+    async def _install_dependencies(self, params: dict) -> dict:
+        """
+        安装/更新 Python 依赖包
+
+        执行 pip install -r requirements.txt 命令。
+        使用异步子进程，不阻塞主线程。
+
+        Returns:
+            {"success": bool, "message": str, "output": str}
+        """
+        import asyncio
+        import sys
+        from pathlib import Path
+
+        # 获取项目根目录
+        project_root = Path(__file__).parent.parent.parent
+        requirements_path = project_root / "requirements.txt"
+
+        if not requirements_path.exists():
+            raise ValueError("requirements.txt 文件不存在")
+
+        logger.info(f"开始安装依赖: {requirements_path}")
+
+        try:
+            # 使用 asyncio 创建子进程执行 pip install
+            # 使用 sys.executable 确保使用当前 Python 解释器
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "pip", "install", "-r", str(requirements_path),
+                cwd=project_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT
+            )
+
+            # 等待完成，设置超时（5分钟）
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=300.0
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                raise ValueError("安装超时（超过5分钟）")
+
+            output = stdout.decode('utf-8', errors='replace')
+
+            if process.returncode == 0:
+                logger.info("依赖安装成功")
+                return {
+                    "success": True,
+                    "message": "依赖安装成功",
+                    "output": output[-2000:] if len(output) > 2000 else output
+                }
+            else:
+                logger.error(f"依赖安装失败: returncode={process.returncode}")
+                raise ValueError(f"安装失败 (exit code {process.returncode}):\n{output[-1000:]}")
+
+        except Exception as e:
+            logger.error(f"安装依赖时发生错误: {e}")
+            raise ValueError(f"安装失败: {str(e)}")
 
     # ==================== GPIO 处理器 ====================
     

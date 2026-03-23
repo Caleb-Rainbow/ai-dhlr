@@ -593,6 +593,37 @@ const result = await ws.request<{ success: boolean; message: string }>('trigger_
 // result: { success: true, message: "更新脚本已触发，服务即将重启..." }
 ```
 
+### 依赖安装
+
+| Action                | 说明       | 参数 | 返回                                   |
+| --------------------- | -------- | -- | ------------------------------------ |
+| `install_dependencies` | 安装/更新依赖 | 无  | `{success, message, output?}` |
+
+**说明：**
+
+- 该接口执行 `pip install -r requirements.txt` 命令
+- 安装过程可能需要数分钟，取决于网络状况和依赖数量
+- 建议在调用前向用户显示确认对话框
+- `output` 字段包含 pip 命令的详细输出（仅当有输出时返回）
+
+**调用示例：**
+
+```typescript
+const result = await ws.request<{ success: boolean; message: string; output?: string }>('install_dependencies');
+// result: { success: true, message: "依赖安装成功", output: "Collecting fastapi..." }
+```
+
+**错误响应示例：**
+
+```json
+{
+    "type": "response",
+    "msg_id": "xxx",
+    "success": false,
+    "error": "安装失败 (exit code 1): ERROR: Could not find a version..."
+}
+```
+
 ***
 
 ## 重连策略

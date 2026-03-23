@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
 import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig, GpioConfig } from '../types';
-import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb } from 'lucide-vue-next';
+import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb, Package } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -110,6 +110,10 @@ const savingDeviceId = ref(false);
 // 系统更新状态
 const updatingSystem = ref(false);
 const updateResult = ref<{ success: boolean; message: string } | null>(null);
+
+// 依赖安装状态
+const installingDeps = ref(false);
+const installResult = ref<{ success: boolean; message: string; output?: string } | null>(null);
 
 // 监测模式状态
 const zoneMode = ref<'zoned' | 'single'>('zoned');
@@ -421,6 +425,32 @@ const triggerSystemUpdate = async () => {
     }, 5000);
   } finally {
     updatingSystem.value = false;
+  }
+};
+
+// 安装依赖
+const installDependencies = async () => {
+  if (!confirm('确定要安装/更新依赖吗？\n\n这将执行 pip install -r requirements.txt，可能需要几分钟时间。')) {
+    return;
+  }
+
+  installingDeps.value = true;
+  installResult.value = null;
+
+  try {
+    const result = await ws.request<{ success: boolean; message: string; output?: string }>('install_dependencies');
+    installResult.value = result;
+    // 10秒后隐藏结果提示
+    setTimeout(() => {
+      installResult.value = null;
+    }, 10000);
+  } catch (e: any) {
+    installResult.value = { success: false, message: e.message || '安装失败' };
+    setTimeout(() => {
+      installResult.value = null;
+    }, 10000);
+  } finally {
+    installingDeps.value = false;
   }
 };
 
@@ -1072,6 +1102,43 @@ onUnmounted(() => {
               <CheckCircle v-if="updateResult.success" class="w-4 h-4 flex-shrink-0" />
               <XCircle v-else class="w-4 h-4 flex-shrink-0" />
               <span>{{ updateResult.message }}</span>
+            </div>
+          </Transition>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Install Dependencies - 安装依赖 -->
+    <Transition name="fade" mode="out-in">
+      <div v-if="!loading"
+        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+        <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+          <Package class="w-4 h-4" /> 安装依赖
+        </h3>
+        <div class="space-y-3">
+          <p class="text-sm text-text-muted">
+            点击下方按钮将执行 pip install 安装或更新所有依赖包。安装过程中请勿关闭页面。
+          </p>
+          <button @click="installDependencies" :disabled="installingDeps"
+            class="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20">
+            <Loader v-if="installingDeps" class="w-5 h-5 animate-spin" />
+            <Package v-else class="w-5 h-5" />
+            <span>{{ installingDeps ? '正在安装...' : '安装依赖包' }}</span>
+          </button>
+          <!-- 安装结果提示 -->
+          <Transition name="slide-fade">
+            <div v-if="installResult" class="space-y-2">
+              <div class="flex items-center gap-2 p-3 rounded-xl text-sm"
+                :class="installResult.success ? 'bg-success/20 text-success' : 'bg-red-500/20 text-red-400'">
+                <CheckCircle v-if="installResult.success" class="w-4 h-4 flex-shrink-0" />
+                <XCircle v-else class="w-4 h-4 flex-shrink-0" />
+                <span>{{ installResult.message }}</span>
+              </div>
+              <!-- 详细输出（可展开） -->
+              <details v-if="installResult.output" class="text-xs">
+                <summary class="cursor-pointer text-text-muted hover:text-text-primary">查看详细输出</summary>
+                <pre class="mt-2 p-3 rounded-xl bg-black/30 text-text-muted overflow-x-auto whitespace-pre-wrap max-h-60">{{ installResult.output }}</pre>
+              </details>
             </div>
           </Transition>
         </div>
