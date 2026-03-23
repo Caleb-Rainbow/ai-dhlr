@@ -1347,47 +1347,57 @@ class WSHandler:
 
     async def _trigger_update(self, params: dict) -> dict:
         """
-        触发系统更新脚本
-        
-        执行 update.sh 脚本，拉取最新代码并重启服务。
-        注意：执行后服务将重启，WebSocket 连接会断开。
-        
+        触发系统强制更新
+
+        使用 git fetch + reset --hard 无条件更新到远程最新版本。
+        执行后服务将重启，WebSocket 连接会断开。
+
         Returns:
             {"message": str, "success": bool}
         """
         import subprocess
-        import os
+        import asyncio
         from pathlib import Path
-        
+
         # 获取项目根目录
         project_root = Path(__file__).parent.parent.parent
-        update_script = project_root / "update.sh"
-        
-        if not update_script.exists():
-            raise ValueError(f"更新脚本不存在: {update_script}")
-        
-        logger.info(f"触发系统更新，执行脚本: {update_script}")
-        
+
+        logger.info(f"触发系统强制更新: {project_root}")
+
         try:
-            # 确保脚本有执行权限
-            os.chmod(update_script, 0o755)
-            
-            # 在后台执行更新脚本（使用 nohup 确保即使 WebSocket 断开也能继续执行）
-            subprocess.Popen(
-                ["bash", str(update_script)],
-                cwd=str(project_root),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
+            # 获取当前分支名
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=project_root,
+                capture_output=True,
+                text=True
             )
-            
+            branch = result.stdout.strip() or "main"
+
+            # 强制更新
+            subprocess.run(["git", "fetch", "origin"], cwd=project_root, check=True)
+            subprocess.run(["git", "reset", "--hard", f"origin/{branch}"], cwd=project_root, check=True)
+
+            logger.info(f"代码已更新到 origin/{branch}，即将重启服务...")
+
+            # 异步重启服务（给客户端时间收到响应）
+            async def restart_service():
+                await asyncio.sleep(1)
+                subprocess.run(["sudo", "systemctl", "restart", "ai-dhlr"])
+
+            asyncio.create_task(restart_service())
+
             return {
                 "success": True,
-                "message": "更新脚本已触发，服务即将重启..."
+                "message": f"已更新到 origin/{branch}，服务正在重启..."
             }
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"更新失败: {e}")
+            raise ValueError(f"更新失败: {e.stderr}")
         except Exception as e:
-            logger.error(f"执行更新脚本失败: {e}")
-            raise ValueError(f"执行更新脚本失败: {e}")
+            logger.error(f"更新失败: {e}")
+            raise ValueError(f"更新失败: {e}")
 
     # ==================== GPIO 处理器 ====================
     

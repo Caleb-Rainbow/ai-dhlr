@@ -201,7 +201,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"WebSocket错误: {e}")
             await ws_manager.disconnect(websocket)
-    
+
     # =========================================================================
     # 前端静态资源托管
     # =========================================================================
