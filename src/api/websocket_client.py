@@ -62,32 +62,44 @@ class RemoteWebSocketClient:
         """
         根据服务器地址构建登录 URL 和 WebSocket URL
         返回 (login_url, ws_url)
+
+        WebSocket URL 格式: ws://host/ws/dhlr/device/{deviceId}?token={token}
         """
         config = config_manager.config.remote
         server_url = config.server_url.strip()
-        
+
         if not server_url:
             return ("", "")
-        
+
         # 确保有协议前缀
         if not server_url.startswith(('http://', 'https://')):
             server_url = 'http://' + server_url
-        
+
         parsed = urlparse(server_url)
-        
+
         # 构建登录 URL
         login_path = config.login_path.strip()
         if not login_path.startswith('/'):
             login_path = '/' + login_path
         login_url = f"{parsed.scheme}://{parsed.netloc}{login_path}"
-        
+
         # 构建 WebSocket URL
+        # 路径格式: /ws/dhlr/device/{deviceId}?token={token}
         ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
         ws_path = config.websocket_path.strip()
         if not ws_path.startswith('/'):
             ws_path = '/' + ws_path
-        ws_url = f"{ws_scheme}://{parsed.netloc}{ws_path}"
-        
+
+        # 确保路径以 / 结尾，然后追加 deviceId
+        # 例如: /ws/dhlr/device/ -> /ws/dhlr/device/{deviceId}
+        ws_base = ws_path.rstrip('/')
+
+        # 获取设备ID（从全局配置）
+        device_id = config_manager.config.system.device_id
+
+        # 完整的 WebSocket URL（token 在连接时通过 query string 传递）
+        ws_url = f"{ws_scheme}://{parsed.netloc}{ws_base}/{device_id}"
+
         return (login_url, ws_url)
     
     async def login(self) -> tuple:
@@ -166,19 +178,18 @@ class RemoteWebSocketClient:
                     self._state.last_error = error
                     return False
             
+            # 构建 WebSocket URL（包含 token 参数）
+            # Java 端期望: /ws/dhlr/device/{deviceId}?token={jwt_token}
+            ws_url_with_token = f"{ws_url}?token={config.token}"
+
             # 创建 session
             if self._session is None or self._session.closed:
                 self._session = aiohttp.ClientSession()
-            
-            # 建立 WebSocket 连接
-            headers = {
-                "Authorization": f"Bearer {config.token}"
-            }
-            
+
             logger.info(f"正在连接远程服务器: {ws_url}")
+
             self._ws = await self._session.ws_connect(
-                ws_url,
-                headers=headers,
+                ws_url_with_token,
                 heartbeat=self._heartbeat_interval,
                 receive_timeout=30
             )
