@@ -36,9 +36,9 @@ jobs:
         working-directory: web/fire-monitor-ui
         run: npm ci
 
-      - name: Build
+      - name: Build for GitHub Pages
         working-directory: web/fire-monitor-ui
-        run: npm run build
+        run: npm run build:github
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
