@@ -1,24 +1,36 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router';
-import { 
-  BarChart2, 
-  Camera, 
-  CookingPot, 
-  ClipboardList, 
+import { computed } from 'vue';
+import { RouterView, useRoute } from 'vue-router';
+import {
+  BarChart2,
+  Camera,
+  CookingPot,
+  ClipboardList,
   Settings,
   SearchCheck
 } from 'lucide-vue-next';
 
+const route = useRoute();
 
+// 根据当前路由动态生成导航路径
+const basePath = computed(() => {
+  if (route.path.startsWith('/device/')) {
+    // 服务器模式: /device/:deviceId
+    const match = route.path.match(/^\/device\/[^/]+/);
+    return match ? match[0] : '';
+  }
+  // 设备模式
+  return '/local';
+});
 
-const navItems = [
-  { name: 'dashboard', label: '监控', path: '/', icon: BarChart2 },
-  { name: 'cameras', label: '摄像头', path: '/cameras', icon: Camera },
-  { name: 'zones', label: '灶台', path: '/zones', icon: CookingPot },
-  { name: 'patrol', label: '巡检', path: '/patrol', icon: SearchCheck },
-  { name: 'logs', label: '日志', path: '/logs', icon: ClipboardList },
-  { name: 'settings', label: '设置', path: '/settings', icon: Settings },
-];
+const navItems = computed(() => [
+  { name: 'dashboard', label: '监控', path: `${basePath.value}/dashboard`, icon: BarChart2 },
+  { name: 'cameras', label: '摄像头', path: `${basePath.value}/cameras`, icon: Camera },
+  { name: 'zones', label: '灶台', path: `${basePath.value}/zones`, icon: CookingPot },
+  { name: 'patrol', label: '巡检', path: `${basePath.value}/patrol`, icon: SearchCheck },
+  { name: 'logs', label: '日志', path: `${basePath.value}/logs`, icon: ClipboardList },
+  { name: 'settings', label: '设置', path: `${basePath.value}/settings`, icon: Settings },
+]);
 </script>
 
 <template>
@@ -37,14 +49,13 @@ const navItems = [
 
     <!-- Bottom Nav -->
     <nav class="h-16 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] flex items-center justify-around fixed bottom-0 w-full max-w-md z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
-      <RouterLink 
-        v-for="item in navItems" 
+      <RouterLink
+        v-for="item in navItems"
         :key="item.name"
         :to="item.path"
         replace
         class="flex flex-col items-center gap-1.5 px-4 py-2 text-text-muted transition-all rounded-xl active:scale-90"
-        :active-class="item.path === '/' ? '' : '!text-text-primary'"
-        :exact-active-class="item.path === '/' ? '!text-text-primary' : ''"
+        exact-active-class="!text-text-primary"
       >
         <component :is="item.icon" class="w-5 h-5 transition-transform duration-300" />
         <span class="text-[10px] font-medium tracking-wide">{{ item.label }}</span>
