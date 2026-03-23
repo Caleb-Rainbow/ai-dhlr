@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/ai-dhlr/',
   plugins: [vue(), tailwindcss()],
   server: {
     host: '0.0.0.0',
@@ -19,6 +20,8 @@ export default defineConfig({
       overlay: true,
     },
     proxy: {
+      // WebSocket 代理 - 匹配所有 /ws 开头的路径
+      // 包括设备模式 /ws/status 和服务器模式 /ws/dhlr/client/{deviceId}
       '/ws': {
         target: 'http://localhost:8000',
         ws: true,
