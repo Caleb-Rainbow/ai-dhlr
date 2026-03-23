@@ -33,7 +33,7 @@ const networkStatus = ref<NetworkStatus>({
 const remoteConfig = ref<RemoteServerConfig>({
   enabled: false,
   server_url: '',
-  websocket_path: 'dhlr/socket',
+  websocket_path: '/ws/dhlr/client',
   login_path: '/login',
   username: '',
   has_token: false,
@@ -86,7 +86,7 @@ const settingVolume = ref(false);
 // 编辑用的本地状态
 const remoteForm = ref({
   server_url: '',
-  websocket_path: 'dhlr/socket',
+  websocket_path: '/ws/dhlr/client',
   login_path: '/login',
   username: '',
   password: '',
@@ -154,7 +154,7 @@ const loadData = async () => {
     // 初始化表单
     remoteForm.value = {
       server_url: remote.server_url || '',
-      websocket_path: remote.websocket_path || 'dhlr/socket',
+      websocket_path: remote.websocket_path || '/ws/dhlr/client',
       login_path: remote.login_path || '/login',
       username: remote.username || '',
       password: '',
@@ -598,7 +598,7 @@ onUnmounted(() => {
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1">
             <label class="text-xs text-text-muted ml-1">WebSocket 路径</label>
-            <input v-model="remoteForm.websocket_path" type="text" placeholder="dhlr/socket"
+            <input v-model="remoteForm.websocket_path" type="text" placeholder="/ws/dhlr/client"
               class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
               style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
           </div>
