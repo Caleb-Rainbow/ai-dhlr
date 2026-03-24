@@ -23,13 +23,19 @@ const basePath = computed(() => {
   return '/local';
 });
 
+// 在远程模式下保留 server 参数
+const serverParam = computed(() => {
+  const server = route.query.server;
+  return server ? `?server=${encodeURIComponent(server as string)}` : '';
+});
+
 const navItems = computed(() => [
-  { name: 'dashboard', label: '监控', path: `${basePath.value}/dashboard`, icon: BarChart2 },
-  { name: 'cameras', label: '摄像头', path: `${basePath.value}/cameras`, icon: Camera },
-  { name: 'zones', label: '灶台', path: `${basePath.value}/zones`, icon: CookingPot },
-  { name: 'patrol', label: '巡检', path: `${basePath.value}/patrol`, icon: SearchCheck },
-  { name: 'logs', label: '日志', path: `${basePath.value}/logs`, icon: ClipboardList },
-  { name: 'settings', label: '设置', path: `${basePath.value}/settings`, icon: Settings },
+  { name: 'dashboard', label: '监控', path: `${basePath.value}/dashboard${serverParam.value}`, icon: BarChart2 },
+  { name: 'cameras', label: '摄像头', path: `${basePath.value}/cameras${serverParam.value}`, icon: Camera },
+  { name: 'zones', label: '灶台', path: `${basePath.value}/zones${serverParam.value}`, icon: CookingPot },
+  { name: 'patrol', label: '巡检', path: `${basePath.value}/patrol${serverParam.value}`, icon: SearchCheck },
+  { name: 'logs', label: '日志', path: `${basePath.value}/logs${serverParam.value}`, icon: ClipboardList },
+  { name: 'settings', label: '设置', path: `${basePath.value}/settings${serverParam.value}`, icon: Settings },
 ]);
 </script>
 
