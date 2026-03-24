@@ -42,7 +42,7 @@ function detectConnectionMode(): ConnectionMode {
     // 检查路由是否是远程模式 /device/:deviceId
     const pathMatch = window.location.hash.match(/#\/device\/([^/]+)/);
 
-    if (pathMatch && serverParam) {
+    if (pathMatch && pathMatch[1] && serverParam) {
         // 远程模式
         return {
             isRemote: true,
