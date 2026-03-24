@@ -12,6 +12,7 @@ from enum import Enum
 
 from ..utils.logger import get_logger
 from ..output.voice import voice_player
+from ..api.websocket import sync_upload_alarm_record
 
 
 # 音频资源目录
@@ -644,8 +645,17 @@ class PatrolManager:
             if audio_path:
                 voice_player.play_file(audio_path)
             
-            self._add_result(zone_id, zone_name, "强制预警", "warning", 
+            self._add_result(zone_id, zone_name, "强制预警", "warning",
                            f"{zone_name}预警已触发")
+
+            # 上报到远程服务器
+            sync_upload_alarm_record(
+                zone_id=zone_id,
+                zone_name=zone_name,
+                alarm_type="warning",
+                image_base64=None,
+                message=f"{zone_name} 强制预警"
+            )
             time.sleep(2)
         
         self._update_progress(PatrolStep.IDLE, 100, "所有区预警已触发")
@@ -680,8 +690,17 @@ class PatrolManager:
             if audio_path:
                 voice_player.play_file(audio_path)
             
-            self._add_result(zone_id, zone_name, "强制报警", "warning", 
+            self._add_result(zone_id, zone_name, "强制报警", "warning",
                            f"{zone_name}报警已触发")
+
+            # 上报到远程服务器
+            sync_upload_alarm_record(
+                zone_id=zone_id,
+                zone_name=zone_name,
+                alarm_type="alarm",
+                image_base64=None,
+                message=f"{zone_name} 强制报警"
+            )
             time.sleep(2)
         
         self._update_progress(PatrolStep.IDLE, 100, "所有区报警已触发")
@@ -720,8 +739,17 @@ class PatrolManager:
             # 执行切电 - 使用 serial_manager
             serial_manager.cutoff(zone_id)
             
-            self._add_result(zone_id, zone_name, "强制切电", "success", 
+            self._add_result(zone_id, zone_name, "强制切电", "success",
                            f"{zone_name}已切电")
+
+            # 上报到远程服务器
+            sync_upload_alarm_record(
+                zone_id=zone_id,
+                zone_name=zone_name,
+                alarm_type="cutoff",
+                image_base64=None,
+                message=f"{zone_name} 强制切电"
+            )
             time.sleep(2)
         
         self._update_progress(PatrolStep.IDLE, 100, "所有区切电已完成")
