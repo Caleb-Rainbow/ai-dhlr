@@ -36,11 +36,21 @@ interface ConnectionMode {
  */
 function detectConnectionMode(): ConnectionMode {
     // 解析 URL 参数
-    const urlParams = new URLSearchParams(window.location.search);
-    const serverParam = urlParams.get('server');
+    // 注意：在 hash 路由模式下，查询参数在 # 后面
+    // 例如: http://host/#/device/xxx?server=yyy
+    // window.location.search 是空的，需要从 hash 中解析
+    const hash = window.location.hash;
+    const hashQueryIndex = hash.indexOf('?');
+    let serverParam: string | null = null;
+
+    if (hashQueryIndex !== -1) {
+        const queryString = hash.substring(hashQueryIndex + 1);
+        const hashParams = new URLSearchParams(queryString);
+        serverParam = hashParams.get('server');
+    }
 
     // 检查路由是否是远程模式 /device/:deviceId
-    const pathMatch = window.location.hash.match(/#\/device\/([^/]+)/);
+    const pathMatch = hash.match(/#\/device\/([^/?]+)/);
 
     if (pathMatch && pathMatch[1] && serverParam) {
         // 远程模式
