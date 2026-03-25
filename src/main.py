@@ -240,20 +240,21 @@ class FireSafetySystem:
             "message": event.message
         })
     
-    def _on_temp_alarm(self, zone: Zone, temperature: float):
+    def _on_temp_alarm(self, zone: Zone, temperature: float, frame=None):
         """温度报警回调 - 加入播报队列并广播事件"""
         config = get_config()
         self._logger.warning(f"[温度报警] {zone.name} 温度过高 ({temperature:.1f}°C > {config.alarm.temp_alarm_threshold}°C)")
         self._add_to_broadcast_queue(zone.id, zone.name, "temp_alarm")
 
-        sync_broadcast_alarm_event(zone.id, zone.name, "temp_alarm", None)
+        image_base64 = self._frame_to_base64(frame) if frame is not None else None
+        sync_broadcast_alarm_event(zone.id, zone.name, "temp_alarm", image_base64)
 
         # 上报到远程服务器
         sync_upload_alarm_record(
             zone_id=zone.id,
             zone_name=zone.name,
             alarm_type="temp_alarm",
-            image_base64=None,
+            image_base64=image_base64,
             message=f"{zone.name} 温度过高 ({temperature:.1f}°C > {config.alarm.temp_alarm_threshold}°C)"
         )
     

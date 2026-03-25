@@ -504,22 +504,23 @@ async def upload_alarm_record(
 
     config = config_manager.config
     if not config.remote.enabled:
+        logger.debug("远程连接未启用，跳过报警记录上报")
         return  # 远程连接未启用，跳过
 
     current_time = int(time.time() * 1000)
     message_data = {
         "type": "alarm_record_upload",
-        "msg_id": str(uuid.uuid4()),
+        "msgId": str(uuid.uuid4()),
         "timestamp": current_time,
-        "device_id": config.system.device_id,
+        "deviceId": config.system.device_id,
         "data": {
-            "zone_id": zone_id,
-            "zone_name": zone_name,
-            "alarm_type": alarm_type,
+            "zoneId": zone_id,
+            "zoneName": zone_name,
+            "alarmType": alarm_type,
             "image": f"data:image/jpeg;base64,{image_base64}" if image_base64 else None,
             "message": message,
-            "occurred_at": current_time,
-            "local_snapshot_path": snapshot_path
+            "occurredAt": current_time,
+            "localSnapshotPath": snapshot_path
         }
     }
 
@@ -545,13 +546,18 @@ def sync_upload_alarm_record(
     上报报警记录到服务器（从非异步上下文调用）
 
     Args:
-        zone_id: 灶台ID
+        zone_id: 灶台ID（单区模式下为空时默认为 "0"）
         zone_name: 灶台名称
         alarm_type: 报警类型 "warning" | "alarm" | "cutoff" | "temp_alarm"
         image_base64: 截图 Base64 编码
         message: 报警消息
         snapshot_path: 本地截图路径
     """
+    # 单区模式下 zone_id 可能为空，使用默认值 "0"
+    if not zone_id:
+        zone_id = "0"
+
+    logger.info(f"准备上报报警记录: zone={zone_id}, type={alarm_type}")
     try:
         # 获取主事件循环
         loop = message_dispatcher.get_main_loop()
@@ -580,17 +586,17 @@ def sync_upload_alarm_record(
                 current_time = int(time.time() * 1000)
                 message_data = {
                     "type": "alarm_record_upload",
-                    "msg_id": str(uuid.uuid4()),
+                    "msgId": str(uuid.uuid4()),
                     "timestamp": current_time,
-                    "device_id": config.system.device_id,
+                    "deviceId": config.system.device_id,
                     "data": {
-                        "zone_id": zone_id,
-                        "zone_name": zone_name,
-                        "alarm_type": alarm_type,
+                        "zoneId": zone_id,
+                        "zoneName": zone_name,
+                        "alarmType": alarm_type,
                         "image": f"data:image/jpeg;base64,{image_base64}" if image_base64 else None,
                         "message": message,
-                        "occurred_at": current_time,
-                        "local_snapshot_path": snapshot_path
+                        "occurredAt": current_time,
+                        "localSnapshotPath": snapshot_path
                     }
                 }
                 offline_cache.push(message_data)

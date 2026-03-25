@@ -50,7 +50,7 @@ class ZoneStateMachine:
         self._on_alarm: Optional[Callable[[Zone], None]] = None
         self._on_cutoff: Optional[Callable[[Zone], None]] = None
         self._on_state_change: Optional[Callable[[StateChangeEvent], None]] = None
-        self._on_temp_alarm: Optional[Callable[[Zone, float], None]] = None  # 温度报警回调
+        self._on_temp_alarm: Optional[Callable[[Zone, float, np.ndarray], None]] = None  # 温度报警回调（含帧参数）
         
         # 时间追踪
         self._no_person_start_time: Optional[float] = None
@@ -61,7 +61,7 @@ class ZoneStateMachine:
                       on_alarm: Optional[Callable[[Zone], None]] = None,
                       on_cutoff: Optional[Callable[[Zone], None]] = None,
                       on_state_change: Optional[Callable[[StateChangeEvent], None]] = None,
-                      on_temp_alarm: Optional[Callable[[Zone, float], None]] = None):
+                      on_temp_alarm: Optional[Callable[[Zone, float, np.ndarray], None]] = None):
         """设置回调函数"""
         self._on_warning = on_warning
         self._on_alarm = on_alarm
@@ -111,9 +111,9 @@ class ZoneStateMachine:
                     if old_state != ZoneState.TEMP_ALARM:
                         self._logger.warning(f"温度超阈值 ({temperature:.1f}°C > {temp_threshold}°C)，触发温度报警")
                         self._transition_to(ZoneState.TEMP_ALARM)
-                        # 触发温度报警回调
+                        # 触发温度报警回调，传递当前帧
                         if self._on_temp_alarm:
-                            self._on_temp_alarm(self.zone, temperature)
+                            self._on_temp_alarm(self.zone, temperature, current_frame)
                     temp_alarm_triggered = True
             
             # 如果已触发温度报警，跳过其他状态判断
