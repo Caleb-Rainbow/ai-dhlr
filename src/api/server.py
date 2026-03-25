@@ -37,10 +37,10 @@ def _status_hash(statuses: list) -> str:
         key_fields.append({
             "id": s.get("id"),
             "state": s.get("state"),
-            "fire_on": s.get("fire_on"),
+            "is_fire_on": s.get("is_fire_on"),
             "has_person": s.get("has_person"),  # 是否有人（前端人形图标状态）
             "current_value": s.get("current_value"),  # 电流值（前端显示电流）
-            "elapsed_time": int(s.get("elapsed_time", 0)),  # 整数比较，避免秒级变化
+            "no_person_duration": int(s.get("no_person_duration", 0)),  # 整数比较，避免秒级变化
         })
     return hashlib.md5(json.dumps(key_fields, sort_keys=True).encode()).hexdigest()
 
