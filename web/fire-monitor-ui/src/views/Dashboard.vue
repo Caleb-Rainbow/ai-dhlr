@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { RefreshCcw, Activity, Flame, User, Cpu, Zap, Maximize2, Lightbulb } from 'lucide-vue-next';
+import { RefreshCcw, Activity, Flame, User, Cpu, Zap, Maximize2, Lightbulb, WifiOff } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { ZoneStatus, DeviceInfo, PerformanceStats } from '../types';
 import Sparkline from '../components/Sparkline.vue';
@@ -10,6 +10,7 @@ const deviceInfo = ref<DeviceInfo | null>(null);
 const zones = ref<ZoneStatus[]>([]);
 const performance = ref<PerformanceStats | null>(null);
 const loading = ref(true);
+const deviceOffline = ref(false);
 
 // History Data for Sparklines
 const fpsHistory = ref<number[]>([]);
@@ -40,17 +41,28 @@ const toggleFullscreen = () => {
   }
 };
 
+// Helper: 检查是否为设备离线错误
+const isDeviceOfflineError = (e: unknown): boolean => {
+  return e instanceof Error && e.message.includes('设备离线');
+};
+
 // Actions
 const fetchDeviceInfo = async () => {
   try {
     deviceInfo.value = await ws.request<DeviceInfo>('get_device');
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    if (isDeviceOfflineError(e)) deviceOffline.value = true;
+    console.error(e);
+  }
 };
 
 const refreshStatus = async () => {
   try {
     zones.value = await ws.request<ZoneStatus[]>('get_status');
-  } catch (e) { console.error(e); } finally {
+  } catch (e) {
+    if (isDeviceOfflineError(e)) deviceOffline.value = true;
+    console.error(e);
+  } finally {
     loading.value = false;
   }
 };
@@ -70,12 +82,20 @@ const refreshPerformance = async () => {
     npuHistory.value.push(stats.npu_load || 0);
     if (npuHistory.value.length > historyLimit) npuHistory.value.shift();
 
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    if (isDeviceOfflineError(e)) deviceOffline.value = true;
+    console.error(e);
+  }
 };
 
 // 注意: toggleFire、resetZone 和 resetAll 已移除，动火状态现在通过串口电流值判断
 
+let unsubscribeConnect: (() => void) | null = null;
+let unsubscribeDisconnect: (() => void) | null = null;
+
 onMounted(async () => {
+  // 断开旧连接，确保重新检测连接模式
+  ws.disconnect();
   // 连接 WebSocket
   await ws.connect();
 
@@ -89,11 +109,23 @@ onMounted(async () => {
     loading.value = false;
   });
 
+  // 监听连接恢复事件
+  unsubscribeConnect = ws.on('connect', () => {
+    deviceOffline.value = false;
+  });
+
+  // 监听连接断开事件
+  unsubscribeDisconnect = ws.on('disconnect', () => {
+    deviceOffline.value = true;
+  });
+
   perfTimer = setInterval(refreshPerformance, 1000);
 });
 
 onUnmounted(() => {
   if (unsubscribeStatus) unsubscribeStatus();
+  if (unsubscribeConnect) unsubscribeConnect();
+  if (unsubscribeDisconnect) unsubscribeDisconnect();
   if (perfTimer) clearInterval(perfTimer);
 });
 </script>
@@ -129,6 +161,15 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 设备离线提示 -->
+    <Transition name="slide-fade">
+      <div v-if="deviceOffline"
+           class="bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-2 rounded-xl flex items-center gap-2">
+        <WifiOff class="w-4 h-4" />
+        <span>{{ ws.isRemoteMode ? '设备离线，请检查设备网络连接' : '连接断开，请检查本地服务' }}</span>
+      </div>
+    </Transition>
 
     <!-- Indicator Lights Status - 指示灯状态 -->
     <div

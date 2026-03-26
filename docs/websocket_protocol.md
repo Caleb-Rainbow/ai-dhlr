@@ -268,6 +268,7 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
 | -------------------------- | ----------------- |
 | `connection_limit_reached` | 连接数已达上限           |
 | `unauthorized`             | 未授权（Token 无效或已过期） |
+| `device_offline`           | 设备离线（设备未连接到远程服务器，仅远程模式） |
 
 **错误消息格式说明：**
 
@@ -289,6 +290,17 @@ Authorization: Bearer eyJhbGciOiJIUzUxMiJ9...
    ```
 
 > **注意**：401 错误通过 `code: 401` 字段标识，而非 `error: "unauthorized"`。客户端收到 401 错误后应清除本地 Token 并重新登录。
+
+3. **设备离线（远程模式）**：通过 `error` 字段标识
+   ```json
+   {
+       "type": "response",
+       "msg_id": "xxx",
+       "success": false,
+       "error": "设备离线"
+   }
+   ```
+   > 此错误仅在远程监控模式下由远程服务器返回，表示目标设备未连接。客户端应提示用户检查设备网络或稍后重试。
 
 ***
 
