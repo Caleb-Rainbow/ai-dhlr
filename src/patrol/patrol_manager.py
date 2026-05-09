@@ -401,11 +401,65 @@ class PatrolManager:
         
         # 执行切电
         serial_manager.cutoff(zone_id)
-        
+
         self._add_result(zone_id, zone_name, "强制切电", "success", f"{zone_name}已切电")
-        
+
+        # 获取摄像头帧并转换为 base64
+        image_base64 = self._get_frame_base64(sm.zone.camera_id)
+
+        # 上报到远程服务器
+        self._logger.info(f"[{zone_id}] 准备上报强制切电记录...")
+        sync_upload_alarm_record(
+            zone_id=zone_id,
+            zone_name=zone_name,
+            alarm_type="cutoff",
+            image_base64=image_base64,
+            message=f"{zone_name} 强制切电"
+        )
+
         return {"success": True, "message": f"{zone_name}已切电"}
-    
+
+    def _get_frame_base64(self, camera_id: str):
+        """获取摄像头当前帧并转换为 base64"""
+        import base64
+        import cv2
+
+        self._logger.info(f"获取摄像头帧: camera_id={camera_id}")
+
+        try:
+            from ..camera.manager import camera_manager
+            camera = camera_manager.get_camera(camera_id)
+            if not camera:
+                self._logger.warning(f"摄像头不存在: camera_id={camera_id}")
+                return None
+            if not camera.is_online:
+                self._logger.warning(f"摄像头离线: camera_id={camera_id}, status={camera.status}")
+                return None
+
+            # 帧缓冲区可能暂时为空，等待重试（最多2秒）
+            frame = camera.get_frame()
+            if frame is None:
+                self._logger.debug(f"帧缓冲区为空，等待帧可用: {camera_id}")
+                for i in range(20):
+                    time.sleep(0.1)
+                    frame = camera.get_frame()
+                    if frame is not None:
+                        self._logger.debug(f"帧可用，等待了 {(i + 1) * 100}ms: {camera_id}")
+                        break
+
+            if frame is None:
+                self._logger.warning(f"获取帧失败: camera_id={camera_id}, frame is None")
+                return None
+
+            # 转换为 JPEG 并编码为 base64
+            _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            result = base64.b64encode(jpeg.tobytes()).decode('utf-8')
+            self._logger.info(f"成功获取帧并转换: camera_id={camera_id}, base64长度={len(result)}")
+            return result
+        except Exception as e:
+            self._logger.error(f"获取摄像头帧异常: camera_id={camera_id}, error={e}")
+            return None
+
     def device_self_check(self) -> dict:
         """
         设备自检
@@ -648,12 +702,15 @@ class PatrolManager:
             self._add_result(zone_id, zone_name, "强制预警", "warning",
                            f"{zone_name}预警已触发")
 
+            # 获取摄像头帧并转换为 base64
+            image_base64 = self._get_frame_base64(sm.zone.camera_id)
+
             # 上报到远程服务器
             sync_upload_alarm_record(
                 zone_id=zone_id,
                 zone_name=zone_name,
                 alarm_type="warning",
-                image_base64=None,
+                image_base64=image_base64,
                 message=f"{zone_name} 强制预警"
             )
             time.sleep(2)
@@ -693,12 +750,15 @@ class PatrolManager:
             self._add_result(zone_id, zone_name, "强制报警", "warning",
                            f"{zone_name}报警已触发")
 
+            # 获取摄像头帧并转换为 base64
+            image_base64 = self._get_frame_base64(sm.zone.camera_id)
+
             # 上报到远程服务器
             sync_upload_alarm_record(
                 zone_id=zone_id,
                 zone_name=zone_name,
                 alarm_type="alarm",
-                image_base64=None,
+                image_base64=image_base64,
                 message=f"{zone_name} 强制报警"
             )
             time.sleep(2)
@@ -738,16 +798,20 @@ class PatrolManager:
             
             # 执行切电 - 使用 serial_manager
             serial_manager.cutoff(zone_id)
-            
+
             self._add_result(zone_id, zone_name, "强制切电", "success",
                            f"{zone_name}已切电")
 
+            # 获取摄像头帧并转换为 base64
+            image_base64 = self._get_frame_base64(sm.zone.camera_id)
+
             # 上报到远程服务器
+            self._logger.info(f"[{zone_id}] 准备上报强制切电记录...")
             sync_upload_alarm_record(
                 zone_id=zone_id,
                 zone_name=zone_name,
                 alarm_type="cutoff",
-                image_base64=None,
+                image_base64=image_base64,
                 message=f"{zone_name} 强制切电"
             )
             time.sleep(2)
