@@ -28,7 +28,9 @@ class RemoteConnectionState:
 
 class RemoteWebSocketClient:
     """远程 WebSocket 客户端"""
-    
+
+    _MAX_AUTH_RETRIES = 5  # 鉴权失败最大重试次数
+
     def __init__(self):
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._session: Optional[aiohttp.ClientSession] = None
@@ -40,6 +42,8 @@ class RemoteWebSocketClient:
         self._message_handlers: List[Callable[[dict], Awaitable[None]]] = []
         self._heartbeat_interval = 10.0  # 心跳间隔（秒）
         self._max_reconnect_delay = 30.0  # 最大重连延迟（秒）
+        self._auth_fail_count = 0  # 连续鉴权失败计数
+        self._auth_stopped = False  # 鉴权失败已停止重连
     
     @property
     def state(self) -> RemoteConnectionState:
@@ -132,9 +136,20 @@ class RemoteWebSocketClient:
                             if token:
                                 # 保存 Token 到配置
                                 config.token = token
-                                config.token_expires = int(time.time()) + 3600 * 24  # 假设24小时有效
+                                # 尝试从响应中获取过期时间，否则默认 24 小时
+                                expires_in = data.get('expires_in') or data.get('expireTime')
+                                if expires_in:
+                                    # 如果是毫秒或秒数
+                                    if expires_in > 10000000000:  # 毫秒时间戳
+                                        config.token_expires = expires_in // 1000
+                                    elif expires_in > 1000000000:  # 秒时间戳
+                                        config.token_expires = expires_in
+                                    else:  # 相对秒数
+                                        config.token_expires = int(time.time()) + expires_in
+                                else:
+                                    config.token_expires = int(time.time()) + 3600 * 24  # 默认 24 小时
                                 config_manager.save()
-                                logger.info("远程服务器登录成功")
+                                logger.info(f"远程服务器登录成功，Token 有效期至: {config.token_expires}")
                                 return (True, token, "")
                             else:
                                 return (False, "", "响应中无 Token")
@@ -170,12 +185,26 @@ class RemoteWebSocketClient:
                 self._state.last_error = "WebSocket 地址无效"
                 return False
             
-            # 检查 Token
+            # 检查 Token 是否存在或已过期
+            need_login = False
             if not config.token:
                 logger.info("Token 不存在，尝试登录...")
+                need_login = True
+            elif config.token_expires > 0 and time.time() >= config.token_expires:
+                logger.info("Token 已过期，尝试重新登录...")
+                config.token = ""  # 清除过期 Token
+                need_login = True
+
+            if need_login:
                 success, token, error = await self.login()
                 if not success:
+                    self._auth_fail_count += 1
                     self._state.last_error = error
+                    if self._auth_fail_count >= self._MAX_AUTH_RETRIES:
+                        self._auth_stopped = True
+                        logger.error(
+                            f"鉴权连续失败 {self._auth_fail_count} 次，停止重连: {error}"
+                        )
                     return False
             
             # 构建 WebSocket URL（包含 token 参数）
@@ -198,6 +227,8 @@ class RemoteWebSocketClient:
             self._state.is_connecting = False
             self._state.reconnect_attempts = 0
             self._state.last_heartbeat = time.time()
+            self._auth_fail_count = 0
+            self._auth_stopped = False
 
             logger.info("远程 WebSocket 连接成功")
 
@@ -212,11 +243,20 @@ class RemoteWebSocketClient:
             
         except aiohttp.WSServerHandshakeError as e:
             if e.status == 401:
+                self._auth_fail_count += 1
                 self._state.last_error = "Token 无效或已过期"
-                logger.warning("Token 无效，尝试重新登录...")
-                # 清除旧 Token 并重新登录
-                config_manager.config.remote.token = ""
-                config_manager.save()
+                if self._auth_fail_count >= self._MAX_AUTH_RETRIES:
+                    self._auth_stopped = True
+                    logger.error(
+                        f"鉴权连续失败 {self._auth_fail_count} 次，停止重连"
+                    )
+                else:
+                    logger.warning(
+                        f"Token 无效，清除后等待重连 ({self._auth_fail_count}/{self._MAX_AUTH_RETRIES})"
+                    )
+                    config_manager.config.remote.token = ""
+                    config_manager.config.remote.token_expires = 0
+                    config_manager.save()
             else:
                 self._state.last_error = f"握手失败: {e.status}"
             return False
@@ -340,12 +380,23 @@ class RemoteWebSocketClient:
 
         # 处理 401 错误（Token 失效）
         if msg_type == 'error' and message.get('code') == 401:
-            logger.warning("收到 401 错误，Token 可能已失效")
+            self._auth_fail_count += 1
             self._state.last_error = "Token 已失效"
-            # 清除 Token 并重连
+            if self._auth_fail_count >= self._MAX_AUTH_RETRIES:
+                self._auth_stopped = True
+                logger.error(
+                    f"鉴权连续失败 {self._auth_fail_count} 次，停止重连"
+                )
+            else:
+                logger.warning(
+                    f"收到 401 错误，清除 Token 等待重连 ({self._auth_fail_count}/{self._MAX_AUTH_RETRIES})"
+                )
             config_manager.config.remote.token = ""
+            config_manager.config.remote.token_expires = 0
             config_manager.save()
-            asyncio.create_task(self._reconnect())
+            # 断开当前连接，触发重连
+            if self._ws and not self._ws.closed:
+                await self._ws.close()
             return
 
         # 通知所有消息处理器
@@ -370,6 +421,10 @@ class RemoteWebSocketClient:
     async def _reconnect(self):
         """重连逻辑（指数退避）"""
         if not self._running:
+            return
+
+        if self._auth_stopped:
+            logger.warning("鉴权失败次数已达上限，不再重连。请检查配置后重启服务")
             return
 
         self._state.reconnect_attempts += 1
@@ -442,7 +497,9 @@ class RemoteWebSocketClient:
             return
         
         self._running = True
-        
+        self._auth_fail_count = 0
+        self._auth_stopped = False
+
         success = await self.connect()
         if not success:
             logger.warning(f"初始连接失败: {self._state.last_error}")
