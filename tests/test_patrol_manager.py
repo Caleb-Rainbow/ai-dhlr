@@ -15,6 +15,7 @@ class MockZone:
     id: str
     name: str
     has_person: bool = False
+    camera_id: str = "cam_0"
 
 
 class MockStateMachine:
