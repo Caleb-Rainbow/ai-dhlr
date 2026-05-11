@@ -226,6 +226,16 @@ class RemoteWebSocketClient:
                 receive_timeout=30
             )
 
+            # 检查响应头中的鉴权错误标记
+            # Java 服务端 modifyHandshake 在 Token 无效时设置 X-Auth-Error
+            # 但不会阻止 101 升级，所以需要主动检测
+            auth_error = self._ws.headers.get('X-Auth-Error')
+            if auth_error:
+                logger.warning(f"WebSocket 握手返回鉴权错误: {auth_error}")
+                await self._ws.close()
+                self._handle_auth_failure(f"握手鉴权失败: {auth_error}")
+                return False
+
             self._state.is_connected = True
             self._state.is_connecting = False
             self._state.reconnect_attempts = 0
@@ -249,7 +259,7 @@ class RemoteWebSocketClient:
 
             # 补发离线缓存的消息
             asyncio.create_task(self._resend_cached_messages())
-            
+
             return True
             
         except aiohttp.WSServerHandshakeError as e:
