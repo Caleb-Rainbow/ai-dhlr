@@ -229,7 +229,14 @@ class RemoteWebSocketClient:
             # 检查响应头中的鉴权错误标记
             # Java 服务端 modifyHandshake 在 Token 无效时设置 X-Auth-Error
             # 但不会阻止 101 升级，所以需要主动检测
-            auth_error = self._ws.headers.get('X-Auth-Error')
+            # aiohttp 的 ClientWebSocketResponse 通过 _response 访问原始响应头
+            auth_error = None
+            try:
+                resp = getattr(self._ws, '_response', None)
+                if resp and hasattr(resp, 'headers'):
+                    auth_error = resp.headers.get('X-Auth-Error')
+            except Exception:
+                pass
             if auth_error:
                 logger.warning(f"WebSocket 握手返回鉴权错误: {auth_error}")
                 await self._ws.close()
