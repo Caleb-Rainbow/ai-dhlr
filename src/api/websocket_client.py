@@ -31,6 +31,8 @@ class RemoteWebSocketClient:
 
     _MAX_AUTH_RETRIES = 5  # 鉴权失败最大重试次数
 
+    _AUTH_FAIL_WINDOW = 5.0  # 连接建立后此时间内断开视为鉴权失败（秒）
+
     def __init__(self):
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._session: Optional[aiohttp.ClientSession] = None
@@ -44,6 +46,7 @@ class RemoteWebSocketClient:
         self._max_reconnect_delay = 30.0  # 最大重连延迟（秒）
         self._auth_fail_count = 0  # 连续鉴权失败计数
         self._auth_stopped = False  # 鉴权失败已停止重连
+        self._connected_at: float = 0  # 连接建立时间戳
     
     @property
     def state(self) -> RemoteConnectionState:
@@ -222,15 +225,23 @@ class RemoteWebSocketClient:
                 heartbeat=self._heartbeat_interval,
                 receive_timeout=30
             )
-            
+
             self._state.is_connected = True
             self._state.is_connecting = False
             self._state.reconnect_attempts = 0
             self._state.last_heartbeat = time.time()
+            self._connected_at = time.time()
             self._auth_fail_count = 0
             self._auth_stopped = False
 
             logger.info("远程 WebSocket 连接成功")
+
+            # 取消旧任务，避免多个 receive loop 并发竞争
+            for task in [self._heartbeat_task, self._receive_task]:
+                if task and not task.done():
+                    task.cancel()
+            self._heartbeat_task = None
+            self._receive_task = None
 
             # 启动心跳和接收任务
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -335,22 +346,39 @@ class RemoteWebSocketClient:
         while self._running and self.is_connected:
             try:
                 msg = await self._ws.receive()
-                
+
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         data = json.loads(msg.data)
                         await self._handle_message(data)
                     except json.JSONDecodeError:
                         logger.warning(f"收到非JSON消息: {msg.data[:100]}")
-                        
+
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
-                    logger.warning("远程 WebSocket 连接已关闭")
+                    close_code = self._ws.close_code if self._ws else None
+                    elapsed = time.time() - self._connected_at if self._connected_at else 0
+                    logger.warning(
+                        f"远程 WebSocket 连接已关闭, code={close_code}, "
+                        f"存活={elapsed:.1f}s"
+                    )
+
+                    # 连接建立后短时间内被关闭，视为鉴权失败
+                    if self._connected_at and elapsed < self._AUTH_FAIL_WINDOW:
+                        self._handle_auth_failure(
+                            f"连接被立即关闭(close_code={close_code})，疑似Token无效"
+                        )
                     break
-                    
+
                 elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error(f"远程 WebSocket 错误: {self._ws.exception()}")
+                    elapsed = time.time() - self._connected_at if self._connected_at else 0
+                    logger.error(
+                        f"远程 WebSocket 错误: {self._ws.exception()}, "
+                        f"存活={elapsed:.1f}s"
+                    )
+                    if self._connected_at and elapsed < self._AUTH_FAIL_WINDOW:
+                        self._handle_auth_failure("连接立即出错，疑似Token无效")
                     break
-                    
+
             except asyncio.CancelledError:
                 break
             except asyncio.TimeoutError:
@@ -358,12 +386,33 @@ class RemoteWebSocketClient:
             except Exception as e:
                 logger.error(f"接收远程消息失败: {e}")
                 break
-        
+
         # 连接断开，触发重连
         self._state.is_connected = False
         if self._running:
             asyncio.create_task(self._reconnect())
-    
+
+    def _handle_auth_failure(self, reason: str):
+        """处理鉴权失败：清除Token，递增失败计数"""
+        self._auth_fail_count += 1
+        self._state.last_error = reason
+
+        config = config_manager.config.remote
+        config.token = ""
+        config.token_expires = 0
+        config_manager.save()
+
+        if self._auth_fail_count >= self._MAX_AUTH_RETRIES:
+            self._auth_stopped = True
+            logger.error(
+                f"鉴权连续失败 {self._auth_fail_count} 次，停止重连: {reason}"
+            )
+        else:
+            logger.warning(
+                f"疑似鉴权失败，清除Token等待重新登录 "
+                f"({self._auth_fail_count}/{self._MAX_AUTH_RETRIES}): {reason}"
+            )
+
     async def _handle_message(self, message: dict):
         """处理收到的消息"""
         msg_type = message.get('type', '')
