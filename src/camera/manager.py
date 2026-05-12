@@ -5,6 +5,7 @@
 import cv2
 import threading
 import time
+import platform
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -115,6 +116,14 @@ class Camera:
     
     def _connect_async(self):
         """异步连接摄像头（在后台线程中执行）"""
+        # Windows: 初始化 COM 以支持 DSHOW 后端
+        if platform.system() == "Windows":
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except ImportError:
+                pass
+
         try:
             if self._open_capture():
                 self._status = CameraStatus.ONLINE
@@ -133,7 +142,12 @@ class Camera:
         """打开视频捕获设备"""
         try:
             if self.type == "usb":
-                self._cap = cv2.VideoCapture(self.config.device)
+                # Windows: 使用 DSHOW 后端，解决子线程中摄像头无法打开的问题
+                # Linux: 默认 V4L2 后端，无需指定
+                if platform.system() == "Windows":
+                    self._cap = cv2.VideoCapture(self.config.device, cv2.CAP_DSHOW)
+                else:
+                    self._cap = cv2.VideoCapture(self.config.device)
             elif self.type == "rtsp":
                 url = self._build_rtsp_url()
                 # 使用 FFMPEG 后端，通过 URL 参数设置超时（FFmpeg 在创建时读取这些参数）
@@ -225,6 +239,14 @@ class Camera:
     
     def _read_frames(self):
         """帧读取线程"""
+        # Windows: 初始化 COM 以支持 DSHOW 后端
+        if platform.system() == "Windows":
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except ImportError:
+                pass
+
         retry_count = 0
         max_retries = 5
         
@@ -257,9 +279,13 @@ class Camera:
                 if self._cap is None or not self._cap.isOpened():
                     # 尝试重连
                     self._status = CameraStatus.CONNECTING
-                    
+
                     if self.type == "usb":
-                        self._cap = cv2.VideoCapture(self.config.device)
+                        # Windows: 使用 DSHOW 后端
+                        if platform.system() == "Windows":
+                            self._cap = cv2.VideoCapture(self.config.device, cv2.CAP_DSHOW)
+                        else:
+                            self._cap = cv2.VideoCapture(self.config.device)
                     elif self.type == "rtsp":
                         url = self._build_rtsp_url()
                         # 使用 FFMPEG 后端，通过 URL 参数设置超时（5秒）

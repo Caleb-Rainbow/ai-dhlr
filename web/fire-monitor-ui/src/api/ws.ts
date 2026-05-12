@@ -69,9 +69,37 @@ function detectConnectionMode(): ConnectionMode {
     };
 }
 
+/**
+ * 根据连接模式构建 WebSocket URL
+ */
+function buildWebSocketUrl(mode: ConnectionMode): string {
+    if (mode.isRemote) {
+        // 远程模式: 连接 Java 服务器
+        // URL 格式: ws://host/ws/dhlr/client/{deviceId}
+        const serverUrl = mode.serverUrl;
+
+        if (serverUrl.startsWith('ws://') || serverUrl.startsWith('wss://')) {
+            // 已经是完整的 WebSocket URL
+            const baseUrl = serverUrl.replace(/\/+$/, '');
+            return `${baseUrl}/ws/dhlr/client/${mode.deviceId}`;
+        } else {
+            // HTTP URL，转换为 WebSocket
+            const wsProtocol = serverUrl.startsWith('https://') ? 'wss://' : 'ws://';
+            const host = serverUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+            return `${wsProtocol}${host}/ws/dhlr/client/${mode.deviceId}`;
+        }
+    } else {
+        // 本地模式: 连接设备端 Python 服务
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        return `${protocol}//${host}/ws/status`;
+    }
+}
+
 class WebSocketClient {
     private ws: WebSocket | null = null;
-    private url: string;
+    private _url: string = '';
+    private _mode: ConnectionMode = { isRemote: false, deviceId: '', serverUrl: '' };
     private pendingRequests: Map<string, PendingRequest> = new Map();
     private eventHandlers: Map<string, Set<EventHandler>> = new Map();
     private reconnectAttempts = 0;
@@ -82,52 +110,69 @@ class WebSocketClient {
     private isManualClose = false;
     private messageIdCounter = 0;
 
-    // 连接模式
-    public readonly mode: ConnectionMode;
-
     constructor() {
-        this.mode = detectConnectionMode();
+        // URL 构建延迟到 connect() 调用时
+    }
 
-        if (this.mode.isRemote) {
-            // 远程模式: 连接 Java 服务器
-            // URL 格式: ws://host/ws/dhlr/client/{deviceId}
-            const serverUrl = this.mode.serverUrl;
-            let wsUrl: string;
+    /**
+     * 当前连接模式
+     */
+    get mode(): ConnectionMode {
+        return this._mode;
+    }
 
-            if (serverUrl.startsWith('ws://') || serverUrl.startsWith('wss://')) {
-                // 已经是完整的 WebSocket URL
-                // 需要添加路径 /ws/dhlr/client/{deviceId}
-                const baseUrl = serverUrl.replace(/\/+$/, ''); // 移除末尾斜杠
-                wsUrl = `${baseUrl}/ws/dhlr/client/${this.mode.deviceId}`;
-            } else {
-                // HTTP URL，转换为 WebSocket
-                const wsProtocol = serverUrl.startsWith('https://') ? 'wss://' : 'ws://';
-                const host = serverUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-                wsUrl = `${wsProtocol}${host}/ws/dhlr/client/${this.mode.deviceId}`;
-            }
-
-            this.url = wsUrl;
-            console.log('[WS] 远程模式，连接到 Java 服务器:', this.url);
-        } else {
-            // 本地模式: 连接设备端 Python 服务
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = window.location.host;
-            this.url = `${protocol}//${host}/ws/status`;
-            console.log('[WS] 本地模式，连接到设备端:', this.url);
-        }
+    /**
+     * 当前 WebSocket URL
+     */
+    get url(): string {
+        return this._url;
     }
 
     /**
      * 是否是远程模式
      */
     get isRemoteMode(): boolean {
-        return this.mode.isRemote;
+        return this._mode.isRemote;
+    }
+
+    /**
+     * 重新配置连接参数（供外部调用）
+     */
+    reconfigure(mode: ConnectionMode): void {
+        const newUrl = buildWebSocketUrl(mode);
+        if (this._url !== newUrl) {
+            console.log('[WS] 连接配置已更新:', mode);
+            // 如果 URL 变化，断开现有连接
+            if (this.ws?.readyState === WebSocket.OPEN) {
+                this.disconnect();
+            }
+        }
+        this._mode = mode;
+        this._url = newUrl;
+    }
+
+    /**
+     * 重新检测连接模式并更新 URL
+     */
+    private refreshConnectionMode(): void {
+        const detectedMode = detectConnectionMode();
+        this._mode = detectedMode;
+        this._url = buildWebSocketUrl(detectedMode);
+
+        if (detectedMode.isRemote) {
+            console.log('[WS] 远程模式，连接到 Java 服务器:', this._url);
+        } else {
+            console.log('[WS] 本地模式，连接到设备端:', this._url);
+        }
     }
 
     /**
      * 连接 WebSocket
      */
     connect(): Promise<void> {
+        // 每次连接时重新检测连接模式，确保 URL 是最新的
+        this.refreshConnectionMode();
+
         console.log('[WS] 开始连接...');
         return new Promise((resolve, reject) => {
             if (this.ws?.readyState === WebSocket.OPEN) {
@@ -140,7 +185,7 @@ class WebSocketClient {
 
             try {
                 console.log('[WS] 创建 WebSocket 对象...');
-                this.ws = new WebSocket(this.url);
+                this.ws = new WebSocket(this._url);
                 console.log('[WS] WebSocket 对象已创建, readyState:', this.ws.readyState);
             } catch (e) {
                 console.error('[WS] 创建 WebSocket 失败:', e);
