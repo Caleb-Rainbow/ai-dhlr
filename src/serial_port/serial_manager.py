@@ -260,7 +260,7 @@ class SerialManager:
                             timeout=timeout
                         )
                     except asyncio.TimeoutError:
-                        self._logger.warning(f"命令响应超时: {command.type.name}")
+                        pass
                 
                 # 命令完成
                 if command.future and not command.future.done():
