@@ -2,7 +2,7 @@
 import { ref, onMounted, nextTick } from 'vue';
 import { ws } from '../api/ws';
 import type { LogFile } from '../types';
-import { RefreshCw } from 'lucide-vue-next';
+import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 
 const logFiles = ref<LogFile[]>([]);
 const currentLog = ref('');
@@ -13,7 +13,12 @@ const contentLoading = ref(false);
 const logContentRef = ref<HTMLElement | null>(null);
 const shouldScrollToBottom = ref(false);
 
-// 滚动到底部
+// Pagination state
+const currentPage = ref(1);
+const totalPages = ref(1);
+const totalLines = ref(0);
+const pageSize = 500;
+
 const scrollToBottom = () => {
   nextTick(() => {
     if (logContentRef.value) {
@@ -22,7 +27,14 @@ const scrollToBottom = () => {
   });
 };
 
-// Transition 动画完成后的回调
+const scrollToTop = () => {
+  nextTick(() => {
+    if (logContentRef.value) {
+      logContentRef.value.scrollTop = 0;
+    }
+  });
+};
+
 const onContentEnter = () => {
   if (shouldScrollToBottom.value) {
     scrollToBottom();
@@ -32,7 +44,6 @@ const onContentEnter = () => {
 
 const loadFiles = async () => {
   try {
-    // 后端返回文件列表
     const files = await ws.request<Array<{ name: string; size: number; mtime: number }>>('get_log_files');
     logFiles.value = files.map(f => ({ name: f.name, size: f.size, modified: f.mtime }));
     if (logFiles.value.length > 0 && !currentFileName.value) {
@@ -45,33 +56,49 @@ const loadFiles = async () => {
   }
 };
 
-const selectLog = async (filename: string) => {
+const selectLog = async (filename: string, page = 1) => {
   currentFileName.value = filename;
   loading.value = true;
   contentLoading.value = true;
-  // 设置标志，在 Transition 动画完成后滚动到底部
-  shouldScrollToBottom.value = true;
+  shouldScrollToBottom.value = (page === 1);
   try {
-    const res = await ws.request<{ content: string; filename: string; total_lines: number }>('get_log_content', { filename });
+    const res = await ws.request<{
+      content: string;
+      filename: string;
+      total_lines: number;
+      page: number;
+      total_pages: number;
+    }>('get_log_content', { filename, page, page_size: pageSize });
+
     currentLog.value = res.content || '日志为空';
+    currentPage.value = res.page;
+    totalPages.value = res.total_pages;
+    totalLines.value = res.total_lines;
   } catch (e) {
     currentLog.value = '读取失败';
   } finally {
     loading.value = false;
-    // 延迟隐藏加载状态，让动画更流畅
     setTimeout(() => {
       contentLoading.value = false;
-      // 如果内容已经显示（非初始加载），直接滚动
       if (!initialLoading.value && logContentRef.value) {
-        scrollToBottom();
+        if (currentPage.value >= totalPages.value) {
+          scrollToBottom();
+        } else {
+          scrollToTop();
+        }
       }
     }, 100);
   }
 };
 
+const goToPage = (page: number) => {
+  if (page < 1 || page > totalPages.value || page === currentPage.value) return;
+  selectLog(currentFileName.value, page);
+};
+
 const refresh = () => {
     loadFiles();
-    if(currentFileName.value) selectLog(currentFileName.value);
+    if(currentFileName.value) selectLog(currentFileName.value, currentPage.value);
 };
 
 onMounted(async () => {
@@ -109,9 +136,9 @@ onMounted(async () => {
         <!-- File Selector and Actions -->
         <div class="grid grid-cols-[1fr_auto] gap-3">
           <div class="relative group">
-            <select 
-              :value="currentFileName" 
-              @change="(e) => selectLog((e.target as HTMLSelectElement).value)"
+            <select
+              :value="currentFileName"
+              @change="(e) => { const v = (e.target as HTMLSelectElement).value; currentPage = 1; selectLog(v, 1); }"
               class="w-full backdrop-blur-md rounded-2xl px-4 py-3.5 border text-sm outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer text-text-primary"
               style="background: var(--theme-bg-input); border-color: var(--theme-border-input);"
             >
@@ -156,11 +183,47 @@ onMounted(async () => {
                   </div>
                 </div>
               </Transition>
-              
+
               <!-- Log Content with Animation -->
               <Transition name="slide-fade" mode="out-in">
-                <pre :key="currentFileName" class="font-mono text-[11px] text-text-secondary whitespace-pre-wrap break-all leading-relaxed">{{ currentLog }}</pre>
+                <pre :key="`${currentFileName}-${currentPage}`" class="font-mono text-[11px] text-text-secondary whitespace-pre-wrap break-all leading-relaxed">{{ currentLog }}</pre>
               </Transition>
+           </div>
+           <!-- Pagination -->
+           <div v-if="totalPages > 1" class="px-4 py-2.5 border-t flex items-center justify-between" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+              <span class="text-[10px] text-text-muted">
+                共 {{ totalLines }} 行，第 {{ currentPage }} / {{ totalPages }} 页
+              </span>
+              <div class="flex items-center gap-1">
+                <button
+                  @click="goToPage(currentPage - 1)"
+                  :disabled="currentPage <= 1"
+                  class="p-1.5 rounded-lg text-text-muted hover:text-text-primary transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft class="w-4 h-4" />
+                </button>
+                <template v-for="p in totalPages" :key="p">
+                  <button
+                    v-if="totalPages <= 7 || p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1"
+                    @click="goToPage(p)"
+                    class="min-w-[28px] h-7 rounded-lg text-xs font-medium transition-all"
+                    :class="p === currentPage ? 'bg-indigo-500/20 text-indigo-400' : 'text-text-muted hover:text-text-primary hover:bg-white/5'"
+                  >
+                    {{ p }}
+                  </button>
+                  <span
+                    v-else-if="totalPages > 7 && (p === currentPage - 2 || p === currentPage + 2)"
+                    class="text-[10px] text-text-muted px-0.5"
+                  >...</span>
+                </template>
+                <button
+                  @click="goToPage(currentPage + 1)"
+                  :disabled="currentPage >= totalPages"
+                  class="p-1.5 rounded-lg text-text-muted hover:text-text-primary transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight class="w-4 h-4" />
+                </button>
+              </div>
            </div>
         </div>
       </div>

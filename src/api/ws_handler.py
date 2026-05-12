@@ -29,7 +29,7 @@ class WSResponse:
     success: bool
     data: Any = None
     error: Optional[str] = None
-    
+
     def to_dict(self) -> dict:
         result = {
             "type": "response",
@@ -602,7 +602,7 @@ class WSHandler:
 
         # 如果摄像头离线或错误状态，尝试触发重连
         if not camera.is_online:
-            self.logger.info(f"预览时检测到摄像头离线，触发重连: {camera_id}")
+            logger.info(f"预览时检测到摄像头离线，触发重连: {camera_id}")
             camera.reconnect()
             # 等待短暂时间让重连开始
             import asyncio
@@ -616,22 +616,22 @@ class WSHandler:
 
         # 如果帧为空，等待帧可用（最多等待2秒）
         if frame is None:
-            self.logger.debug(f"帧缓冲区为空，等待帧可用: {camera_id}")
+            logger.debug(f"帧缓冲区为空，等待帧可用: {camera_id}")
             import asyncio
             for i in range(20):  # 最多等待2秒
                 await asyncio.sleep(0.1)
                 frame = camera.get_snapshot()
                 if frame is not None:
-                    self.logger.debug(f"帧可用，等待了 {(i+1) * 100}ms: {camera_id}")
+                    logger.debug(f"帧可用，等待了 {(i+1) * 100}ms: {camera_id}")
                     break
 
         if frame is None:
-            self.logger.warning(f"获取预览失败，帧缓冲区为空: {camera_id}")
+            logger.warning(f"获取预览失败，帧缓冲区为空: {camera_id}")
             raise ValueError("获取预览失败，摄像头可能正在初始化")
 
         # 检查帧尺寸是否有效
         if frame.shape[0] == 0 or frame.shape[1] == 0:
-            self.logger.warning(f"帧尺寸无效: {camera_id}, shape={frame.shape}")
+            logger.warning(f"帧尺寸无效: {camera_id}, shape={frame.shape}")
             raise ValueError("获取预览失败，帧尺寸无效")
 
         # 使用帧缓存进行编码（减少多客户端重复编码开销）
@@ -639,10 +639,10 @@ class WSHandler:
         if result:
             base64_str, from_cache = result
             if from_cache:
-                self.logger.debug(f"预览帧从缓存获取: {camera_id}")
+                logger.debug(f"预览帧从缓存获取: {camera_id}")
             return {"image": f"data:image/jpeg;base64,{base64_str}"}
 
-        self.logger.error(f"帧编码失败: {camera_id}")
+        logger.error(f"帧编码失败: {camera_id}")
         raise ValueError("获取预览失败，帧编码错误")
     
     async def _get_snapshot_image(self, params: dict) -> dict:
@@ -1027,33 +1027,46 @@ class WSHandler:
         return files
     
     async def _get_log_content(self, params: dict) -> dict:
-        """读取日志内容"""
+        """读取日志内容，支持分页"""
         from ..utils.logger import event_logger
         filename = params.get("filename")
-        lines = params.get("lines", 200)
-        
+        page = max(1, params.get("page", 1))
+        page_size = min(1000, max(100, params.get("page_size", 500)))
+
         log_dir = event_logger._log_dir
         if not log_dir or not log_dir.exists():
-            return {"content": "日志目录不存在"}
-        
+            return {"content": "日志目录不存在", "total_lines": 0, "page": 1, "total_pages": 0}
+
         if not filename:
             files = sorted(log_dir.glob("*.log"), reverse=True)
             if not files:
-                return {"content": "暂无日志文件"}
+                return {"content": "暂无日志文件", "total_lines": 0, "page": 1, "total_pages": 0}
             file_path = files[0]
         else:
             file_path = log_dir / filename
             if not file_path.exists():
-                return {"content": "日志文件不存在"}
-        
+                return {"content": "日志文件不存在", "total_lines": 0, "page": 1, "total_pages": 0}
+
         with open(file_path, "r", encoding="utf-8") as f:
             all_lines = f.readlines()
-            content = "".join(all_lines[-lines:])
-            return {
-                "filename": file_path.name,
-                "content": content,
-                "total_lines": len(all_lines)
-            }
+
+        total_lines = len(all_lines)
+        total_pages = max(1, (total_lines + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        start = total_lines - page * page_size
+        end = total_lines - (page - 1) * page_size
+        start = max(0, start)
+        page_lines = all_lines[start:end]
+        content = "".join(page_lines)
+
+        return {
+            "filename": file_path.name,
+            "content": content,
+            "total_lines": total_lines,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     
     # ==================== 串口处理器 ====================
     
