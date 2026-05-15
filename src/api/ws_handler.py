@@ -1564,8 +1564,8 @@ class WSHandler:
 
         try:
             result = subprocess.run(
-                ["sudo", "-S", "tee", self._OTG_MODE_PATH],
-                input=f"{self._SUDO_PASSWORD}\n{mode}".encode(),
+                ["sudo", "-S", "sh", "-c", f"echo {mode} > {self._OTG_MODE_PATH}"],
+                input=self._SUDO_PASSWORD.encode(),
                 capture_output=True,
                 timeout=5,
             )
