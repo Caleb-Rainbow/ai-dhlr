@@ -125,6 +125,10 @@ class WSHandler:
             "get_gpio_pins": self._get_gpio_pins,
             "get_gpio_config": self._get_gpio_config,
             "update_gpio_config": self._update_gpio_config,
+
+            # USB OTG 模式
+            "get_usb_otg_mode": self._get_usb_otg_mode,
+            "set_usb_otg_mode": self._set_usb_otg_mode,
             
             # 系统更新
             "trigger_update": self._trigger_update,
@@ -1521,6 +1525,43 @@ class WSHandler:
             logger.warning(f"重新加载 GPIO 配置失败: {e}")
         
         return {"message": "GPIO 配置已更新"}
+
+    # ==================== USB OTG 模式处理器 ====================
+
+    _OTG_MODE_PATH = "/sys/devices/platform/fe8a0000.usb2-phy/otg_mode"
+
+    async def _get_usb_otg_mode(self, params: dict) -> dict:
+        """获取当前 USB OTG 模式"""
+        try:
+            with open(self._OTG_MODE_PATH, "r") as f:
+                mode = f.read().strip()
+            return {"mode": mode}
+        except FileNotFoundError:
+            raise ValueError("当前设备不支持 USB OTG 模式切换")
+        except PermissionError:
+            raise ValueError("无权限读取 USB OTG 模式，请以 root 用户运行")
+        except Exception as e:
+            logger.error(f"读取 USB OTG 模式失败: {e}")
+            raise ValueError(f"读取 USB OTG 模式失败: {e}")
+
+    async def _set_usb_otg_mode(self, params: dict) -> dict:
+        """设置 USB OTG 模式"""
+        mode = params.get("mode")
+        if mode not in ("host", "peripheral"):
+            raise ValueError("无效的 USB OTG 模式，仅支持 'host' 或 'peripheral'")
+
+        try:
+            with open(self._OTG_MODE_PATH, "w") as f:
+                f.write(mode)
+            logger.info(f"USB OTG 模式已切换为: {mode}")
+            return {"mode": mode, "message": f"已切换为 {mode} 模式"}
+        except FileNotFoundError:
+            raise ValueError("当前设备不支持 USB OTG 模式切换")
+        except PermissionError:
+            raise ValueError("无权限设置 USB OTG 模式，请以 root 用户运行")
+        except Exception as e:
+            logger.error(f"设置 USB OTG 模式失败: {e}")
+            raise ValueError(f"设置 USB OTG 模式失败: {e}")
 
 
 # 全局处理器实例

@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
 import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig, GpioConfig } from '../types';
-import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb, Package } from 'lucide-vue-next';
+import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb, Package, Usb } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -71,6 +71,10 @@ const gpioConfig = ref<GpioConfig>({
 // 可用GPIO引脚列表
 const gpioPins = ref<string[]>([]);
 const loadingGpioPins = ref(false);
+
+// USB OTG 模式
+const usbOtgMode = ref<'host' | 'peripheral'>('host');
+const switchingUsbOtg = ref(false);
 
 // 可用串口列表
 const serialPorts = ref<Array<{ device: string; name: string; description: string; hwid: string }>>([]);
@@ -192,6 +196,12 @@ const loadData = async () => {
     await loadGpioPins();
   } catch (e) { console.error('Failed to load gpio config', e); }
 
+  // 加载 USB OTG 模式
+  try {
+    const otgData = await ws.request<{ mode: 'host' | 'peripheral' }>('get_usb_otg_mode');
+    usbOtgMode.value = otgData.mode;
+  } catch (e) { console.error('Failed to load USB OTG mode', e); }
+
   // 加载监测模式配置
   try {
     const modeData = await ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode');
@@ -225,6 +235,20 @@ const saveGpioConfig = async () => {
     alert('保存GPIO配置失败: ' + (e.message || e));
   } finally {
     savingGpio.value = false;
+  }
+};
+
+// USB OTG 模式切换
+const toggleUsbOtgMode = async () => {
+  const newMode = usbOtgMode.value === 'host' ? 'peripheral' : 'host';
+  switchingUsbOtg.value = true;
+  try {
+    const result = await ws.request<{ mode: string; message: string }>('set_usb_otg_mode', { mode: newMode });
+    usbOtgMode.value = result.mode as 'host' | 'peripheral';
+  } catch (e: any) {
+    alert('切换 USB OTG 模式失败: ' + (e.message || e));
+  } finally {
+    switchingUsbOtg.value = false;
   }
 };
 
@@ -897,6 +921,45 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- USB OTG Mode - USB 模式切换 -->
+    <div
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+      <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+        <Usb class="w-4 h-4" /> USB OTG 模式
+      </h3>
+
+      <div class="flex items-center justify-between p-4 rounded-2xl"
+        style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center"
+            :class="usbOtgMode === 'host' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'">
+            <Usb class="w-5 h-5" />
+          </div>
+          <div>
+            <div class="font-medium text-text-primary">
+              {{ usbOtgMode === 'host' ? 'Host 模式（主设备）' : 'Device 模式（从设备）' }}
+            </div>
+            <div class="text-xs text-text-muted">
+              {{ usbOtgMode === 'host' ? '可连接 U 盘、鼠标等外设' : '连接电脑时被识别为 USB 设备' }}
+            </div>
+          </div>
+        </div>
+        <button @click="toggleUsbOtgMode" :disabled="switchingUsbOtg"
+          class="relative inline-flex items-center cursor-pointer disabled:opacity-50">
+          <div class="w-12 h-6 rounded-full transition-colors duration-300"
+            :class="usbOtgMode === 'host' ? 'bg-blue-500' : 'bg-purple-500'">
+            <div class="absolute top-[2px] w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 flex items-center justify-center"
+              :class="usbOtgMode === 'host' ? 'left-[2px]' : 'left-[26px]'">
+              <Loader v-if="switchingUsbOtg" class="w-3 h-3 animate-spin text-gray-400" />
+            </div>
+          </div>
+        </button>
+      </div>
+
+      <div class="text-xs text-text-muted leading-relaxed">
+        切换 USB 工作模式。Host 模式下设备作为主控，可接入 U 盘、鼠标等外设；Device 模式下设备作为从设备，通过 USB 连接电脑时会被识别为 gadget 设备。
+      </div>
+    </div>
 
     <!-- Zone Mode Settings - 监测模式设置 -->
     <div
