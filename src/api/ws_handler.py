@@ -1529,36 +1529,57 @@ class WSHandler:
     # ==================== USB OTG 模式处理器 ====================
 
     _OTG_MODE_PATH = "/sys/devices/platform/fe8a0000.usb2-phy/otg_mode"
+    _SUDO_PASSWORD = "linaro"
 
     async def _get_usb_otg_mode(self, params: dict) -> dict:
         """获取当前 USB OTG 模式"""
+        import subprocess
         try:
-            with open(self._OTG_MODE_PATH, "r") as f:
-                mode = f.read().strip()
-            return {"mode": mode}
+            result = subprocess.run(
+                ["sudo", "-S", "cat", self._OTG_MODE_PATH],
+                input=self._SUDO_PASSWORD.encode(),
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.decode().strip()
+                if "No such file" in stderr:
+                    raise ValueError("当前设备不支持 USB OTG 模式切换")
+                raise ValueError(f"读取失败: {stderr}")
+            return {"mode": result.stdout.decode().strip()}
         except FileNotFoundError:
-            raise ValueError("当前设备不支持 USB OTG 模式切换")
-        except PermissionError:
-            raise ValueError("无权限读取 USB OTG 模式，请以 root 用户运行")
+            raise ValueError("当前设备不支持 sudo 命令")
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"读取 USB OTG 模式失败: {e}")
             raise ValueError(f"读取 USB OTG 模式失败: {e}")
 
     async def _set_usb_otg_mode(self, params: dict) -> dict:
         """设置 USB OTG 模式"""
+        import subprocess
         mode = params.get("mode")
         if mode not in ("host", "peripheral"):
             raise ValueError("无效的 USB OTG 模式，仅支持 'host' 或 'peripheral'")
 
         try:
-            with open(self._OTG_MODE_PATH, "w") as f:
-                f.write(mode)
+            result = subprocess.run(
+                ["sudo", "-S", "tee", self._OTG_MODE_PATH],
+                input=f"{self._SUDO_PASSWORD}\n{mode}".encode(),
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.decode().strip()
+                if "No such file" in stderr:
+                    raise ValueError("当前设备不支持 USB OTG 模式切换")
+                raise ValueError(f"设置失败: {stderr}")
             logger.info(f"USB OTG 模式已切换为: {mode}")
             return {"mode": mode, "message": f"已切换为 {mode} 模式"}
         except FileNotFoundError:
-            raise ValueError("当前设备不支持 USB OTG 模式切换")
-        except PermissionError:
-            raise ValueError("无权限设置 USB OTG 模式，请以 root 用户运行")
+            raise ValueError("当前设备不支持 sudo 命令")
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"设置 USB OTG 模式失败: {e}")
             raise ValueError(f"设置 USB OTG 模式失败: {e}")
