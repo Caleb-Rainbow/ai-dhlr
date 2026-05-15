@@ -436,7 +436,9 @@ class SerialManager:
                 # 轮询所有分区电流值（通过命令队列依次执行）
                 with self._lock:
                     zones = list(self._zone_currents.values())
-                
+
+                # 对相同 serial_index 去重，避免重复发送 Modbus 命令
+                polled_indices: set[int] = set()
                 for zone_info in zones:
                     if not self._running:
                         break
@@ -444,6 +446,10 @@ class SerialManager:
                     # 检查灶台是否启用，跳过已禁用的灶台
                     if not self._is_zone_enabled(zone_info.zone_id):
                         continue
+
+                    if zone_info.serial_index in polled_indices:
+                        continue
+                    polled_indices.add(zone_info.serial_index)
 
                     # 创建获取电流命令并加入队列
                     command = SerialCommand(
@@ -463,16 +469,20 @@ class SerialManager:
                 # 轮询所有分区温度值（通过命令队列依次执行）
                 with self._lock:
                     temp_zones = list(self._zone_temperatures.values())
-                
+
+                # 对相同 sensor_address 去重
+                polled_sensors: set[int] = set()
                 for temp_info in temp_zones:
                     if not self._running:
                         break
 
-                    # 检查灶台是否启用，跳过已禁用的灶台
                     if not self._is_zone_enabled(temp_info.zone_id):
                         continue
 
-                    # 创建获取温度命令并加入队列
+                    if temp_info.sensor_address in polled_sensors:
+                        continue
+                    polled_sensors.add(temp_info.sensor_address)
+
                     command = SerialCommand(
                         type=CommandType.GET_TEMPERATURE,
                         index=temp_info.sensor_address,
@@ -579,7 +589,6 @@ class SerialManager:
                             self._on_current_update(zone_id, value, info.is_fire_on)
                         except Exception as e:
                             self._logger.error(f"电流更新回调错误: {e}")
-                    break
     
     def _update_temperature(self, address: int, temperature: float):
         """更新温度值"""
@@ -596,7 +605,6 @@ class SerialManager:
                             self._on_temperature_update(zone_id, temperature)
                         except Exception as e:
                             self._logger.error(f"温度更新回调错误: {e}")
-                    break
     
     # ==================== 温度传感器接口 ====================
     
