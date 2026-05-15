@@ -1541,6 +1541,54 @@ Content-Type: application/json
 
 ***
 
+### USB OTG 模式
+
+#### get_usb_otg_mode — 获取当前 USB OTG 模式
+
+**参数：** 无
+
+**返回值：**
+
+```json
+{
+    "mode": "host"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| mode | string | 当前模式：`"host"`（主设备）或 `"peripheral"`（从设备） |
+
+**错误：**
+- 设备不支持：`"当前设备不支持 USB OTG 模式切换"`
+- 权限不足：`"无权限读取 USB OTG 模式，请以 root 用户运行"`
+
+#### set_usb_otg_mode — 设置 USB OTG 模式
+
+通过 `sudo -S` 提权写入 `/sys/devices/platform/fe8a0000.usb2-phy/otg_mode` 切换 USB OTG 工作模式。
+
+**参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| mode | string | 是 | `"host"`（主设备，可接 U 盘、鼠标等）或 `"peripheral"`（从设备，连接电脑时被识别为 gadget） |
+
+**返回值：**
+
+```json
+{
+    "mode": "peripheral",
+    "message": "已切换为 peripheral 模式"
+}
+```
+
+**错误：**
+- 参数无效：`"无效的 USB OTG 模式，仅支持 'host' 或 'peripheral'"`
+- 设备不支持：`"当前设备不支持 USB OTG 模式切换"`
+- 权限不足：`"无权限设置 USB OTG 模式，请以 root 用户运行"`
+
+***
+
 ### 巡检操作
 
 > **异步执行说明：** `start_patrol`、`patrol_self_check`、`patrol_alarm_demo`、`patrol_force_warning`、`patrol_force_alarm`、`patrol_force_cutoff` 均在后台线程中异步执行。调用后立即返回 `{success: true, message: "..."}`，实际执行进度通过 `patrol_event` 推送。`patrol_cutoff_zone` 也会同步上报报警记录到远程服务器。
