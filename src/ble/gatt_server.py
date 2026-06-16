@@ -117,3 +117,31 @@ class GattServer:
 
         await server.start()
         logger.info("BLE 配网服务已广播: name=%s advertising=%s", self._name, await server.is_advertising())
+        # 看门狗：bless 在中央断开后不会自动恢复广播，需主动重广播
+        asyncio.create_task(self._advertising_watchdog())
+
+    async def _advertising_watchdog(self) -> None:
+        """bless 断开后不自动恢复广播；检测到断开或广播停时 stop()+start() 重广播。"""
+        was_connected = False
+        while True:
+            await asyncio.sleep(5)
+            try:
+                if self._server is None:
+                    continue
+                connected = await self._server.is_connected()
+                advertising = await self._server.is_advertising()
+                just_disconnected = was_connected and not connected
+                stalled = (not advertising) and (not connected)
+                if just_disconnected or stalled:
+                    logger.info(
+                        "[watchdog] 重新广播 (connected=%s advertising=%s)",
+                        connected, advertising,
+                    )
+                    try:
+                        await self._server.stop()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("[watchdog] stop 忽略: %s", e)
+                    await self._server.start()
+                was_connected = connected
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[watchdog] 异常: %s", e)
