@@ -174,7 +174,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
+
+    # 内部配网接口（仅本机回环；供 ai-dhlr-ble.service 下发 remote/system 配置）
+    from .internal_provisioning import router as internal_router
+    app.include_router(internal_router)
+
     # WebSocket端点
     @app.websocket("/ws/status")
     async def websocket_endpoint(websocket: WebSocket):
