@@ -14,6 +14,8 @@ if [ $? -eq 0 ]; then
     echo "代码拉取成功，正在重启服务..."
     # 重启 Python 服务
     sudo systemctl restart ai-dhlr.service
+    # 重启蓝牙配网服务（未安装/未启用时忽略）
+    sudo systemctl try-restart ai-dhlr-ble.service 2>/dev/null || true
 else
     echo "代码更新失败，请检查网络或 Git 配置。"
     exit 1

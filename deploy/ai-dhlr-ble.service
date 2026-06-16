@@ -1,0 +1,15 @@
+[Unit]
+Description=AI DHLR BLE Provisioning Service (蓝牙配网)
+After=bluetooth.service ai-dhlr.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/linaro/ai-dhlr
+ExecStart=/home/linaro/miniforge3/envs/dhlr_env/bin/python -m src.ble
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

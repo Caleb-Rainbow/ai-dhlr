@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,12 +22,30 @@ from .service import ProvisioningService
 
 logger = logging.getLogger("ble")
 
+_MAC_RE = re.compile(r"((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})")
+
 
 def _bt_address() -> str:
+    """取 hci0 蓝牙地址（sysfs → hciconfig → btmgmt 多级回退）。"""
+    # 1) sysfs
     try:
-        return Path("/sys/class/bluetooth/hci0/address").read_text().strip().upper()
+        p = Path("/sys/class/bluetooth/hci0/address")
+        if p.exists():
+            v = p.read_text().strip().upper()
+            if _MAC_RE.fullmatch(v):
+                return v
     except Exception:
-        return "00:00:00:00:00:00"
+        pass
+    # 2) hciconfig / btmgmt
+    for cmd in (["hciconfig", "hci0"], ["btmgmt", "info"]):
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+            m = _MAC_RE.search(out)
+            if m:
+                return m.group(1).upper()
+        except Exception:
+            continue
+    return "00:00:00:00:00:00"
 
 
 def _load_fw_and_name() -> tuple[str, str]:
