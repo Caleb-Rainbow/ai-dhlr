@@ -63,15 +63,24 @@ class GattServer:
 
     # ---------------------------- 状态通知 ---------------------------- #
     async def notify(self, obj: dict) -> None:
-        """分帧并通过 STATUS 特征值下发通知（best-effort）。"""
+        """分帧并通过 STATUS 特征值下发通知（best-effort）。
+
+        bless 的 update_value(service_uuid, char_uuid) 是「读特征值当前值再通知」，
+        故需先把每块 chunk 写入特征值 .value，再 update_value 触发 PropertiesChanged。
+        """
         if self._server is None:
             return
         try:
+            char = self._server.get_characteristic(P.STATUS_UUID)
+            if char is None:
+                logger.warning("[notify] STATUS 特征值未找到，无法通知")
+                return
             self._seq = (self._seq + 1) & 0xFFFF
             chunks = P.encode_message(self._seq, obj, self._mtu)
             logger.info(f"[notify] seq={self._seq} event={obj.get('event')} 分 {len(chunks)} 块")
             for chunk in chunks:
-                self._server.update_value(P.STATUS_UUID, bytearray(chunk))
+                char.value = bytearray(chunk)
+                self._server.update_value(P.SERVICE_UUID, P.STATUS_UUID)
                 await asyncio.sleep(0)
         except Exception as e:  # noqa: BLE001
             logger.warning("notify 失败: %s", e)
