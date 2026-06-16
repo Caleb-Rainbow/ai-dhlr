@@ -14,7 +14,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import protocol as P
 from .dhlr_client import DhlrClient
 from .gatt_server import GattServer
 from .network_applier import NetworkApplier
@@ -70,14 +69,12 @@ async def main() -> None:
     hwid = bt.replace(":", "-").lower()
     suffix = bt.replace(":", "")[-4:]
 
-    device_info = P.build_device_info(
-        type="dhlr", model="ai-dhlr", fw=fw, hwid=hwid, name=friendly
-    )
+    identity = {"type": "dhlr", "model": "ai-dhlr", "fw": fw, "hwid": hwid, "name": friendly}
     adv_name = f"AI-DHLR-{suffix}"
 
     network = NetworkApplier()
     dhlr = DhlrClient()
-    gatt = GattServer(device_info_bytes=device_info, name=adv_name)
+    gatt = GattServer(identity=identity, name=adv_name)
     service = ProvisioningService(network, dhlr, gatt.notify)
     gatt.bind_service(service)
 

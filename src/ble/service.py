@@ -142,7 +142,22 @@ class ProvisioningService:
             await self._error(cid, "busy", f"cannot cancel state={self._state}")
 
     async def _do_get_config(self, cid: int) -> None:
-        # TODO: 读取设备当前 remote/system（需 dhlr 提供只读接口）；v1 返回最近一次 set_config
-        await self._notify(
-            {"event": "current_config", "id": cid, "config": self._pending_config or {}}
-        )
+        # 返回设备当前 remote/system 配置（读 config.yaml），供 App 回填表单
+        config: dict = {}
+        try:
+            from src.utils.config import config_manager
+            cfg = config_manager.config
+            config = {
+                "remote": {
+                    "enabled": cfg.remote.enabled,
+                    "server_url": cfg.remote.server_url,
+                    "token": cfg.remote.token,
+                },
+                "system": {
+                    "name": cfg.system.name,
+                    "device_id": cfg.system.device_id,
+                },
+            }
+        except Exception as e:
+            logger.warning(f"读取当前配置失败: {e}")
+        await self._notify({"event": "current_config", "id": cid, "config": config})

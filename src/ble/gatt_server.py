@@ -21,6 +21,7 @@ from bless import (
 )
 
 from . import protocol as P
+from .network_applier import current_network_status
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +29,11 @@ logger = logging.getLogger(__name__)
 class GattServer:
     def __init__(
         self,
-        device_info_bytes: bytes,
+        identity: dict,
         name: str,
         mtu: int = P.DEFAULT_MTU,
     ) -> None:
-        self._device_info = bytearray(device_info_bytes)
+        self._identity = identity
         self._name = name
         self._mtu = mtu
         self._decoder = P.MessageDecoder()
@@ -46,7 +47,8 @@ class GattServer:
     # ---------------------------- bless 回调 ---------------------------- #
     def _read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
         if str(characteristic.uuid) == P.DEVICE_INFO_UUID:
-            return bytearray(self._device_info)
+            # 每次读取动态拼入当前网络状态（IP/上行类型会随配网变化）
+            return bytearray(P.build_device_info(**self._identity, network=current_network_status()))
         return bytearray(b"")
 
     def _write(self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs) -> None:
@@ -97,7 +99,7 @@ class GattServer:
         await server.add_new_characteristic(
             P.SERVICE_UUID, P.DEVICE_INFO_UUID,
             GATTCharacteristicProperties.read,
-            bytearray(self._device_info),
+            bytearray(P.build_device_info(**self._identity, network=current_network_status())),
             GATTAttributePermissions.readable,
         )
         await server.add_new_characteristic(

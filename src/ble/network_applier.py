@@ -89,6 +89,54 @@ def _extract_ip4_addr(text: str) -> Optional[str]:
     return None
 
 
+def _iface_ipv4(runner: Runner, iface: str) -> Optional[str]:
+    """`ip -4 -o addr show <iface>` 取首个 IPv4。"""
+    rc, out = runner(["ip", "-4", "-o", "addr", "show", iface])
+    for line in out.splitlines():
+        if "inet " in line:
+            return line.split("inet ")[1].split()[0].split("/")[0]
+    return None
+
+
+def _wlan_active_mode(runner: Runner) -> tuple[Optional[str], Optional[str]]:
+    """返回 wlan0 活动连接的 (mode, connection_name)。mode: infrastructure(STA)/ap(热点)。"""
+    rc, out = runner(["nmcli", "-t", "-f", "NAME,DEVICE,TYPE,MODE", "connection", "show", "--active"])
+    for line in out.splitlines():
+        name, ctype, dev, mode = (line.split(":") + ["", "", "", ""])[:4]
+        if dev == DEFAULT_IFACE:
+            return mode, name
+    return None, None
+
+
+def _wifi_ssid(runner: Runner, conn_name: Optional[str]) -> Optional[str]:
+    """取 STA 连接的 SSID（nmcli 连接属性）。"""
+    if not conn_name:
+        return None
+    rc, out = runner(["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", conn_name])
+    s = out.strip()
+    return s if s and s != "--" else None
+
+
+def current_network_status(runner: Runner = _default_runner) -> dict:
+    """当前网络状态（用于 DEVICE_INFO 展示）：
+    {uplink: "ethernet"|"wifi"|"none", ethernet:{ip}|null, wifi:{ip,ssid}|null, hotspot:{ip}|null}
+    """
+    eth_ip = _iface_ipv4(runner, "eth0")
+    wlan_ip = _iface_ipv4(runner, DEFAULT_IFACE)
+    mode, conn_name = _wlan_active_mode(runner)
+
+    wifi = None
+    hotspot = None
+    if mode == "infrastructure" and wlan_ip:
+        wifi = {"ip": wlan_ip, "ssid": _wifi_ssid(runner, conn_name)}
+    elif mode in ("ap", "hotspot") and wlan_ip:
+        hotspot = {"ip": wlan_ip}
+
+    ethernet = {"ip": eth_ip} if eth_ip else None
+    uplink = "wifi" if wifi else ("ethernet" if ethernet else "none")
+    return {"uplink": uplink, "ethernet": ethernet, "wifi": wifi, "hotspot": hotspot}
+
+
 class NetworkApplier:
     """WiFi 扫描与切网。"""
 

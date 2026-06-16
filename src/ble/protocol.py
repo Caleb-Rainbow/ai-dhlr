@@ -168,9 +168,10 @@ def build_device_info(
     hwid: str,
     name: str,
     proto: int = PROTOCOL_VERSION,
+    network: Any = None,
 ) -> bytes:
-    """生成 DEVICE_INFO 特征值的裸 JSON 字节。"""
-    return json.dumps(
-        {"type": type, "model": model, "fw": fw, "hwid": hwid, "name": name, "proto": proto},
-        ensure_ascii=False,
-    ).encode("utf-8")
+    """生成 DEVICE_INFO 特征值的裸 JSON 字节。network 为当前网络状态(可选)。"""
+    data: dict = {"type": type, "model": model, "fw": fw, "hwid": hwid, "name": name, "proto": proto}
+    if network is not None:
+        data["network"] = network
+    return json.dumps(data, ensure_ascii=False).encode("utf-8")
