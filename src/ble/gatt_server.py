@@ -52,9 +52,14 @@ class GattServer:
     def _write(self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs) -> None:
         if str(characteristic.uuid) != P.REQUEST_UUID:
             return
+        logger.info(f"[write] 收到 {len(value)} 字节写入 REQUEST")
         for seq, obj in self._decoder.feed(bytes(value)):
+            logger.info(f"[write] 解析出帧 seq={seq} obj_keys={list(obj.keys())} cmd={obj.get('cmd')}")
             if self._service is not None:
-                asyncio.create_task(self._service.handle(seq, obj))
+                try:
+                    asyncio.create_task(self._service.handle(seq, obj))
+                except RuntimeError as e:
+                    logger.error(f"[write] 派发失败(无事件循环?): {e}")
 
     # ---------------------------- 状态通知 ---------------------------- #
     async def notify(self, obj: dict) -> None:
@@ -63,7 +68,9 @@ class GattServer:
             return
         try:
             self._seq = (self._seq + 1) & 0xFFFF
-            for chunk in P.encode_message(self._seq, obj, self._mtu):
+            chunks = P.encode_message(self._seq, obj, self._mtu)
+            logger.info(f"[notify] seq={self._seq} event={obj.get('event')} 分 {len(chunks)} 块")
+            for chunk in chunks:
                 self._server.update_value(P.STATUS_UUID, bytearray(chunk))
                 await asyncio.sleep(0)
         except Exception as e:  # noqa: BLE001

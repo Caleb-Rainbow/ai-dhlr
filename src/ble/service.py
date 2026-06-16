@@ -63,6 +63,7 @@ class ProvisioningService:
         async with self._lock:
             cid = command.get("id", seq)
             cmd = command.get("cmd")
+            logger.info(f"[cmd] seq={seq} cid={cid} cmd={cmd}")
             try:
                 if cmd == "scan_wifi":
                     await self._do_scan(cid)
@@ -85,7 +86,9 @@ class ProvisioningService:
             await self._error(cid, "busy", f"state={self._state}")
             return
         await self._state_update(cid, SCANNING)
+        logger.info(f"[scan] cid={cid} 开始 nmcli 扫描")
         networks = await asyncio.to_thread(self._network.scan)
+        logger.info(f"[scan] cid={cid} 扫到 {len(networks)} 个 AP，发送 scan_results")
         await self._scan_results(cid, networks)
         await self._state_update(cid, IDLE)
 
