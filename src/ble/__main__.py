@@ -47,15 +47,19 @@ def _bt_address() -> str:
     return "00:00:00:00:00:00"
 
 
-def _load_fw_and_name() -> tuple[str, str]:
+def _load_fw_name_device_id() -> tuple[str, str, str]:
     try:
         from src.utils.config import config_manager
 
         cfg = config_manager.config
-        return cfg.system.version or "0.0.0", cfg.system.name or "AI动火离人"
+        return (
+            cfg.system.version or "0.0.0",
+            cfg.system.name or "AI动火离人",
+            getattr(cfg.system, "device_id", "") or "",
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("读取 dhlr 配置失败，使用默认值: %s", e)
-        return "0.0.0", "AI动火离人"
+        return "0.0.0", "AI动火离人", ""
 
 
 async def main() -> None:
@@ -65,12 +69,14 @@ async def main() -> None:
     )
 
     bt = _bt_address()
-    fw, friendly = _load_fw_and_name()
+    fw, friendly, device_id = _load_fw_name_device_id()
     hwid = bt.replace(":", "-").lower()
     suffix = bt.replace(":", "")[-4:]
 
     identity = {"type": "dhlr", "model": "ai-dhlr", "fw": fw, "hwid": hwid, "name": friendly}
-    adv_name = f"AI-DHLR-{suffix}"
+    # 广播名 = 设备ID（约定以 AILRBJ 开头，如 AILRBJ26032502）：手机按前缀匹配并区分多台设备；
+    # 设备ID 缺失时回退到 MAC 后缀（仅未配网/异常兜底，此时不被新前缀匹配）。
+    adv_name = device_id.strip() or f"AI-DHLR-{suffix}"
 
     network = NetworkApplier()
     dhlr = DhlrClient()
