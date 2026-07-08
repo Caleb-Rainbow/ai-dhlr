@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行时产物
+cache/
+logs/
+snapshots/
+
+# 配置(含 token 等敏感信息, 勿入库; 另放 config.example.yaml 作模板)
+config/config.yaml
+
+# 大模型资产(部署时另行下发)
+*.onnx
+*.bin
+
+# IDE / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
