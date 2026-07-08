@@ -82,7 +82,9 @@ class ProvisioningService:
                 await self._error(cid, "internal", str(e))
 
     async def _do_scan(self, cid: int) -> None:
-        if self._state not in (IDLE, SCANNING):
+        # 扫描 WiFi 是只读操作(nmcli scan)，不干扰现有连接；仅在正在切网(APPLYING/CONNECTING)时拒绝。
+        # 必须允许 CONNECTED 状态扫描——否则已联网设备重新配网时首个 scan_wifi 即 busy 失败。
+        if self._state in (APPLYING, CONNECTING):
             await self._error(cid, "busy", f"state={self._state}")
             return
         await self._state_update(cid, SCANNING)

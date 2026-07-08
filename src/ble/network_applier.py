@@ -99,21 +99,33 @@ def _iface_ipv4(runner: Runner, iface: str) -> Optional[str]:
 
 
 def _wlan_active_mode(runner: Runner) -> tuple[Optional[str], Optional[str]]:
-    """返回 wlan0 活动连接的 (mode, connection_name)。mode: infrastructure(STA)/ap(热点)。"""
-    rc, out = runner(["nmcli", "-t", "-f", "NAME,DEVICE,TYPE,MODE", "connection", "show", "--active"])
+    """返回 wlan0 活动连接的 (mode, connection_name)。mode: infrastructure(STA)/ap(热点)。
+
+    MODE 不是 `nmcli connection show` 的合法字段（旧代码 -f NAME,DEVICE,TYPE,MODE 让 nmcli
+    报 "无效字段 MODE" 写到 stderr，runner 合并 stdout+stderr → 解析不到 wlan0 行 → 返回
+    (None,None) → current_network_status 误报无网络，即便 wlan0 已联网）。故分两步：先按
+    NAME,DEVICE 取 wlan0 上的活动连接名，再查该连接的 802-11-wireless.mode 属性。
+    """
+    rc, out = runner(["nmcli", "-t", "-f", "NAME,DEVICE", "connection", "show", "--active"])
+    conn: Optional[str] = None
     for line in out.splitlines():
-        name, ctype, dev, mode = (line.split(":") + ["", "", "", ""])[:4]
+        name, dev = (line.split(":") + ["", ""])[:2]
         if dev == DEFAULT_IFACE:
-            return mode, name
-    return None, None
+            conn = name
+            break
+    if not conn:
+        return None, None
+    rc, out = runner(["nmcli", "-g", "802-11-wireless.mode", "connection", "show", conn])
+    mode = next((ln.strip().lower() for ln in out.splitlines() if ln.strip()), "")
+    return (mode or None), conn
 
 
 def _wifi_ssid(runner: Runner, conn_name: Optional[str]) -> Optional[str]:
-    """取 STA 连接的 SSID（nmcli 连接属性）。"""
+    """取 STA 连接的 SSID（nmcli 连接属性）。取首个非空行——nmcli -g 偶发重复输出同值。"""
     if not conn_name:
         return None
     rc, out = runner(["nmcli", "-g", "802-11-wireless.ssid", "connection", "show", conn_name])
-    s = out.strip()
+    s = next((ln.strip() for ln in out.splitlines() if ln.strip()), "")
     return s if s and s != "--" else None
 
 
