@@ -117,12 +117,20 @@ class GattServer:
 
         await server.start()
         logger.info("BLE 配网服务已广播: name=%s advertising=%s", self._name, await server.is_advertising())
-        # 看门狗：bless 在中央断开后不会自动恢复广播，需主动重广播
+        # 看门狗：bless 广告停滞(停广播且无连接)时主动 stop()+start() 重广播
         asyncio.create_task(self._advertising_watchdog())
 
     async def _advertising_watchdog(self) -> None:
-        """bless 断开后不自动恢复广播；检测到断开或广播停时 stop()+start() 重广播。"""
-        was_connected = False
+        """仅当广告真正停滞(not advertising)且无连接时才 stop()+start() 重广播。
+
+        历史 bug：原逻辑还因「中央断开」(just_disconnected) 触发恢复，而
+        server.stop()+start() 会注销并重新注册整个 GATT 应用
+        (org.bluez.GattApplication1)，导致所有 characteristic 的 attribute
+        handle 被重新分配。中央(手机)若带着缓存的旧服务表重连，首个
+        readCharacteristic(DEVICE_INFO) 会命中失效 handle → 返回
+        GATT_INVALID_HANDLE(status=1)，表现为「偶发连不上、重连又好了」。
+        断开本身不影响广告(is_advertising 仍 True)，无需恢复，故移除该分支。
+        """
         while True:
             await asyncio.sleep(5)
             try:
@@ -130,11 +138,10 @@ class GattServer:
                     continue
                 connected = await self._server.is_connected()
                 advertising = await self._server.is_advertising()
-                just_disconnected = was_connected and not connected
                 stalled = (not advertising) and (not connected)
-                if just_disconnected or stalled:
+                if stalled:
                     logger.info(
-                        "[watchdog] 重新广播 (connected=%s advertising=%s)",
+                        "[watchdog] 广告停滞, 重新广播 (connected=%s advertising=%s)",
                         connected, advertising,
                     )
                     try:
@@ -142,6 +149,5 @@ class GattServer:
                     except Exception as e:  # noqa: BLE001
                         logger.debug("[watchdog] stop 忽略: %s", e)
                     await self._server.start()
-                was_connected = connected
             except Exception as e:  # noqa: BLE001
                 logger.warning("[watchdog] 异常: %s", e)
