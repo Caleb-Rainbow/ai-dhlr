@@ -16,6 +16,28 @@ config/config.yaml
 # 大模型资产(部署时另行下发)
 *.onnx
 *.bin
+*.pt
+*.pth
+*.rknn
+*.tflite
+
+# 压缩归档
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# 崩溃转储
+*.stackdump
+
+# Trae IDE
+.trae/
+
+# 环境变量 / 密钥（保留 *.example 模板）
+.env
+.env.*
+!.env.example
+!.env.*.example
 
 # IDE / 系统
 .idea/
