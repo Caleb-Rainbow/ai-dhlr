@@ -65,8 +65,10 @@ def chunk_size(mtu: int) -> int:
 
 def encode_frame(seq: int, payload: bytes) -> bytes:
     """编码单帧：magic|seq|len|payload|crc16。"""
-    if len(payload) > MAX_PAYLOAD:
-        raise ValueError(f"payload 过大: {len(payload)} > {MAX_PAYLOAD}")
+    # 发送端也按 MAX_FRAME_PAYLOAD（接收端硬限）校验：否则接收端 FrameDecoder 会静默丢帧
+    # （length > MAX_FRAME_PAYLOAD → 丢 magic 重同步），致对端 rpc/image 等待器超时无报错。
+    if len(payload) > MAX_FRAME_PAYLOAD:
+        raise ValueError(f"payload 过大: {len(payload)} > {MAX_FRAME_PAYLOAD}")
     if not (0 <= seq <= 0xFFFF):
         raise ValueError(f"seq 越界: {seq}")
     body = _HEADER.pack(MAGIC, seq, len(payload)) + payload

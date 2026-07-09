@@ -650,24 +650,38 @@ class WSHandler:
         raise ValueError("获取预览失败，帧编码错误")
     
     async def _get_snapshot_image(self, params: dict) -> dict:
-        """获取告警快照图片 (Base64 编码)"""
+        """获取告警快照图片 (Base64 编码)。
+
+        filename 不可信（可经 BLE 无鉴权链路或 LAN 下发）：resolve + relative_to 防
+        `../../etc/shadow` 路径穿越读任意文件（主应用 root）；并限大小防 WS 溢出/DoS。"""
         import base64
         from pathlib import Path
-        
+
         filename = params.get("filename")
-        if not filename:
+        if not filename or not isinstance(filename, str):
             raise ValueError("缺少 filename 参数")
-        
-        # 获取快照目录
-        snapshot_dir = Path(__file__).parent.parent.parent / "snapshots"
-        file_path = snapshot_dir / filename
-        
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise ValueError("非法 filename")
+
+        snapshot_dir = (Path(__file__).parent.parent.parent / "snapshots").resolve()
+        file_path = (snapshot_dir / filename).resolve()
+        try:  # 防穿越：解析后必须仍在 snapshot_dir 内
+            file_path.relative_to(snapshot_dir)
+        except ValueError:
+            raise ValueError("filename escapes snapshot dir")
+
         if not file_path.exists():
             raise ValueError(f"快照文件不存在: {filename}")
-        
+
+        # 大小上限：防读超大文件致 base64 撑爆 WS（max_size=8MB）/DoS
+        MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+        size = file_path.stat().st_size
+        if size > MAX_SNAPSHOT_BYTES:
+            raise ValueError(f"快照过大: {size}")
+
         with open(file_path, "rb") as f:
             data = f.read()
-        
+
         b64 = base64.b64encode(data).decode('utf-8')
         # 根据文件扩展名确定 MIME 类型
         ext = file_path.suffix.lower()
@@ -677,7 +691,7 @@ class WSHandler:
             mime = 'image/png'
         else:
             mime = 'application/octet-stream'
-        
+
         return {"image": f"data:{mime};base64,{b64}", "filename": filename}
     
     async def _toggle_fire(self, params: dict) -> dict:
@@ -776,24 +790,35 @@ class WSHandler:
         
         if category == "alarm":
             alarm = config.alarm
-            if "warning_time" in settings:
-                alarm.warning_time = settings["warning_time"]
-            if "alarm_time" in settings:
-                alarm.alarm_time = settings["alarm_time"]
-            if "action_time" in settings:
-                alarm.action_time = settings["action_time"]
-            if "broadcast_interval" in settings:
-                alarm.broadcast_interval = settings["broadcast_interval"]
-            if "warning_message" in settings:
-                alarm.warning_message = settings["warning_message"]
-            if "alarm_message" in settings:
-                alarm.alarm_message = settings["alarm_message"]
-            if "action_message" in settings:
-                alarm.action_message = settings["action_message"]
+            # 范围校验：BLE 无鉴权端可下发设置，防极端值实质禁用报警
+            # （如 action_time=99999 让切电永不触发、temp_alarm_threshold=0 恒报或失敏）。
+            INT_BOUNDS = {  # key: (lo, hi)
+                "warning_time": (0, 3600),
+                "alarm_time": (0, 3600),
+                "action_time": (0, 3600),
+                "broadcast_interval": (0, 3600),
+            }
+            for key, (lo, hi) in INT_BOUNDS.items():
+                if key in settings:
+                    try:
+                        v = int(settings[key])
+                    except (TypeError, ValueError):
+                        raise ValueError(f"{key} 必须是整数")
+                    if not (lo <= v <= hi):
+                        raise ValueError(f"{key} 越界，允许 {lo}..{hi}")
+                    setattr(alarm, key, v)
             if "temp_alarm_threshold" in settings:
-                alarm.temp_alarm_threshold = float(settings["temp_alarm_threshold"])
-            if "temp_alarm_message" in settings:
-                alarm.temp_alarm_message = settings["temp_alarm_message"]
+                try:
+                    t = float(settings["temp_alarm_threshold"])
+                except (TypeError, ValueError):
+                    raise ValueError("temp_alarm_threshold 必须是数值")
+                if not (0 <= t <= 200):
+                    raise ValueError("temp_alarm_threshold 越界，允许 0..200")
+                alarm.temp_alarm_threshold = t
+            # 文本字段：限长度防滥用
+            for key in ("warning_message", "alarm_message", "action_message", "temp_alarm_message"):
+                if key in settings:
+                    setattr(alarm, key, str(settings[key])[:200])
         
         config_manager.save()
         return {"message": "设置已更新"}

@@ -18,15 +18,19 @@ class DailyFileHandler(logging.FileHandler):
     当日期变化时自动切换到新的日志文件
     """
     
-    def __init__(self, log_dir: Path, prefix: str = "fire_safety", encoding: str = 'utf-8'):
+    def __init__(self, log_dir: Path, prefix: str = "fire_safety", encoding: str = 'utf-8', retention_days: int = 7):
         self.log_dir = log_dir
         self.prefix = prefix
         self._encoding = encoding
+        self._retention_days = retention_days
         self._current_date = datetime.date.today()
-        
+
         # 初始化时使用当天日期的文件
         log_file = self._get_log_filename()
         super().__init__(log_file, encoding=encoding)
+
+        # 启动时清理过期日志
+        self._cleanup_old_logs()
     
     def _get_log_filename(self) -> str:
         """获取当前日期对应的日志文件名"""
@@ -39,15 +43,33 @@ class DailyFileHandler(logging.FileHandler):
         if today != self._current_date:
             # 日期变了，切换到新文件
             self._current_date = today
-            
+
             # 关闭当前文件
             if self.stream:
                 self.stream.close()
                 self.stream = None
-            
+
             # 更新文件名并重新打开
             self.baseFilename = self._get_log_filename()
             self.stream = self._open()
+
+            # 每天清理过期日志
+            self._cleanup_old_logs()
+
+    def _cleanup_old_logs(self):
+        """删除超过保留天数的日志文件"""
+        if self._retention_days <= 0:
+            return
+        cutoff_date = datetime.date.today() - datetime.timedelta(days=self._retention_days)
+        for f in self.log_dir.glob(f"{self.prefix}_*.log"):
+            try:
+                # 从文件名提取日期: {prefix}_{YYYY-MM-DD}.log
+                date_str = f.stem.split("_", 1)[-1]
+                file_date = datetime.date.fromisoformat(date_str)
+                if file_date < cutoff_date:
+                    f.unlink()
+            except (ValueError, IndexError):
+                pass
     
     def emit(self, record):
         """写入日志前检查是否需要轮转"""

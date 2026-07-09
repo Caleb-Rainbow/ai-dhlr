@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .dhlr_bridge import DhlrBridge
 from .dhlr_client import DhlrClient
 from .gatt_server import GattServer
 from .network_applier import NetworkApplier
@@ -81,9 +82,26 @@ async def main() -> None:
     network = NetworkApplier()
     dhlr = DhlrClient()
     gatt = GattServer(identity=identity, name=adv_name)
-    service = ProvisioningService(network, dhlr, gatt.notify)
+
+    async def on_broadcast(msg: dict) -> None:
+        # 仅转发告警；剥离 base64 图片（BLE 帧 payload 上限 8KB，图片经 LAN/云通道获取）
+        if msg.get("type") != "alarm_event":
+            return
+        data = msg.get("data") or {}
+        await gatt.notify({
+            "event": "alarm",
+            "id": 0,
+            "zone_id": data.get("zone_id"),
+            "zone_name": data.get("zone_name"),
+            "alarm_type": data.get("alarm_type"),
+            "message": data.get("message"),
+        })
+
+    bridge = DhlrBridge(on_broadcast=on_broadcast)
+    service = ProvisioningService(network, dhlr, gatt.notify, bridge=bridge)
     gatt.bind_service(service)
 
+    bridge.start()
     await gatt.start()
     logger.info("BLE 配网服务就绪: %s (hwid=%s, fw=%s)", adv_name, hwid, fw)
 

@@ -40,6 +40,10 @@ class GattServer:
         self._seq = 0
         self._server: Optional[BlessServer] = None
         self._service = None  # ProvisioningService，由 bind_service 注入
+        # 派发的 handle 任务引用集合：防被 GC（"Task was destroyed but it is pending!"）+ 丢失异常。
+        # 注：并发 handle 的 notify 可能跨 id 交错，但 App 端按命令 id 关联（rpc/image 各自等待器），
+        # 单个 _do_rpc/_do_get_image 内 notify 顺序 await，故跨 id 交错不破坏正确性。
+        self._inflight: set = set()
 
     def bind_service(self, service) -> None:
         self._service = service
@@ -59,7 +63,9 @@ class GattServer:
             logger.info(f"[write] 解析出帧 seq={seq} obj_keys={list(obj.keys())} cmd={obj.get('cmd')}")
             if self._service is not None:
                 try:
-                    asyncio.create_task(self._service.handle(seq, obj))
+                    task = asyncio.create_task(self._service.handle(seq, obj))
+                    self._inflight.add(task)
+                    task.add_done_callback(self._inflight.discard)
                 except RuntimeError as e:
                     logger.error(f"[write] 派发失败(无事件循环?): {e}")
 

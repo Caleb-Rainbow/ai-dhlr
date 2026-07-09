@@ -1,4 +1,6 @@
 """ProvisioningService 状态机单测（注入 fakes，不触碰 nmcli/http/BLE）。"""
+import base64 as _b64
+
 import pytest
 
 from src.ble.service import (
@@ -124,3 +126,110 @@ async def test_set_config_bad_payload():
     await svc.handle(1, {"cmd": "set_config", "config": "not-an-object"})
     err = [o for o in nf.objs if o["event"] == "error"]
     assert err[0]["code"] == "bad_request"
+
+
+# ------------------------------ rpc 桥 ------------------------------ #
+class FakeBridge:
+    def __init__(self, result=None):
+        self.result = result or {"success": True, "data": [{"id": "z1"}], "error": None}
+        self.calls = []
+
+    async def request(self, action, params=None, timeout=10.0):
+        self.calls.append((action, params))
+        return self.result
+
+
+def _svc_with_bridge(bridge):
+    nf = FakeNotify()
+    svc = ProvisioningService(FakeNetwork(), FakeDhlr(), nf, bridge=bridge)
+    return svc, nf
+
+
+async def test_rpc_whitelisted_action_forwards_and_notifies():
+    bridge = FakeBridge()
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 5, "cmd": "rpc", "action": "get_status", "params": {}})
+    assert bridge.calls == [("get_status", {})]
+    r = next(o for o in nf.objs if o["event"] == "rpc_result")
+    assert r["id"] == 5 and r["action"] == "get_status"
+    assert r["success"] is True and r["data"] == [{"id": "z1"}]
+
+
+async def test_rpc_rejects_non_whitelisted_action():
+    bridge = FakeBridge()
+    svc, nf = _svc_with_bridge(bridge)
+    # trigger_update（OTA git reset）不在白名单——勿用已白名单化的 patrol_force_cutoff
+    await svc.handle(1, {"id": 6, "cmd": "rpc", "action": "trigger_update"})
+    assert bridge.calls == []
+    err = [o for o in nf.objs if o["event"] == "error"]
+    assert err[0]["code"] == "bad_request" and err[0]["id"] == 6
+
+
+async def test_rpc_without_bridge_reports_unsupported():
+    svc, nf, _, _ = _svc()
+    await svc.handle(1, {"id": 7, "cmd": "rpc", "action": "get_status"})
+    err = [o for o in nf.objs if o["event"] == "error"]
+    assert err[0]["code"] == "unsupported"
+
+
+async def test_rpc_bridge_failure_propagates_error():
+    bridge = FakeBridge(result={"success": False, "data": None, "error": "timeout"})
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 8, "cmd": "rpc", "action": "get_device"})
+    r = next(o for o in nf.objs if o["event"] == "rpc_result")
+    assert r["success"] is False and r["error"] == "timeout"
+
+
+# ------------------------------ get_image / get_preview 多帧流式 ------------------------------ #
+def _image_b64():
+    return _b64.b64encode(b"\xff\xd8\xff\xd9" + b"x" * 10).decode()
+
+
+async def test_get_image_streams_start_chunks_end():
+    bridge = FakeBridge(result={"success": True, "data": {"image": "data:image/jpeg;base64," + _image_b64()}, "error": None})
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 10, "cmd": "get_image", "filename": "zone_1_alarm.jpg"})
+    assert bridge.calls == [("get_snapshot", {"filename": "zone_1_alarm.jpg"})]
+    start = next(o for o in nf.objs if o["event"] == "image_start")
+    chunks = [o for o in nf.objs if o["event"] == "image_chunk"]
+    assert start["total_chunks"] == len(chunks)
+    assert [c["index"] for c in chunks] == list(range(len(chunks)))
+    assert any(o["event"] == "image_end" for o in nf.objs)
+    rebuilt = _b64.b64decode("".join(c["data"] for c in chunks))
+    assert rebuilt.startswith(b"\xff\xd8\xff")
+
+
+async def test_get_image_empty_filename_sends_image_error():
+    """早期校验失败须发 image_error（非 error）——否则 App awaitImage 挂 30s 超时。"""
+    bridge = FakeBridge()
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 11, "cmd": "get_image", "filename": ""})
+    assert bridge.calls == []  # 校验在桥之前
+    assert any(o["event"] == "image_error" and o["id"] == 11 for o in nf.objs)
+    assert not any(o["event"] == "image_start" for o in nf.objs)
+
+
+async def test_get_image_traversal_yields_no_image():
+    """路径穿越被 basename 收敛为 'passwd' 转发——不会泄漏 /etc/passwd（无 image_start）。"""
+    bridge = FakeBridge()  # 默认 result 的 data 是 list（无 image）→ image_error
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 12, "cmd": "get_image", "filename": "../../etc/passwd"})
+    assert bridge.calls == [("get_snapshot", {"filename": "passwd"})]  # 已 basename
+    assert not any(o["event"] == "image_start" for o in nf.objs)
+
+
+async def test_get_preview_missing_camera_id_sends_image_error():
+    bridge = FakeBridge()
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 13, "cmd": "get_preview"})  # 无 camera_id
+    assert bridge.calls == []
+    assert any(o["event"] == "image_error" and o["id"] == 13 for o in nf.objs)
+    assert not any(o["event"] == "image_start" for o in nf.objs)
+
+
+async def test_get_preview_bridge_failure_sends_image_error():
+    bridge = FakeBridge(result={"success": False, "data": None, "error": "摄像头离线"})
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 14, "cmd": "get_preview", "camera_id": "0"})
+    err = [o for o in nf.objs if o["event"] == "image_error"]
+    assert err and err[0]["id"] == 14 and "离线" in err[0]["error"]
