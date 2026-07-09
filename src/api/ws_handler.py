@@ -4,8 +4,9 @@ WebSocket 请求处理器
 """
 import time
 import uuid
+import os
 import threading
-from typing import Dict, Any, Optional, Callable, Awaitable
+from typing import Dict, Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass
 
 from ..utils.logger import get_logger
@@ -74,6 +75,7 @@ class WSHandler:
             "get_device": self._get_device,
             "get_performance": self._get_performance,
             "get_snapshot": self._get_snapshot_image,
+            "get_system": self._get_system,
             
             # 设置相关
             "get_settings": self._get_settings,
@@ -742,6 +744,137 @@ class WSHandler:
             **stats
         }
     
+    async def _get_system(self, params: dict) -> dict:
+        """获取设备系统运行态遥测（CPU/NPU/GPU/内存/存储/温度/版本/uptime/负载/流量）。
+
+        纯读 sysfs/proc/psutil，无副作用。每项独立 try/except：单项读取失败给 null，
+        不影响其他字段返回（容错风格同 _get_npu_load）。
+        App 运维面板经 BLE rpc 调用，一次返回全部指标，避免多次往返占用 GATT 通道。
+        """
+        from ..utils.performance import performance_monitor
+        stats = performance_monitor.get_stats_dict()
+
+        def gpu_load() -> Optional[float]:
+            # devfreq gpu 节点 load 格式 "0@800000000Hz"，取 @ 前
+            try:
+                import glob
+                for path in glob.glob("/sys/class/devfreq/*gpu*/load"):
+                    with open(path) as f:
+                        return float(f.read().strip().split("@")[0])
+            except Exception:
+                return None
+            return None
+
+        def temperatures() -> Optional[Dict[str, float]]:
+            try:
+                base = "/sys/class/thermal"
+                result: Dict[str, float] = {}
+                for tz in os.listdir(base):
+                    if not tz.startswith("thermal_zone"):
+                        continue
+                    try:
+                        name = open(f"{base}/{tz}/type").read().strip()
+                        result[name] = float(open(f"{base}/{tz}/temp").read().strip()) / 1000.0
+                    except Exception:
+                        continue
+                return result or None
+            except Exception:
+                return None
+
+        def memory() -> Optional[Dict[str, float]]:
+            # 系统级内存，区别于 performance_monitor 的进程 RSS
+            try:
+                import psutil
+                vm = psutil.virtual_memory()
+                return {
+                    "total_mb": round(vm.total / (1024 * 1024), 1),
+                    "available_mb": round(vm.available / (1024 * 1024), 1),
+                    "used_percent": round(vm.percent, 1),
+                }
+            except Exception:
+                return None
+
+        def disk() -> Optional[Dict[str, float]]:
+            try:
+                import psutil
+                du = psutil.disk_usage("/")
+                return {
+                    "total_gb": round(du.total / (1024 ** 3), 1),
+                    "used_gb": round(du.used / (1024 ** 3), 1),
+                    "free_gb": round(du.free / (1024 ** 3), 1),
+                    "used_percent": round(du.percent, 1),
+                }
+            except Exception:
+                return None
+
+        def version_info() -> Dict[str, Optional[str]]:
+            result: Dict[str, Optional[str]] = {}
+            try:
+                import platform
+                u = platform.uname()
+                result["os"] = f"{u.system} {u.release} {u.machine}".strip()
+            except Exception:
+                result["os"] = None
+            try:
+                import sys
+                result["python"] = sys.version.split()[0]
+            except Exception:
+                result["python"] = None
+            try:
+                result["app"] = config_manager.config.system.version
+            except Exception:
+                result["app"] = None
+            try:
+                import rknnlite
+                result["rknn"] = getattr(rknnlite, "__version__", None)
+            except Exception:
+                result["rknn"] = None
+            return result
+
+        def uptime_seconds() -> Optional[float]:
+            try:
+                with open("/proc/uptime") as f:
+                    return round(float(f.read().split()[0]), 1)
+            except Exception:
+                return None
+
+        def load_average() -> Optional[List[float]]:
+            try:
+                return [round(x, 2) for x in os.getloadavg()]
+            except Exception:
+                return None
+
+        def network() -> Optional[Dict[str, float]]:
+            try:
+                import psutil
+                nio = psutil.net_io_counters()
+                return {
+                    "rx_mb": round(nio.bytes_recv / (1024 * 1024), 1),
+                    "tx_mb": round(nio.bytes_sent / (1024 * 1024), 1),
+                }
+            except Exception:
+                return None
+
+        return {
+            "cpu_percent": stats.get("cpu_percent"),
+            "npu_load": stats.get("npu_load"),
+            "gpu_load": gpu_load(),
+            "temperatures": temperatures(),
+            "memory": memory(),
+            "process_memory_mb": stats.get("memory_mb"),
+            "disk": disk(),
+            "inference": {
+                "engine": config_manager.config.inference.engine,
+                "model": config_manager.config.inference.model_path,
+                "fps": stats.get("fps"),
+                "inference_time_ms": stats.get("inference_time_ms"),
+            },
+            "version": version_info(),
+            "uptime_seconds": uptime_seconds(),
+            "load_average": load_average(),
+            "network": network(),
+        }
+
     # ==================== 设置处理器 ====================
     
     async def _get_settings(self, params: dict) -> dict:

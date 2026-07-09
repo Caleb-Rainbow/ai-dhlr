@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # 这些非操作台日常动作，或参数会撞 BLE 8KB 帧上限。
 RPC_ACTION_WHITELIST = frozenset({
     # 只读查询
-    "get_status", "get_device", "get_performance", "get_network",
+    "get_status", "get_device", "get_performance", "get_network", "get_system",
     # 运行态设置读写（④配置）
     "get_settings", "update_settings",
     "get_zone_mode", "set_zone_mode",
