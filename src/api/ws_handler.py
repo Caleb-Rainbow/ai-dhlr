@@ -1179,12 +1179,16 @@ class WSHandler:
         if not log_dir or not log_dir.exists():
             return []
         
+        # 限制返回数量：日志文件列表经 BLE 单帧 rpc 下发（< 8192 硬上限），文件过多（retention
+        # 失效累积）会撑爆单帧（service.py 超帧保护会回 "response too large" 致功能失败）。
+        # 按名倒序（新在前）取最近 MAX_LOG_FILES 个——排查主要看近期，足够覆盖。
+        MAX_LOG_FILES = 50
         files = []
-        for f in sorted(log_dir.glob("*.log"), reverse=True):
+        for f in sorted(log_dir.glob("*.log"), reverse=True)[:MAX_LOG_FILES]:
             files.append({
                 "name": f.name,
                 "size": f.stat().st_size,
-                "mtime": f.stat().st_mtime
+                "mtime": f.stat().st_mtime,
             })
         return files
     
@@ -1193,7 +1197,9 @@ class WSHandler:
         from ..utils.logger import event_logger
         filename = params.get("filename")
         page = max(1, params.get("page", 1))
-        page_size = min(1000, max(100, params.get("page_size", 500)))
+        # page_size 下限放宽至 20：App 无感分页（向上滑到顶 prepend 更旧页）传小 page_size（50 行），
+        # 使单页 < 6KB 不触发截断，分页连续不丢行（截断仅对超长堆栈行防御）。
+        page_size = min(500, max(20, params.get("page_size", 100)))
 
         log_dir = event_logger._log_dir
         if not log_dir or not log_dir.exists():
@@ -1205,9 +1211,23 @@ class WSHandler:
                 return {"content": "暂无日志文件", "total_lines": 0, "page": 1, "total_pages": 0}
             file_path = files[0]
         else:
-            file_path = log_dir / filename
+            # 防路径穿越（BLE filename 不可信，主应用 root）：字符级拒绝分隔符/前导点 + 后缀 .log
+            # + resolve 必须仍在 log_dir 内（双层防护，照 _get_snapshot_image 同类修复）。
+            from pathlib import Path
+            if (
+                not isinstance(filename, str)
+                or "/" in filename or "\\" in filename or filename.startswith(".")
+                or not filename.endswith(".log")
+            ):
+                raise ValueError("非法 filename")
+            log_dir_resolved = log_dir.resolve()
+            file_path = (log_dir / filename).resolve()
+            try:
+                file_path.relative_to(log_dir_resolved)
+            except ValueError:
+                raise ValueError("filename escapes log dir")
             if not file_path.exists():
-                return {"content": "日志文件不存在", "total_lines": 0, "page": 1, "total_pages": 0}
+                return {"content": "日志文件不存在", "total_lines": 0, "page": 1, "total_pages": 0, "truncated": False}
 
         with open(file_path, "r", encoding="utf-8") as f:
             all_lines = f.readlines()
@@ -1221,6 +1241,15 @@ class WSHandler:
         page_lines = all_lines[start:end]
         content = "".join(page_lines)
 
+        # 字节上限：单页内容经 BLE JSON 单帧下发，须 < 8192 硬上限。超 MAX 按字节取末尾（保留最新），
+        # errors="ignore" 丢弃开头可能的多字节残尾。truncated 标记告知 App 如实提示（数据诚实）。
+        MAX_LOG_CONTENT_BYTES = 6 * 1024  # 6144
+        truncated = False
+        encoded = content.encode("utf-8")
+        if len(encoded) > MAX_LOG_CONTENT_BYTES:
+            content = encoded[-MAX_LOG_CONTENT_BYTES:].decode("utf-8", errors="ignore")
+            truncated = True
+
         return {
             "filename": file_path.name,
             "content": content,
@@ -1228,6 +1257,7 @@ class WSHandler:
             "page": page,
             "page_size": page_size,
             "total_pages": total_pages,
+            "truncated": truncated,
         }
     
     # ==================== 串口处理器 ====================

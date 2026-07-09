@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 RPC_ACTION_WHITELIST = frozenset({
     # 只读查询
     "get_status", "get_device", "get_performance", "get_network", "get_system",
+    "get_log_files", "get_log_content",
     # 运行态设置读写（④配置）
     "get_settings", "update_settings",
     "get_zone_mode", "set_zone_mode",
