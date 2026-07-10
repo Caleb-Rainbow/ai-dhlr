@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 # BLE rpc 白名单（无鉴权，按「操作台需要 + 危险动作靠 App 侧 Destructive 二次确认」原则放行）。
 # 明确不放行：trigger_update（git reset+重启，OTA 级）、install_dependencies（pip）、
-# toggle_fire（调试）、硬件配置（serial/gpio/usb_otg）、zone/camera CRUD、remote 账密——
+# toggle_fire（调试）、硬件配置（serial/gpio/usb_otg）、remote 账密——
 # 这些非操作台日常动作，或参数会撞 BLE 8KB 帧上限。
+# 注：zone/camera CRUD 已纳入（区域·摄像头管理覆盖层）——典型规模（ROI 多边形 + 2~10 条列表）
+# 单帧远小于 8KB；超帧由 _do_rpc 回「response too large」兜底。删除类靠 App 二次确认。
 RPC_ACTION_WHITELIST = frozenset({
     # 只读查询
     "get_status", "get_device", "get_performance", "get_network", "get_system",
@@ -36,6 +38,10 @@ RPC_ACTION_WHITELIST = frozenset({
     "patrol_force_warning", "patrol_force_alarm", "patrol_force_cutoff",
     # 单灶台巡检操作（需 zone_id 参数；强制类同上靠 App 二次确认）
     "patrol_check_person", "patrol_check_fire", "patrol_cutoff_zone",
+    # 摄像头/灶台配置 CRUD（区域·摄像头管理覆盖层）；删除类由 App 二次确认
+    "get_cameras", "get_camera", "create_camera", "update_camera", "delete_camera",
+    "get_usb_devices",
+    "get_zone", "create_zone", "update_zone", "delete_zone",
 })
 
 # 图像多帧流式：单帧 payload 上限 8192，整图（告警快照 base64 数十 KB）必切块。

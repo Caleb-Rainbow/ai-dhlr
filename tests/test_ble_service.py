@@ -165,6 +165,19 @@ async def test_rpc_rejects_non_whitelisted_action():
     assert err[0]["code"] == "bad_request" and err[0]["id"] == 6
 
 
+@pytest.mark.parametrize("action", [
+    "get_cameras", "get_camera", "create_camera", "update_camera", "delete_camera",
+    "get_usb_devices", "get_zone", "create_zone", "update_zone", "delete_zone",
+])
+async def test_rpc_whitelists_camera_zone_crud(action):
+    """区域·摄像头管理覆盖层：camera/zone CRUD 已纳入白名单，应转发给桥而非被拒。"""
+    bridge = FakeBridge()
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 60, "cmd": "rpc", "action": action, "params": {"zone_id": "z"}})
+    assert bridge.calls == [(action, {"zone_id": "z"})]
+    assert not any(o["event"] == "error" for o in nf.objs)
+
+
 async def test_rpc_without_bridge_reports_unsupported():
     svc, nf, _, _ = _svc()
     await svc.handle(1, {"id": 7, "cmd": "rpc", "action": "get_status"})
