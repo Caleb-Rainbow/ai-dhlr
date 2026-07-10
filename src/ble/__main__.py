@@ -18,6 +18,7 @@ from .dhlr_bridge import DhlrBridge
 from .dhlr_client import DhlrClient
 from .gatt_server import GattServer
 from .network_applier import NetworkApplier
+from .patrol_notify import _ensure_patrol_frame_safe, _patrol_notify
 from .service import ProvisioningService
 
 logger = logging.getLogger("ble")
@@ -84,18 +85,22 @@ async def main() -> None:
     gatt = GattServer(identity=identity, name=adv_name)
 
     async def on_broadcast(msg: dict) -> None:
-        # 仅转发告警；剥离 base64 图片（BLE 帧 payload 上限 8KB，图片经 LAN/云通道获取）
-        if msg.get("type") != "alarm_event":
-            return
-        data = msg.get("data") or {}
-        await gatt.notify({
-            "event": "alarm",
-            "id": 0,
-            "zone_id": data.get("zone_id"),
-            "zone_name": data.get("zone_name"),
-            "alarm_type": data.get("alarm_type"),
-            "message": data.get("message"),
-        })
+        # 转发设备主动广播（alarm_event / patrol_event）经 STATUS 通知给 App。
+        # base64 图片已在主应用侧剥离（BLE 帧 payload 上限 8KB，图片经 LAN/云通道获取）。
+        mtype = msg.get("type")
+        if mtype == "alarm_event":
+            data = msg.get("data") or {}
+            await gatt.notify({
+                "event": "alarm",
+                "id": 0,
+                "zone_id": data.get("zone_id"),
+                "zone_name": data.get("zone_name"),
+                "alarm_type": data.get("alarm_type"),
+                "message": data.get("message"),
+            })
+        elif mtype == "patrol_event":
+            # 巡检进度/结果流（设备后台线程推送）：整态替换，超帧裁剪兜底。
+            await gatt.notify(_ensure_patrol_frame_safe(_patrol_notify(msg.get("data") or {})))
 
     bridge = DhlrBridge(on_broadcast=on_broadcast)
     service = ProvisioningService(network, dhlr, gatt.notify, bridge=bridge)

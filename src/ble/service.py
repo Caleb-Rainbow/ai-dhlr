@@ -26,6 +26,7 @@ RPC_ACTION_WHITELIST = frozenset({
     # 只读查询
     "get_status", "get_device", "get_performance", "get_network", "get_system",
     "get_log_files", "get_log_content",
+    "get_zones", "get_patrol_status",
     # 运行态设置读写（④配置）
     "get_settings", "update_settings",
     "get_zone_mode", "set_zone_mode",
@@ -33,6 +34,8 @@ RPC_ACTION_WHITELIST = frozenset({
     # 控制动作（③动作）；强制类由 App ConfirmLevel.Destructive 二次确认
     "patrol_self_check", "start_patrol", "stop_patrol", "patrol_alarm_demo",
     "patrol_force_warning", "patrol_force_alarm", "patrol_force_cutoff",
+    # 单灶台巡检操作（需 zone_id 参数；强制类同上靠 App 二次确认）
+    "patrol_check_person", "patrol_check_fire", "patrol_cutoff_zone",
 })
 
 # 图像多帧流式：单帧 payload 上限 8192，整图（告警快照 base64 数十 KB）必切块。
