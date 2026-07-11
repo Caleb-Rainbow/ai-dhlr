@@ -98,6 +98,8 @@ class LoggingConfig:
     level: str = "INFO"
     log_dir: str = "logs"
     snapshot_dir: str = "snapshots"
+    log_retention_days: int = 7        # 日志保留天数（按天轮转时清理，0=永不清理）
+    snapshot_retention_days: int = 3   # 告警快照保留天数（按文件 mtime 清理，0=永不清理）
 
 
 @dataclass
@@ -295,7 +297,9 @@ class ConfigManager:
         logging_config = LoggingConfig(
             level=log_raw.get('level', 'INFO'),
             log_dir=log_raw.get('log_dir', 'logs'),
-            snapshot_dir=log_raw.get('snapshot_dir', 'snapshots')
+            snapshot_dir=log_raw.get('snapshot_dir', 'snapshots'),
+            log_retention_days=int(log_raw.get('log_retention_days', 7)),
+            snapshot_retention_days=int(log_raw.get('snapshot_retention_days', 3))
         )
         
         # 解析GPIO配置
@@ -459,7 +463,9 @@ class ConfigManager:
             'logging': {
                 'level': config.logging.level,
                 'log_dir': config.logging.log_dir,
-                'snapshot_dir': config.logging.snapshot_dir
+                'snapshot_dir': config.logging.snapshot_dir,
+                'log_retention_days': config.logging.log_retention_days,
+                'snapshot_retention_days': config.logging.snapshot_retention_days
             },
             'gpio': {
                 'enabled': config.gpio.enabled,

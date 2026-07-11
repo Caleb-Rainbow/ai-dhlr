@@ -56,7 +56,9 @@ class FireSafetySystem:
             event_logger.setup(
                 level=config.logging.level,
                 log_dir=config.logging.log_dir,
-                snapshot_dir=config.logging.snapshot_dir
+                snapshot_dir=config.logging.snapshot_dir,
+                log_retention_days=config.logging.log_retention_days,
+                snapshot_retention_days=config.logging.snapshot_retention_days
             )
             self._logger = get_logger()
             self._logger.info("=" * 50)

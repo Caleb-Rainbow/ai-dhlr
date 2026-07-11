@@ -3,6 +3,7 @@
 提供统一的日志记录和事件保存功能
 """
 import os
+import time
 import logging
 import datetime
 from pathlib import Path
@@ -61,10 +62,13 @@ class DailyFileHandler(logging.FileHandler):
         if self._retention_days <= 0:
             return
         cutoff_date = datetime.date.today() - datetime.timedelta(days=self._retention_days)
+        # 文件名格式: {prefix}_{YYYY-MM-DD}.log；prefix 可能含下划线（如 fire_safety），
+        # 故按已知 prefix 长度截取日期，勿用 split('_')——旧实现把 "fire_safety" 拆成两段
+        # 导致 date_str="safety_2026-01-13" 永远 fromisoformat 失败 → 历史日志从不被清理。
+        prefix_len = len(self.prefix) + 1  # prefix + '_'
         for f in self.log_dir.glob(f"{self.prefix}_*.log"):
             try:
-                # 从文件名提取日期: {prefix}_{YYYY-MM-DD}.log
-                date_str = f.stem.split("_", 1)[-1]
+                date_str = f.stem[prefix_len:]
                 file_date = datetime.date.fromisoformat(date_str)
                 if file_date < cutoff_date:
                     f.unlink()
@@ -94,27 +98,34 @@ class EventLogger:
         self._logger = None
         self._log_dir = None
         self._snapshot_dir = None
-    
-    def setup(self, level: str = "INFO", log_dir: str = "logs", snapshot_dir: str = "snapshots"):
+        self._log_retention_days = 7
+        self._snapshot_retention_days = 3
+        self._last_snapshot_cleanup = 0.0
+
+    def setup(self, level: str = "INFO", log_dir: str = "logs", snapshot_dir: str = "snapshots",
+              log_retention_days: int = 7, snapshot_retention_days: int = 3):
         """初始化日志配置"""
+        self._log_retention_days = max(0, int(log_retention_days))
+        self._snapshot_retention_days = max(0, int(snapshot_retention_days))
+
         # 创建目录
         base_dir = Path(__file__).parent.parent.parent
         self._log_dir = base_dir / log_dir
         self._snapshot_dir = base_dir / snapshot_dir
-        
+
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._snapshot_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 配置日志
         log_level = getattr(logging, level.upper(), logging.INFO)
-        
+
         # 创建logger
         self._logger = logging.getLogger("fire_safety")
         self._logger.setLevel(log_level)
-        
+
         # 清除已有handler
         self._logger.handlers.clear()
-        
+
         # 控制台handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(log_level)
@@ -124,10 +135,13 @@ class EventLogger:
         )
         console_handler.setFormatter(console_format)
         self._logger.addHandler(console_handler)
-        
+
         # 文件handler - 使用 DailyFileHandler 实现日志按天自动轮转
         # 日志文件名格式: fire_safety_2026-01-07.log
-        file_handler = DailyFileHandler(self._log_dir, prefix="fire_safety", encoding='utf-8')
+        file_handler = DailyFileHandler(
+            self._log_dir, prefix="fire_safety", encoding='utf-8',
+            retention_days=self._log_retention_days,
+        )
         file_handler.setLevel(log_level)
         file_format = logging.Formatter(
             '%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s',
@@ -135,8 +149,30 @@ class EventLogger:
         )
         file_handler.setFormatter(file_format)
         self._logger.addHandler(file_handler)
-        
+
+        # 启动时清理过期快照（运行期再由 save_snapshot 节流清理）
+        self._cleanup_old_snapshots()
+
         self._logger.info(f"日志系统初始化完成，日志目录: {self._log_dir}")
+
+    def _cleanup_old_snapshots(self):
+        """删除超过保留天数的告警快照（按文件 mtime，避免依赖文件名格式）"""
+        if self._snapshot_retention_days <= 0 or self._snapshot_dir is None:
+            return
+        cutoff = time.time() - self._snapshot_retention_days * 86400
+        removed = 0
+        try:
+            for f in self._snapshot_dir.glob("*.jpg"):
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                        removed += 1
+                except Exception:
+                    pass
+            if removed > 0:
+                self.logger.info(f"清理过期告警快照 {removed} 个（保留 {self._snapshot_retention_days} 天）")
+        except Exception as e:
+            self.logger.warning(f"清理告警快照失败: {e}")
     
     @property
     def logger(self) -> logging.Logger:
@@ -175,7 +211,16 @@ class EventLogger:
         """
         if self._snapshot_dir is None:
             self.setup()
-        
+
+        # 节流清理过期快照（每小时最多一次，避免每次告警都遍历目录）
+        now = time.time()
+        if now - self._last_snapshot_cleanup > 3600:
+            self._last_snapshot_cleanup = now
+            try:
+                self._cleanup_old_snapshots()
+            except Exception:
+                pass
+
         try:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{zone_id}_{event_type}_{timestamp}.jpg"

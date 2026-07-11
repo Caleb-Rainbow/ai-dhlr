@@ -51,6 +51,7 @@ class FrameCache:
         self._ttl_ms = ttl_ms
         self._hits = 0
         self._misses = 0
+        self._last_cleanup = 0.0  # 上次过期清理时间戳（节流，避免高频调用遍历整表）
 
     def get_or_encode(self, camera_id: str, frame, quality: int = 80) -> Optional[Tuple[str, bool]]:
         """
@@ -66,6 +67,17 @@ class FrameCache:
         """
         if frame is None:
             return None
+
+        # 节流清理过期缓存项（每 60s 最多一次）。
+        # 正常情况下键按 camera_id_quality 覆写不会无限增长，但质量/摄像头组合不再被请求时
+        # 会残留过期项，靠这里周期性回收（base64 串较大，长期累积有内存压力）。
+        now = time.time()
+        if now - self._last_cleanup > 60:
+            self._last_cleanup = now
+            try:
+                self.cleanup_expired()
+            except Exception:
+                pass
 
         # 检查帧尺寸是否有效
         try:

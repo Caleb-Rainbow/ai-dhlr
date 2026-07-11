@@ -6,6 +6,7 @@ import time
 import threading
 import asyncio
 import os
+from collections import deque
 from typing import Optional, Dict, List, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -17,6 +18,9 @@ from ..api.websocket import sync_upload_alarm_record
 
 # 音频资源目录
 AUDIO_ASSETS_DIR = "audio_assets"
+
+# 巡检结果保留上限（2GB 内存设备：巡检结果无界增长会缓慢吃内存，封顶后旧结果自动出队）
+MAX_PATROL_RESULTS = 200
 
 
 def _get_audio_path(zone_id: str, audio_type: str) -> Optional[str]:
@@ -86,15 +90,16 @@ class PatrolState:
     current_step: PatrolStep = PatrolStep.IDLE
     progress: int = 0
     message: str = ""
-    results: List[PatrolResult] = field(default_factory=list)
-    
+    # 有界队列：超过 MAX_PATROL_RESULTS 自动丢弃最旧结果，防止长期运行下无界增长
+    results: deque = field(default_factory=lambda: deque(maxlen=MAX_PATROL_RESULTS))
+
     def to_dict(self) -> dict:
         return {
             "is_active": self.is_active,
             "current_step": self.current_step.value,
             "progress": self.progress,
             "message": self.message,
-            "results": [r.to_dict() for r in self.results[-20:]]  # 只返回最近20条结果
+            "results": [r.to_dict() for r in list(self.results)[-20:]]  # 只返回最近20条结果
         }
 
 
@@ -194,7 +199,7 @@ class PatrolManager:
             self._state.current_step = PatrolStep.IDLE
             self._state.progress = 0
             self._state.message = "巡检模式已开启"
-            self._state.results = []
+            self._state.results.clear()
         
         # 停止所有正在进行的播报
         voice_player.stop_playback()
