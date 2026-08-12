@@ -31,6 +31,9 @@ pyserial>=3.5
 # 系统监控（CPU/内存/NPU/磁盘/网络）
 psutil>=5.9
 
+# 蓝牙配网（BLE 外设，ai-dhlr-ble.service 依赖；原为开发期手动安装，补回依赖清单）
+bless>=0.3.0
+
 #测试框架
 pytest>=7.0.0
 pytest-asyncio>=0.21.0

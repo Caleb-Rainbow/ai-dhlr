@@ -1555,10 +1555,15 @@ class WSHandler:
 
     async def _trigger_update(self, params: dict) -> dict:
         """
-        触发系统强制更新
+        触发系统强制更新（全自动部署）
 
-        使用 git fetch + reset --hard 无条件更新到远程最新版本。
-        执行后服务将重启，WebSocket 连接会断开。
+        使用 git fetch + reset --hard 无条件更新到远程最新版本；随后在后台依次：
+        1) pip install -r requirements.txt（含蓝牙 bless 依赖）
+        2) sudo bash deploy/bootstrap-ble.sh（bluez 检测兜底 + 注册/更新 ai-dhlr-ble 服务 + enable）
+        3) 重启 ai-dhlr 与 ai-dhlr-ble 两个服务
+
+        BLE 部署失败不阻断主服务（火灾监测）重启。响应立即返回，部署在后台进行，
+        服务重启期间 WebSocket 会断开。
 
         Returns:
             {"message": str, "success": bool}
@@ -1582,30 +1587,115 @@ class WSHandler:
             )
             branch = result.stdout.strip() or "main"
 
-            # 强制更新
+            # 强制更新代码
             subprocess.run(["git", "fetch", "origin"], cwd=project_root, check=True)
             subprocess.run(["git", "reset", "--hard", f"origin/{branch}"], cwd=project_root, check=True)
 
-            logger.info(f"代码已更新到 origin/{branch}，即将重启服务...")
-
-            # 异步重启服务（给客户端时间收到响应）
-            async def restart_service():
-                await asyncio.sleep(1)
-                subprocess.run(["sudo", "systemctl", "restart", "ai-dhlr"])
-
-            asyncio.create_task(restart_service())
-
-            return {
-                "success": True,
-                "message": f"已更新到 origin/{branch}，服务正在重启..."
-            }
-
+            logger.info(f"代码已更新到 origin/{branch}，后台开始部署 BLE 并重启服务...")
         except subprocess.CalledProcessError as e:
             logger.error(f"更新失败: {e}")
             raise ValueError(f"更新失败: {e.stderr}")
         except Exception as e:
             logger.error(f"更新失败: {e}")
             raise ValueError(f"更新失败: {e}")
+
+        # 后台部署 + 重启：不 await。服务重启会断开 WebSocket，响应必须先返回给客户端。
+        asyncio.create_task(self._deploy_and_restart(project_root))
+
+        return {
+            "success": True,
+            "message": f"已更新到 origin/{branch}，正在后台部署蓝牙并重启服务（约1-3分钟），连接即将断开。"
+        }
+
+    async def _deploy_and_restart(self, project_root) -> None:
+        """
+        更新代码后的后台部署任务（不阻断、失败可见）。
+
+        顺序：pip 依赖 → bootstrap-ble.sh（bluez + 服务注册 + enable）→ 重启两服务。
+        各步相互隔离：BLE 相关失败仅记日志，绝不阻止主服务 ai-dhlr 重启
+        （火灾监测可用性优先）。全部输出追加到 logs/bootstrap-ble.log，
+        便于远程排查零干预升级结果。
+        """
+        import asyncio
+        import subprocess
+        import sys
+        from datetime import datetime
+
+        log_path = project_root / "logs" / "bootstrap-ble.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _log(line: str) -> None:
+            logger.info(line)
+            try:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception:
+                pass
+
+        _log(f"\n======== 部署开始 {datetime.now():%F %T} ========")
+
+        # 1) Python 依赖（含 bless）——失败仅告警，不阻断
+        try:
+            _log("[1/3] pip install -r requirements.txt ...")
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "pip", "install", "-r", str(project_root / "requirements.txt"),
+                cwd=project_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                _log("[WARN] pip install 超时（>300s），跳过依赖更新")
+            else:
+                out = stdout.decode("utf-8", errors="replace") if stdout else ""
+                if proc.returncode == 0:
+                    _log("[OK]   pip install 完成")
+                else:
+                    _log(f"[WARN] pip install 失败 rc={proc.returncode}:\n{out[-800:]}")
+        except Exception as e:
+            _log(f"[WARN] pip install 异常: {e}")
+
+        # 2) bootstrap-ble.sh（bluez 检测 + 服务注册 + enable）——失败仅告警，不阻断
+        try:
+            _log("[2/3] deploy/bootstrap-ble.sh ...")
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "-S", "bash", str(project_root / "deploy" / "bootstrap-ble.sh"),
+                cwd=project_root,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(input=self._SUDO_PASSWORD.encode()), timeout=240.0
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                _log("[WARN] bootstrap-ble.sh 超时（>240s）")
+            else:
+                out = stdout.decode("utf-8", errors="replace") if stdout else ""
+                _log(f"[INFO ] bootstrap-ble.sh rc={proc.returncode}:\n{out[-1500:]}")
+        except Exception as e:
+            _log(f"[WARN] bootstrap-ble.sh 异常: {e}")
+
+        # 3) 重启服务——主服务必然重启（放最后）；BLE 已 enable 则起来，未就绪由其 Restart=always 自处理
+        _log("[3/3] 重启服务 ...")
+        for unit in ("ai-dhlr", "ai-dhlr-ble"):
+            try:
+                subprocess.run(
+                    ["sudo", "-S", "systemctl", "restart", unit],
+                    input=self._SUDO_PASSWORD.encode(),
+                    capture_output=True,
+                    timeout=30,
+                )
+                _log(f"[OK]   systemctl restart {unit}")
+            except Exception as e:
+                level = "WARN" if unit == "ai-dhlr-ble" else "FAIL"
+                _log(f"[{level}] restart {unit} 失败: {e}")
+
+        _log(f"======== 部署结束 {datetime.now():%F %T} ========")
 
     async def _install_dependencies(self, params: dict) -> dict:
         """

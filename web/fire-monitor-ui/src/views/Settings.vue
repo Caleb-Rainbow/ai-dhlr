@@ -425,30 +425,37 @@ const saveDeviceId = async () => {
   }
 };
 
-// 触发系统更新
+// 触发系统更新（全自动部署：拉代码→装依赖→部署蓝牙服务→重启两服务）
 const triggerSystemUpdate = async () => {
-  if (!confirm('确定要更新系统吗？\n\n更新将拉取最新代码并重启服务，期间连接会断开。')) {
+  if (!confirm('确定要更新系统吗？\n\n更新将拉取最新代码、安装依赖、部署蓝牙服务并重启，约1-3分钟内连接会断开并自动重连。')) {
     return;
   }
 
   updatingSystem.value = true;
-  updateResult.value = null;
+  // 乐观提示：服务端在 git pull 后、真正重启前就返回响应；重启期间显示"重启中"，
+  // 由 onWsReconnect 在 WebSocket 重连成功后清除状态。
+  updateResult.value = { success: true, message: '设备正在部署并重启，约1-3分钟后自动重连...' };
 
   try {
-    const result = await ws.request<{ success: boolean; message: string }>('trigger_update');
-    updateResult.value = result;
-    // 5秒后隐藏结果提示
-    setTimeout(() => {
-      updateResult.value = null;
-    }, 5000);
+    await ws.request<{ success: boolean; message: string }>('trigger_update');
+    // 正常收到响应（git pull 后、重启前返回）：保持 updatingSystem，等待重连事件清除
   } catch (e: any) {
+    // 连接断开属预期（服务重启）；其余错误才视为失败
+    if (e?.message && e.message.includes('连接断开')) {
+      return; // 保持"重启中"提示，等 onWsReconnect
+    }
     updateResult.value = { success: false, message: e.message || '更新失败' };
-    // 5秒后隐藏错误提示
-    setTimeout(() => {
-      updateResult.value = null;
-    }, 5000);
-  } finally {
     updatingSystem.value = false;
+    setTimeout(() => { updateResult.value = null; }, 5000);
+  }
+};
+
+// WebSocket 重连成功：若正处于"更新中"，视为部署 + 重启完成
+const onWsReconnect = () => {
+  if (updatingSystem.value) {
+    updateResult.value = { success: true, message: '设备已重启完成，更新成功' };
+    updatingSystem.value = false;
+    setTimeout(() => { updateResult.value = null; }, 5000);
   }
 };
 
@@ -509,6 +516,7 @@ const setZoneMode = async (newMode: 'zoned' | 'single') => {
 // 定时刷新网络和远程状态
 let refreshInterval: number | null = null;
 onMounted(async () => {
+  ws.on('connect', onWsReconnect);
   await ws.connect();
   loadData();
   // 延迟显示保存按钮，触发进入动画
@@ -529,6 +537,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  ws.off('connect', onWsReconnect);
   if (refreshInterval) {
     clearInterval(refreshInterval);
   }
@@ -1150,7 +1159,7 @@ onUnmounted(() => {
         </h3>
         <div class="space-y-3">
           <p class="text-sm text-text-muted">
-            点击下方按钮将拉取最新代码并重启服务。更新过程中连接会短暂断开。
+            点击下方按钮将拉取最新代码、安装依赖、部署蓝牙服务并重启。过程中连接会断开并自动重连。
           </p>
           <button @click="triggerSystemUpdate" :disabled="updatingSystem"
             class="w-full py-3 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20">
