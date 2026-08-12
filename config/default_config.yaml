@@ -83,6 +83,10 @@ gpio:
   pin_fire: "gpio0"                # 动火指示灯引脚 (Pin 3)
   pin_absence: "gpio1"             # 离人指示灯引脚 (Pin 5)
   pin_alarm: "gpio2"               # 报警指示灯引脚 (Pin 7)
+  # 急停按钮（输入监听）
+  estop_enabled: true              # 是否启用急停监听
+  pin_estop: "gpio10"              # 急停输入引脚 (IO10 / GPIO3_A2_D / J20)
+  estop_active_low: true           # true=按下接地，读到低电平触发
 
 # 三阶段报警配置
 alarm:

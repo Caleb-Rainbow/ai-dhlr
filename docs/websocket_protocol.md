@@ -222,7 +222,7 @@ Content-Type: application/json
 
 #### alarm_event — 报警事件
 
-灶台触发报警（预警、报警、切电、温度报警）时推送。
+灶台触发报警（预警、报警、切电、温度报警）或急停按钮按下时推送。
 
 ```json
 {
@@ -243,9 +243,11 @@ Content-Type: application/json
 |------|------|------|------|
 | data.zone_id | string | 是 | 灶台 ID |
 | data.zone_name | string | 是 | 灶台名称 |
-| data.alarm_type | string | 是 | 报警类型：`"warning"`（预警）、`"alarm"`（报警）、`"cutoff"`（切电）、`"temp_alarm"`（温度报警） |
+| data.alarm_type | string | 是 | 报警类型：`"warning"`（预警）、`"alarm"`（报警）、`"cutoff"`（切电）、`"temp_alarm"`（温度报警）、`"estop"`（急停） |
 | data.image | string | 否 | 抓拍图片 Base64 编码，格式 `data:image/jpeg;base64,...` |
 | data.message | string | 否 | 事件描述 |
+
+> **急停事件（`alarm_type: "estop"`）说明：** 当 GPIO 急停按钮（默认 `pin_estop=gpio10`）触发时推送，此时 `zone_id="all"`、`zone_name="全部灶台"`、`image` 为空，表示已对所有启用灶台执行全局切电并插队播报语音。急停事件**不上报**到远程服务器。
 
 #### network_interface — 网络状态变化
 
@@ -1506,7 +1508,10 @@ Content-Type: application/json
     "gpio_path": "/sys/external_gpio",
     "pin_fire": "gpio0",
     "pin_absence": "gpio1",
-    "pin_alarm": "gpio2"
+    "pin_alarm": "gpio2",
+    "estop_enabled": true,
+    "pin_estop": "gpio10",
+    "estop_active_low": true
 }
 ```
 
@@ -1517,6 +1522,9 @@ Content-Type: application/json
 | pin_fire | string | 动火指示灯引脚 |
 | pin_absence | string | 离人指示灯引脚 |
 | pin_alarm | string | 报警指示灯引脚 |
+| estop_enabled | boolean | 是否启用急停输入监听 |
+| pin_estop | string | 急停按钮输入引脚 |
+| estop_active_low | boolean | 急停有效电平：`true`=低电平有效（按下接地触发） |
 
 #### update_gpio_config — 更新 GPIO 配置
 
@@ -1524,10 +1532,13 @@ Content-Type: application/json
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| enabled | boolean | 是否启用 |
+| enabled | boolean | 是否启用指示灯输出 |
 | pin_fire | string | 动火指示灯引脚名（如 `"gpio0"`） |
 | pin_absence | string | 离人指示灯引脚名 |
 | pin_alarm | string | 报警指示灯引脚名 |
+| estop_enabled | boolean | 是否启用急停输入监听 |
+| pin_estop | string | 急停按钮输入引脚名（如 `"gpio10"`） |
+| estop_active_low | boolean | 急停有效电平：`true`=低电平有效 |
 
 **返回值：**
 

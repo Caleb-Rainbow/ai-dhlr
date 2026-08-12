@@ -110,6 +110,10 @@ class GpioConfig:
     pin_fire: str = "gpio0"                   # 动火指示灯引脚
     pin_absence: str = "gpio1"                # 离人指示灯引脚
     pin_alarm: str = "gpio2"                  # 报警指示灯引脚
+    # 急停按钮（输入）
+    estop_enabled: bool = True                # 是否启用急停监听
+    pin_estop: str = "gpio10"                 # 急停输入引脚 (IO10 / GPIO3_A2_D / J20)
+    estop_active_low: bool = True             # True=按下接地读到低电平触发
 
 
 @dataclass
@@ -309,7 +313,10 @@ class ConfigManager:
             gpio_path=gpio_raw.get('gpio_path', '/sys/external_gpio'),
             pin_fire=gpio_raw.get('pin_fire', 'gpio0'),
             pin_absence=gpio_raw.get('pin_absence', 'gpio1'),
-            pin_alarm=gpio_raw.get('pin_alarm', 'gpio2')
+            pin_alarm=gpio_raw.get('pin_alarm', 'gpio2'),
+            estop_enabled=gpio_raw.get('estop_enabled', True),
+            pin_estop=gpio_raw.get('pin_estop', 'gpio10'),
+            estop_active_low=gpio_raw.get('estop_active_low', True)
         )
         
         # 解析报警配置（三阶段）
@@ -472,7 +479,10 @@ class ConfigManager:
                 'gpio_path': config.gpio.gpio_path,
                 'pin_fire': config.gpio.pin_fire,
                 'pin_absence': config.gpio.pin_absence,
-                'pin_alarm': config.gpio.pin_alarm
+                'pin_alarm': config.gpio.pin_alarm,
+                'estop_enabled': config.gpio.estop_enabled,
+                'pin_estop': config.gpio.pin_estop,
+                'estop_active_low': config.gpio.estop_active_low
             },
             'alarm': {
                 'warning_time': config.alarm.warning_time,

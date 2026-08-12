@@ -1684,7 +1684,10 @@ class WSHandler:
             "gpio_path": gpio.gpio_path,
             "pin_fire": gpio.pin_fire,
             "pin_absence": gpio.pin_absence,
-            "pin_alarm": gpio.pin_alarm
+            "pin_alarm": gpio.pin_alarm,
+            "estop_enabled": gpio.estop_enabled,
+            "pin_estop": gpio.pin_estop,
+            "estop_active_low": gpio.estop_active_low
         }
     
     async def _update_gpio_config(self, params: dict) -> dict:
@@ -1699,6 +1702,12 @@ class WSHandler:
             gpio.pin_absence = params["pin_absence"]
         if "pin_alarm" in params:
             gpio.pin_alarm = params["pin_alarm"]
+        if "estop_enabled" in params:
+            gpio.estop_enabled = params["estop_enabled"]
+        if "pin_estop" in params:
+            gpio.pin_estop = params["pin_estop"]
+        if "estop_active_low" in params:
+            gpio.estop_active_low = params["estop_active_low"]
         
         config_manager.save()
         
@@ -1710,7 +1719,15 @@ class WSHandler:
                 controller.reload_config(gpio)
                 logger.info("已重新加载 GPIO 指示灯配置")
         except Exception as e:
-            logger.warning(f"重新加载 GPIO 配置失败: {e}")
+            logger.warning(f"重新加载 GPIO 指示灯配置失败: {e}")
+
+        # 重新加载急停监听器配置
+        try:
+            from ..output.gpio import reload_estop_monitor
+            reload_estop_monitor(gpio)
+            logger.info("已重新加载急停监听器配置")
+        except Exception as e:
+            logger.warning(f"重新加载急停监听器配置失败: {e}")
         
         return {"message": "GPIO 配置已更新"}
 

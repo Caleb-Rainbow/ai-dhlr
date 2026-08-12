@@ -45,6 +45,9 @@ class FireSafetySystem:
         self._broadcast_stop_flags: dict = {}  # zone_id -> bool (停止标志)
         self._broadcast_lock = threading.Lock()
 
+        # 急停监听器（GPIO 输入）
+        self._estop_monitor = None
+
     
     def initialize(self) -> bool:
         """初始化系统"""
@@ -149,7 +152,19 @@ class FireSafetySystem:
             except Exception as e:
                 self._logger.warning(f"GPIO 指示灯控制器初始化失败: {e}")
                 self._indicator_controller = None
-            
+
+            # 初始化急停监听器（GPIO 输入）
+            try:
+                from src.output.gpio import init_estop_monitor
+                self._estop_monitor = init_estop_monitor(config.gpio, on_trigger=self._on_estop)
+                if self._estop_monitor is not None and self._estop_monitor.is_available():
+                    self._logger.info("急停监听器初始化完成（待启动）")
+                else:
+                    self._logger.info("急停监听器已初始化（sysfs 不可用或未启用，已禁用）")
+            except Exception as e:
+                self._logger.warning(f"急停监听器初始化失败: {e}")
+                self._estop_monitor = None
+
             self._logger.info("系统初始化完成")
             return True
             
@@ -221,7 +236,68 @@ class FireSafetySystem:
             image_base64=image_base64,
             message=f"{zone.name} 无人看管超过 {config.alarm.action_time} 秒，已切电"
         )
-    
+
+    def _on_estop(self):
+        """急停按钮触发回调 - 立即全局切电 + 语音插队 + Web 告警
+
+        由 GPIO 输入监听线程在下降沿触发，不经过状态机倒计时。
+        不改 zone 软件状态，仅发硬件切电指令 + 联动语音/Web。
+        """
+        self._logger.warning("[急停] 触发全局切电")
+
+        try:
+            from src.serial_port.serial_manager import serial_manager
+
+            zones = zone_manager.get_all_zones()
+
+            # 1. 全局切电：遍历所有已启用灶台
+            cutoff_count = 0
+            for sm in zones:
+                zone = sm.zone
+                if not zone.enabled:
+                    continue
+                try:
+                    if serial_manager.cutoff(zone.id):
+                        cutoff_count += 1
+                except Exception as e:
+                    self._logger.error(f"[急停] 切电 {zone.name} 失败: {e}")
+            self._logger.warning(f"[急停] 已对 {cutoff_count} 个灶台下发切电指令")
+
+            # 2. 语音：优先全局切电音，回退到首个启用灶台的 action.wav
+            estop_audio = self._get_estop_audio(zones)
+            if estop_audio:
+                try:
+                    voice_player.play_file(estop_audio, priority=True)
+                except Exception as e:
+                    self._logger.warning(f"[急停] 语音播报失败: {e}")
+
+            # 3. Web 告警弹窗（全局事件）
+            try:
+                sync_broadcast_alarm_event("all", "全部灶台", "estop", None)
+            except Exception as e:
+                self._logger.warning(f"[急停] Web 事件广播失败: {e}")
+
+        except Exception as e:
+            self._logger.error(f"[急停] 处理过程异常: {e}")
+
+    def _get_estop_audio(self, zones):
+        """获取急停语音路径：优先 audio_assets/no_zone/action.wav，
+        回退到第一个启用灶台的 action.wav"""
+        try:
+            no_zone = Path("audio_assets/no_zone/action.wav")
+            if no_zone.exists():
+                return str(no_zone)
+            for sm in zones:
+                zone = sm.zone
+                if not zone.enabled:
+                    continue
+                zpath = Path(f"audio_assets/{zone.id}/action.wav")
+                if zpath.exists():
+                    return str(zpath)
+        except Exception:
+            pass
+        return None
+
     def _on_state_change(self, event: StateChangeEvent):
         """状态变化回调 - 根据状态决定是否停止播报"""
         self._logger.info(f"[状态变化] {event.zone_name}: {event.old_state.value} -> {event.new_state.value}")
@@ -517,7 +593,11 @@ class FireSafetySystem:
         # 启动检测线程
         self._detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
         self._detection_thread.start()
-        
+
+        # 启动急停监听
+        if self._estop_monitor is not None:
+            self._estop_monitor.start()
+
         self._logger.info("系统已启动")
     
     def stop(self):
@@ -526,7 +606,11 @@ class FireSafetySystem:
         
         if self._detection_thread:
             self._detection_thread.join(timeout=2.0)
-        
+
+        # 停止急停监听
+        if self._estop_monitor is not None:
+            self._estop_monitor.stop()
+
         # 停止所有播报（标记为非活跃）
         with self._broadcast_lock:
             for zone_id, info in self._broadcast_stop_flags.items():
