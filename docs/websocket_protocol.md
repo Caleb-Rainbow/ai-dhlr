@@ -247,7 +247,7 @@ Content-Type: application/json
 | data.image | string | 否 | 抓拍图片 Base64 编码，格式 `data:image/jpeg;base64,...` |
 | data.message | string | 否 | 事件描述 |
 
-> **急停事件（`alarm_type: "estop"`）说明：** 当 GPIO 急停按钮（默认 `pin_estop=gpio10`）触发时推送，此时 `zone_id="all"`、`zone_name="全部灶台"`、`image` 为空，表示已对所有启用灶台执行全局切电并插队播报语音。急停事件**不上报**到远程服务器。
+> **急停事件（`alarm_type: "estop"`）说明：** 当 GPIO 急停按钮（默认 `pin_estop=gpio10`）触发时推送，此时 `zone_id="all"`、`zone_name="全部灶台"`、`image` 为空，表示已对所有启用灶台执行全局切电。急停事件**不上报**到远程服务器。
 
 #### network_interface — 网络状态变化
 

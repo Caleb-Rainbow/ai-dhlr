@@ -238,10 +238,10 @@ class FireSafetySystem:
         )
 
     def _on_estop(self):
-        """急停按钮触发回调 - 立即全局切电 + 语音插队 + Web 告警
+        """急停按钮触发回调 - 立即全局切电 + Web 告警
 
         由 GPIO 输入监听线程在下降沿触发，不经过状态机倒计时。
-        不改 zone 软件状态，仅发硬件切电指令 + 联动语音/Web。
+        不改 zone 软件状态，仅发硬件切电指令 + Web 告警弹窗。
         """
         self._logger.warning("[急停] 触发全局切电")
 
@@ -250,7 +250,7 @@ class FireSafetySystem:
 
             zones = zone_manager.get_all_zones()
 
-            # 1. 全局切电：遍历所有已启用灶台
+            # 全局切电：遍历所有已启用灶台
             cutoff_count = 0
             for sm in zones:
                 zone = sm.zone
@@ -263,15 +263,7 @@ class FireSafetySystem:
                     self._logger.error(f"[急停] 切电 {zone.name} 失败: {e}")
             self._logger.warning(f"[急停] 已对 {cutoff_count} 个灶台下发切电指令")
 
-            # 2. 语音：优先全局切电音，回退到首个启用灶台的 action.wav
-            estop_audio = self._get_estop_audio(zones)
-            if estop_audio:
-                try:
-                    voice_player.play_file(estop_audio, priority=True)
-                except Exception as e:
-                    self._logger.warning(f"[急停] 语音播报失败: {e}")
-
-            # 3. Web 告警弹窗（全局事件）
+            # Web 告警弹窗（全局事件）
             try:
                 sync_broadcast_alarm_event("all", "全部灶台", "estop", None)
             except Exception as e:
@@ -279,24 +271,6 @@ class FireSafetySystem:
 
         except Exception as e:
             self._logger.error(f"[急停] 处理过程异常: {e}")
-
-    def _get_estop_audio(self, zones):
-        """获取急停语音路径：优先 audio_assets/no_zone/action.wav，
-        回退到第一个启用灶台的 action.wav"""
-        try:
-            no_zone = Path("audio_assets/no_zone/action.wav")
-            if no_zone.exists():
-                return str(no_zone)
-            for sm in zones:
-                zone = sm.zone
-                if not zone.enabled:
-                    continue
-                zpath = Path(f"audio_assets/{zone.id}/action.wav")
-                if zpath.exists():
-                    return str(zpath)
-        except Exception:
-            pass
-        return None
 
     def _on_state_change(self, event: StateChangeEvent):
         """状态变化回调 - 根据状态决定是否停止播报"""
