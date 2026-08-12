@@ -158,8 +158,8 @@ async def test_rpc_whitelisted_action_forwards_and_notifies():
 async def test_rpc_rejects_non_whitelisted_action():
     bridge = FakeBridge()
     svc, nf = _svc_with_bridge(bridge)
-    # trigger_update（OTA git reset）不在白名单——勿用已白名单化的 patrol_force_cutoff
-    await svc.handle(1, {"id": 6, "cmd": "rpc", "action": "trigger_update"})
+    # toggle_fire（调试动作）不在白名单——勿用已白名单化的 trigger_update / patrol_force_cutoff
+    await svc.handle(1, {"id": 6, "cmd": "rpc", "action": "toggle_fire"})
     assert bridge.calls == []
     err = [o for o in nf.objs if o["event"] == "error"]
     assert err[0]["code"] == "bad_request" and err[0]["id"] == 6
@@ -175,6 +175,21 @@ async def test_rpc_whitelists_camera_zone_crud(action):
     svc, nf = _svc_with_bridge(bridge)
     await svc.handle(1, {"id": 60, "cmd": "rpc", "action": action, "params": {"zone_id": "z"}})
     assert bridge.calls == [(action, {"zone_id": "z"})]
+    assert not any(o["event"] == "error" for o in nf.objs)
+
+
+@pytest.mark.parametrize("action", [
+    "get_remote_config", "update_remote_config", "verify_remote_login",
+    "get_lora_config", "set_lora_config",
+    "get_usb_otg_mode", "set_usb_otg_mode",
+    "trigger_update", "install_dependencies",
+])
+async def test_rpc_whitelists_system_config(action):
+    """系统设置覆盖层：远程连接/LoRA/USB OTG/系统维护动作已纳入白名单，应转发给桥而非被拒。"""
+    bridge = FakeBridge()
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 70, "cmd": "rpc", "action": action, "params": {}})
+    assert bridge.calls == [(action, {})]
     assert not any(o["event"] == "error" for o in nf.objs)
 
 

@@ -18,10 +18,12 @@ from .protocol import MAX_FRAME_PAYLOAD
 
 logger = logging.getLogger(__name__)
 
-# BLE rpc 白名单（无鉴权，按「操作台需要 + 危险动作靠 App 侧 Destructive 二次确认」原则放行）。
-# 明确不放行：trigger_update（git reset+重启，OTA 级）、install_dependencies（pip）、
-# toggle_fire（调试）、硬件配置（serial/gpio/usb_otg）、remote 账密——
-# 这些非操作台日常动作，或参数会撞 BLE 8KB 帧上限。
+# BLE rpc 白名单（BLE 已配对绑定，按「操作台 + 系统设置覆盖层需要 + 危险动作靠 App 侧
+# Destructive 二次确认」原则放行）。
+# 系统设置覆盖层（远程连接/LoRA/USB OTG/系统维护）现已纳入：remote 账密、usb_otg、
+# trigger_update（三合一：git reset + pip + 部署蓝牙 + 重启两服务）、install_dependencies（pip）。
+# 安全面：依赖 BLE 配对绑定作第一道鉴权；trigger_update/install_dependencies 由 App
+# DestructiveConfirmDialog 二次确认；调试/底层动作（toggle_fire、serial/gpio 直配）仍不放行。
 # 注：zone/camera CRUD 已纳入（区域·摄像头管理覆盖层）——典型规模（ROI 多边形 + 2~10 条列表）
 # 单帧远小于 8KB；超帧由 _do_rpc 回「response too large」兜底。删除类靠 App 二次确认。
 RPC_ACTION_WHITELIST = frozenset({
@@ -42,6 +44,11 @@ RPC_ACTION_WHITELIST = frozenset({
     "get_cameras", "get_camera", "create_camera", "update_camera", "delete_camera",
     "get_usb_devices",
     "get_zone", "create_zone", "update_zone", "delete_zone",
+    # 系统设置覆盖层：远程连接(+校验登录) / LoRA / USB OTG / 系统维护(更新·装依赖)
+    "get_remote_config", "update_remote_config", "verify_remote_login",
+    "get_lora_config", "set_lora_config",
+    "get_usb_otg_mode", "set_usb_otg_mode",
+    "trigger_update", "install_dependencies",
 })
 
 # 图像多帧流式：单帧 payload 上限 8192，整图（告警快照 base64 数十 KB）必切块。
