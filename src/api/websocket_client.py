@@ -397,17 +397,21 @@ class RemoteWebSocketClient:
                     break
 
             except asyncio.CancelledError:
-                break
+                # 被 connect() 主动取消（新连接接管）或 disconnect() 取消，
+                # 都不是真正的断线：不要修改连接状态，也不要触发重连，
+                # 否则每次重连都会被取消的旧 receive loop 繁殖出新重连链，
+                # 形成自我维持的重连风暴。
+                return
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
                 logger.error(f"接收远程消息失败: {e}")
                 break
 
-        # 连接断开，触发重连
+        # 连接真正断开，触发重连
         self._state.is_connected = False
         if self._running:
-            asyncio.create_task(self._reconnect())
+            self._schedule_reconnect()
 
     def _handle_auth_failure(self, reason: str):
         """处理鉴权失败：清除Token，递增失败计数"""
@@ -484,32 +488,44 @@ class RemoteWebSocketClient:
             error = data.get('error', '未知错误')
             logger.warning(f"报警记录上传失败: msg_id={msg_id}, error={error}")
 
+    def _schedule_reconnect(self):
+        """调度重连任务，保证同一时间最多只有一个重连任务在运行。
+
+        旧的实现里 receive_loop 与 _reconnect 都会 create_task(self._reconnect)，
+        一旦出现并发就会各自繁殖，形成多条重连链互相取消。这里通过
+        _reconnect_task 做单例约束，从根上杜绝并发重连。
+        """
+        if not self._running or self._auth_stopped:
+            if self._auth_stopped:
+                logger.warning("鉴权失败次数已达上限，不再重连。请检查配置后重启服务")
+            return
+        if self._reconnect_task and not self._reconnect_task.done():
+            return  # 已有重连任务在排队，避免并发重连链
+        self._reconnect_task = asyncio.create_task(self._reconnect())
+
     async def _reconnect(self):
-        """重连逻辑（指数退避）"""
-        if not self._running:
-            return
+        """重连逻辑（指数退避）。单任务循环，避免多条重连链并发。"""
+        try:
+            while self._running and not self._auth_stopped:
+                self._state.reconnect_attempts += 1
 
-        if self._auth_stopped:
-            logger.warning("鉴权失败次数已达上限，不再重连。请检查配置后重启服务")
-            return
+                # 计算延迟（指数退避：1, 2, 4, 8, 16, 30...）
+                delay = min(2 ** (self._state.reconnect_attempts - 1), self._max_reconnect_delay)
+                logger.info(f"将在 {delay} 秒后尝试第 {self._state.reconnect_attempts} 次重连...")
 
-        self._state.reconnect_attempts += 1
+                await asyncio.sleep(delay)
 
-        # 计算延迟（指数退避：1, 2, 4, 8, 16, 30...）
-        delay = min(2 ** (self._state.reconnect_attempts - 1), self._max_reconnect_delay)
+                if not self._running or self._auth_stopped:
+                    break
 
-        logger.info(f"将在 {delay} 秒后尝试第 {self._state.reconnect_attempts} 次重连...")
-
-        await asyncio.sleep(delay)
-
-        if not self._running:
-            return
-
-        # 尝试重连
-        success = await self.connect()
-        if not success and self._running:
-            # 继续重连
-            asyncio.create_task(self._reconnect())
+                # 尝试重连，成功则退出循环；真正断线时由 receive_loop 重新调度
+                success = await self.connect()
+                if success:
+                    break
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._reconnect_task = None
 
     async def _resend_cached_messages(self):
         """补发离线缓存的消息"""
@@ -570,7 +586,7 @@ class RemoteWebSocketClient:
         if not success:
             logger.warning(f"初始连接失败: {self._state.last_error}")
             # 启动重连
-            asyncio.create_task(self._reconnect())
+            self._schedule_reconnect()
     
     async def stop(self):
         """停止客户端"""
