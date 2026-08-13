@@ -25,6 +25,10 @@ from .network_applier import current_network_status
 
 logger = logging.getLogger(__name__)
 
+# DEVICE_INFO 网络状态缓存的刷新间隔（秒）。current_network_status 同步跑 nmcli/ip，
+# 不能在读回调里现查（阻塞事件循环/超时 → BlueZ 回 0x0E），故后台定时刷新、读时取缓存。
+NETWORK_REFRESH_SEC = 3
+
 
 class GattServer:
     def __init__(
@@ -44,6 +48,9 @@ class GattServer:
         # 注：并发 handle 的 notify 可能跨 id 交错，但 App 端按命令 id 关联（rpc/image 各自等待器），
         # 单个 _do_rpc/_do_get_image 内 notify 顺序 await，故跨 id 交错不破坏正确性。
         self._inflight: set = set()
+        # DEVICE_INFO 的网络状态缓存：后台任务 _refresh_network_loop 定时刷新，_read 直接读，
+        # 不在读回调里现查 nmcli/ip（会阻塞 bless 事件循环 → BlueZ 回 0x0E Unlikely Error）。
+        self._network: Optional[dict] = None
 
     def bind_service(self, service) -> None:
         self._service = service
@@ -51,8 +58,14 @@ class GattServer:
     # ---------------------------- bless 回调 ---------------------------- #
     def _read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
         if str(characteristic.uuid) == P.DEVICE_INFO_UUID:
-            # 每次读取动态拼入当前网络状态（IP/上行类型会随配网变化）
-            return bytearray(P.build_device_info(**self._identity, network=current_network_status()))
+            # 读回调必须瞬间返回且永不抛异常：bless 在事件循环里同步调用本函数，若在此现查
+            # current_network_status（同步跑 nmcli/ip）会阻塞循环或超时 → BlueZ 回 0x0E(Unlikely
+            # Error)。网络状态取后台定时刷新的缓存 self._network（见 _refresh_network_loop）。
+            try:
+                return bytearray(P.build_device_info(**self._identity, network=self._network))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("DEVICE_INFO 构造失败，返回无网络兜底: %s", e)
+                return bytearray(P.build_device_info(**self._identity))
         return bytearray(b"")
 
     def _write(self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs) -> None:
@@ -102,10 +115,13 @@ class GattServer:
 
         await server.add_new_service(P.SERVICE_UUID)
 
+        # 预取一次网络状态填缓存，兼作 DEVICE_INFO 初始值；之后由后台任务定时刷新。
+        await self._refresh_network()
+
         await server.add_new_characteristic(
             P.SERVICE_UUID, P.DEVICE_INFO_UUID,
             GATTCharacteristicProperties.read,
-            bytearray(P.build_device_info(**self._identity, network=current_network_status())),
+            bytearray(P.build_device_info(**self._identity, network=self._network)),
             GATTAttributePermissions.readable,
         )
         await server.add_new_characteristic(
@@ -125,6 +141,26 @@ class GattServer:
         logger.info("BLE 配网服务已广播: name=%s advertising=%s", self._name, await server.is_advertising())
         # 看门狗：bless 广告停滞(停广播且无连接)时主动 stop()+start() 重广播
         asyncio.create_task(self._advertising_watchdog())
+        # DEVICE_INFO 网络状态缓存定时刷新（读回调不现查，见 _read 说明）
+        asyncio.create_task(self._refresh_network_loop())
+
+    async def _refresh_network(self) -> None:
+        """刷新一次网络状态缓存：nmcli/ip 子进程丢线程池跑，不阻塞事件循环。失败沿用旧缓存。"""
+        try:
+            self._network = await asyncio.to_thread(current_network_status)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("刷新网络状态失败，沿用旧缓存: %s", e)
+
+    async def _refresh_network_loop(self) -> None:
+        """后台定时刷新 DEVICE_INFO 的网络状态缓存。
+
+        current_network_status 同步跑 nmcli/ip，绝不能放进 _read（bless 在事件循环里同步调读回调，
+        阻塞或超时都会让 BlueZ 对 DEVICE_INFO 读回 0x0E Unlikely Error）。这里用 to_thread 把
+        子进程移出事件循环，读时只取缓存 → 读回调瞬间返回。
+        """
+        while True:
+            await self._refresh_network()
+            await asyncio.sleep(NETWORK_REFRESH_SEC)
 
     async def _advertising_watchdog(self) -> None:
         """仅当广告真正停滞(not advertising)且无连接时才 stop()+start() 重广播。
