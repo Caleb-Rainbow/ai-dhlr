@@ -19,7 +19,8 @@ from src.utils.config import (
     GpioConfig,
     SystemConfig,
     SerialConfig,
-    RemoteServerConfig
+    RemoteServerConfig,
+    HotspotConfig,
 )
 
 
@@ -179,10 +180,52 @@ class TestSystemConfig:
 
 class TestRemoteServerConfig:
     """测试 RemoteServerConfig 数据类"""
-    
+
     def test_default_values(self):
         """测试默认值"""
         config = RemoteServerConfig()
         assert config.enabled is False
         assert config.server_url == ""
         assert config.websocket_path == "dhlr/socket"
+
+
+class TestHotspotConfig:
+    """测试 HotspotConfig 数据类 + 配置解析/序列化往返"""
+
+    def test_default_values(self):
+        """默认开机自启热点为开（保持出厂行为）"""
+        config = HotspotConfig()
+        assert config.auto_start_on_boot is True
+
+    def test_custom_values(self):
+        config = HotspotConfig(auto_start_on_boot=False)
+        assert config.auto_start_on_boot is False
+
+    def test_appconfig_defaults_hotspot_when_absent(self):
+        """AppConfig 未传 hotspot 时 __post_init__ 兜底为默认"""
+        from src.utils.config import AppConfig, SystemConfig, InferenceConfig, \
+            DetectionConfig, ApiConfig, VoiceConfig, LoggingConfig, GpioConfig
+        cfg = AppConfig(
+            system=SystemConfig(), inference=InferenceConfig(),
+            detection=DetectionConfig(), cameras=[], zones=[],
+            api=ApiConfig(), voice=VoiceConfig(),
+            logging=LoggingConfig(), gpio=GpioConfig(),
+        )
+        assert cfg.hotspot is not None
+        assert cfg.hotspot.auto_start_on_boot is True
+
+    def test_parse_and_round_trip(self):
+        """_parse_config 读 hotspot 段，_to_dict 原样写回"""
+        from src.utils.config import ConfigManager
+        cm = ConfigManager()
+        cfg = cm._parse_config({"hotspot": {"auto_start_on_boot": False}})
+        assert cfg.hotspot.auto_start_on_boot is False
+        dumped = cm._to_dict(cfg)
+        assert dumped["hotspot"] == {"auto_start_on_boot": False}
+
+    def test_parse_default_when_section_absent(self):
+        """缺省 hotspot 段时默认 True"""
+        from src.utils.config import ConfigManager
+        cm = ConfigManager()
+        cfg = cm._parse_config({})
+        assert cfg.hotspot.auto_start_on_boot is True

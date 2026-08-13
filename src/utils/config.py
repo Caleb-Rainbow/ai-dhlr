@@ -136,6 +136,13 @@ class SerialConfig:
 
 
 @dataclass
+class HotspotConfig:
+    """WiFi 热点配置"""
+    # 开机是否自动启动热点（控制设备上的 hotspot-startup.service）
+    auto_start_on_boot: bool = True
+
+
+@dataclass
 class RemoteServerConfig:
     """远程服务器配置"""
     enabled: bool = False                    # 是否启用远程连接
@@ -163,6 +170,7 @@ class AppConfig:
     alarm: AlarmConfig = None      # 三阶段报警配置
     remote: RemoteServerConfig = None  # 远程服务器配置
     serial: SerialConfig = None    # 串口配置
+    hotspot: HotspotConfig = None  # WiFi 热点配置
 
     def __post_init__(self):
         """初始化可选配置"""
@@ -172,6 +180,8 @@ class AppConfig:
             self.remote = RemoteServerConfig()
         if self.serial is None:
             self.serial = SerialConfig()
+        if self.hotspot is None:
+            self.hotspot = HotspotConfig()
 
 
 class ConfigManager:
@@ -354,7 +364,13 @@ class ConfigManager:
             baudrate=serial_raw.get('baudrate', 9600),
             poll_interval=serial_raw.get('poll_interval', 1.0)
         )
-        
+
+        # 解析热点配置
+        hotspot_raw = raw.get('hotspot', {})
+        hotspot = HotspotConfig(
+            auto_start_on_boot=hotspot_raw.get('auto_start_on_boot', True)
+        )
+
         return AppConfig(
             system=system,
             inference=inference,
@@ -367,7 +383,8 @@ class ConfigManager:
             gpio=gpio,
             alarm=alarm,
             remote=remote,
-            serial=serial
+            serial=serial,
+            hotspot=hotspot
         )
 
     def _migrate_config(self, config: AppConfig) -> AppConfig:
@@ -510,6 +527,9 @@ class ConfigManager:
                 'port': config.serial.port,
                 'baudrate': config.serial.baudrate,
                 'poll_interval': config.serial.poll_interval
+            },
+            'hotspot': {
+                'auto_start_on_boot': config.hotspot.auto_start_on_boot
             }
         }
     

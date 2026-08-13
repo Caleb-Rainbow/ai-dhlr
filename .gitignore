@@ -36,6 +36,9 @@ config/config.yaml
 # Claude Code 本地配置（勿入库）
 .claude/
 
+# ZCode 会话本地配置（勿入库）
+.zcode/
+
 # 文档（二进制协议 pdf 等不纳入版本控制）
 docs/
 

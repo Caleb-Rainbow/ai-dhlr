@@ -76,6 +76,11 @@ const loadingGpioPins = ref(false);
 const usbOtgMode = ref<'host' | 'peripheral'>('host');
 const switchingUsbOtg = ref(false);
 
+// 开机自启热点
+const hotspotAutostart = ref(false);
+const hotspotSupported = ref(true);
+const switchingHotspot = ref(false);
+
 // 可用串口列表
 const serialPorts = ref<Array<{ device: string; name: string; description: string; hwid: string }>>([]);
 const loadingSerialPorts = ref(false);
@@ -202,6 +207,16 @@ const loadData = async () => {
     usbOtgMode.value = otgData.mode;
   } catch (e) { console.error('Failed to load USB OTG mode', e); }
 
+  // 加载开机自启热点状态
+  try {
+    const hsData = await ws.request<{ supported: boolean; enabled: boolean; active: boolean }>('get_hotspot_autostart');
+    hotspotAutostart.value = !!hsData.enabled;
+    hotspotSupported.value = hsData.supported !== false;
+  } catch (e) {
+    console.error('Failed to load hotspot autostart', e);
+    hotspotSupported.value = false;
+  }
+
   // 加载监测模式配置
   try {
     const modeData = await ws.request<{ zone_mode: 'zoned' | 'single'; zone_count: number }>('get_zone_mode');
@@ -249,6 +264,20 @@ const toggleUsbOtgMode = async () => {
     alert('切换 USB OTG 模式失败: ' + (e.message || e));
   } finally {
     switchingUsbOtg.value = false;
+  }
+};
+
+// 开机自启热点开关
+const toggleHotspot = async () => {
+  const newVal = !hotspotAutostart.value;
+  switchingHotspot.value = true;
+  try {
+    const result = await ws.request<{ enabled: boolean; message: string }>('set_hotspot_autostart', { enabled: newVal });
+    hotspotAutostart.value = !!result.enabled;
+  } catch (e: any) {
+    alert('切换开机自启热点失败: ' + (e.message || e));
+  } finally {
+    switchingHotspot.value = false;
   }
 };
 
@@ -967,6 +996,46 @@ onUnmounted(() => {
 
       <div class="text-xs text-text-muted leading-relaxed">
         切换 USB 工作模式。Host 模式下设备作为主控，可接入 U 盘、鼠标等外设；Device 模式下设备作为从设备，通过 USB 连接电脑时会被识别为 gadget 设备。
+      </div>
+    </div>
+
+    <!-- 开机自启热点 - Hotspot Autostart -->
+    <div v-if="hotspotSupported"
+      class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4 animate-fade-in-up">
+      <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
+        <Wifi class="w-4 h-4" /> 开机自启热点
+      </h3>
+
+      <div class="flex items-center justify-between p-4 rounded-2xl"
+        style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center"
+            :class="hotspotAutostart ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/20 text-gray-400'">
+            <Wifi class="w-5 h-5" />
+          </div>
+          <div>
+            <div class="font-medium text-text-primary">
+              {{ hotspotAutostart ? '已启用' : '已关闭' }}
+            </div>
+            <div class="text-xs text-text-muted">
+              {{ hotspotAutostart ? '下次开机自动启动热点' : '开机不自动启动热点' }}
+            </div>
+          </div>
+        </div>
+        <button @click="toggleHotspot" :disabled="switchingHotspot"
+          class="relative inline-flex items-center cursor-pointer disabled:opacity-50">
+          <div class="w-12 h-6 rounded-full transition-colors duration-300"
+            :class="hotspotAutostart ? 'bg-emerald-500' : 'bg-gray-500'">
+            <div class="absolute top-[2px] w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 flex items-center justify-center"
+              :class="hotspotAutostart ? 'left-[26px]' : 'left-[2px]'">
+              <Loader v-if="switchingHotspot" class="w-3 h-3 animate-spin text-gray-400" />
+            </div>
+          </div>
+        </button>
+      </div>
+
+      <div class="text-xs text-text-muted leading-relaxed">
+        控制设备开机是否自动启动 WiFi 热点（hotspot-startup.service）。开启后仅下次开机生效；关闭时会立即停止当前运行的热点。
       </div>
     </div>
 

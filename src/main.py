@@ -67,7 +67,15 @@ class FireSafetySystem:
             self._logger.info("=" * 50)
             self._logger.info(f"  {config.system.name} v{config.system.version}")
             self._logger.info("=" * 50)
-            
+
+            # 开机自启热点：按配置对齐 systemd 状态（手改 config.yaml 也能在启动时生效）
+            # 防御式：非 Linux / 无该单元时静默跳过，绝不阻断主服务
+            try:
+                from .utils.hotspot import reconcile_with_config
+                reconcile_with_config(config.hotspot.auto_start_on_boot)
+            except Exception as e:
+                self._logger.warning(f"开机自启热点同步失败（忽略）: {e}")
+
             # 初始化摄像头
             camera_manager.initialize_from_config(config.cameras)
             camera_manager.start_all()

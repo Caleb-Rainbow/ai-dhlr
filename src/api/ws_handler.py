@@ -131,7 +131,11 @@ class WSHandler:
             # USB OTG 模式
             "get_usb_otg_mode": self._get_usb_otg_mode,
             "set_usb_otg_mode": self._set_usb_otg_mode,
-            
+
+            # 开机自启热点开关
+            "get_hotspot_autostart": self._get_hotspot_autostart,
+            "set_hotspot_autostart": self._set_hotspot_autostart,
+
             # 系统更新
             "trigger_update": self._trigger_update,
 
@@ -903,7 +907,8 @@ class WSHandler:
                 "version": config.system.version,
                 "device_id": config.system.device_id,
                 "debug": config.system.debug,
-                "zone_mode": config.system.zone_mode
+                "zone_mode": config.system.zone_mode,
+                "hotspot_autostart": config.hotspot.auto_start_on_boot
             }
 
         if category in ["all", "voice"]:
@@ -1611,7 +1616,8 @@ class WSHandler:
         """
         更新代码后的后台部署任务（不阻断、失败可见）。
 
-        顺序：pip 依赖 → bootstrap-ble.sh（bluez + 服务注册 + enable）→ 重启两服务。
+        顺序：pip 依赖 → bootstrap-ble.sh（bluez + 服务注册 + enable）
+              → bootstrap-hotspot.sh（热点脚本安装 + 清理 Hotspot-N 残留）→ 重启两服务。
         各步相互隔离：BLE 相关失败仅记日志，绝不阻止主服务 ai-dhlr 重启
         （火灾监测可用性优先）。全部输出追加到 logs/bootstrap-ble.log，
         便于远程排查零干预升级结果。
@@ -1636,7 +1642,7 @@ class WSHandler:
 
         # 1) Python 依赖（含 bless）——失败仅告警，不阻断
         try:
-            _log("[1/3] pip install -r requirements.txt ...")
+            _log("[1/4] pip install -r requirements.txt ...")
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "pip", "install", "-r", str(project_root / "requirements.txt"),
                 cwd=project_root,
@@ -1659,7 +1665,7 @@ class WSHandler:
 
         # 2) bootstrap-ble.sh（bluez 检测 + 服务注册 + enable）——失败仅告警，不阻断
         try:
-            _log("[2/3] deploy/bootstrap-ble.sh ...")
+            _log("[2/4] deploy/bootstrap-ble.sh ...")
             proc = await asyncio.create_subprocess_exec(
                 "sudo", "-S", "bash", str(project_root / "deploy" / "bootstrap-ble.sh"),
                 cwd=project_root,
@@ -1680,8 +1686,31 @@ class WSHandler:
         except Exception as e:
             _log(f"[WARN] bootstrap-ble.sh 异常: {e}")
 
-        # 3) 重启服务——主服务必然重启（放最后）；BLE 已 enable 则起来，未就绪由其 Restart=always 自处理
-        _log("[3/3] 重启服务 ...")
+        # 3) bootstrap-hotspot.sh（热点脚本安装 + 清理 Hotspot-N 残留）——失败仅告警，不阻断
+        try:
+            _log("[3/4] deploy/bootstrap-hotspot.sh ...")
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "-S", "bash", str(project_root / "deploy" / "bootstrap-hotspot.sh"),
+                cwd=project_root,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(input=self._SUDO_PASSWORD.encode()), timeout=120.0
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                _log("[WARN] bootstrap-hotspot.sh 超时（>120s）")
+            else:
+                out = stdout.decode("utf-8", errors="replace") if stdout else ""
+                _log(f"[INFO ] bootstrap-hotspot.sh rc={proc.returncode}:\n{out[-1500:]}")
+        except Exception as e:
+            _log(f"[WARN] bootstrap-hotspot.sh 异常: {e}")
+
+        # 4) 重启服务——主服务必然重启（放最后）；BLE 已 enable 则起来，未就绪由其 Restart=always 自处理
+        _log("[4/4] 重启服务 ...")
         for unit in ("ai-dhlr", "ai-dhlr-ble"):
             try:
                 subprocess.run(
@@ -1878,6 +1907,69 @@ class WSHandler:
         except Exception as e:
             logger.error(f"设置 USB OTG 模式失败: {e}")
             raise ValueError(f"设置 USB OTG 模式失败: {e}")
+
+    # ==================== 开机自启热点处理器 ====================
+
+    async def _get_hotspot_autostart(self, params: dict) -> dict:
+        """获取开机自启热点状态。
+
+        返回 ``{supported, enabled, active, config_enabled}``：
+        - supported: 设备是否支持（Linux 且安装了 hotspot-startup.service）。
+        - enabled:   systemd is-enabled 实际状态。
+        - active:    wlan0 当前是否正处 AP（热点在跑）。
+        - config_enabled: config.yaml 中的配置值。
+        """
+        from ..utils.hotspot import get_state
+        try:
+            state = get_state()
+        except FileNotFoundError:
+            state = {"supported": False, "enabled": False, "active": False}
+        except Exception as e:
+            logger.error(f"读取开机自启热点状态失败: {e}")
+            raise ValueError(f"读取开机自启热点状态失败: {e}")
+        state["config_enabled"] = config_manager.config.hotspot.auto_start_on_boot
+        return state
+
+    async def _set_hotspot_autostart(self, params: dict) -> dict:
+        """开关开机自启热点。
+
+        - 开启：systemctl enable（仅下次开机生效，不动当前网络）。
+        - 关闭：systemctl disable --now + 立即停掉当前活动热点。
+        结果同步写回 config.yaml。
+        """
+        from ..utils.hotspot import apply_autostart
+        enabled = params.get("enabled")
+        if enabled is None or not isinstance(enabled, bool):
+            raise ValueError("缺少或非法的 enabled 参数（需 true/false）")
+
+        try:
+            result = apply_autostart(enabled)
+        except FileNotFoundError:
+            raise ValueError("当前设备不支持该操作（非 Linux 或无 sudo）")
+        except Exception as e:
+            logger.error(f"设置开机自启热点失败: {e}")
+            raise ValueError(f"设置开机自启热点失败: {e}")
+
+        if not result.get("supported"):
+            raise ValueError(result.get("error", "当前设备不支持开机自启热点控制"))
+        if not result.get("ok"):
+            raise ValueError(result.get("error", "操作失败"))
+
+        # 持久化到配置，保证启动同步与展示一致
+        config_manager.config.hotspot.auto_start_on_boot = enabled
+        config_manager.save()
+        logger.info(f"开机自启热点已{'启用' if enabled else '关闭'}")
+
+        # 回读真实状态（active 反映当前热点是否在跑）
+        from ..utils.hotspot import get_state as _get_state
+        fresh = _get_state()
+        return {
+            "supported": True,
+            "enabled": fresh.get("enabled", enabled),
+            "active": fresh.get("active", False),
+            "config_enabled": enabled,
+            "message": result.get("message", "设置已更新"),
+        }
 
 
 # 全局处理器实例

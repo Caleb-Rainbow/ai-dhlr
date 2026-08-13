@@ -44,10 +44,11 @@ RPC_ACTION_WHITELIST = frozenset({
     "get_cameras", "get_camera", "create_camera", "update_camera", "delete_camera",
     "get_usb_devices",
     "get_zone", "create_zone", "update_zone", "delete_zone",
-    # 系统设置覆盖层：远程连接(+校验登录) / LoRA / USB OTG / 系统维护(更新·装依赖)
+    # 系统设置覆盖层：远程连接(+校验登录) / LoRA / USB OTG / 开机自启热点 / 系统维护(更新·装依赖)
     "get_remote_config", "update_remote_config", "verify_remote_login",
     "get_lora_config", "set_lora_config",
     "get_usb_otg_mode", "set_usb_otg_mode",
+    "get_hotspot_autostart", "set_hotspot_autostart",
     "trigger_update", "install_dependencies",
 })
 

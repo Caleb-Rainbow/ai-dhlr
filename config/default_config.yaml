@@ -101,9 +101,17 @@ alarm:
 # 串口配置
 serial:
   enabled: true
-  port: "/dev/ttyS7"
+  port: "/dev/ttyS3"
   baudrate: 9600
   poll_interval: 1.0  # 轮询间隔（秒）
+
+# WiFi 热点配置
+hotspot:
+  # 开机是否自动启动 WiFi 热点（控制设备上的 hotspot-startup.service）
+  # true：开机自动启动热点（出厂默认）
+  # false：不自动启动热点
+  auto_start_on_boot: true
+
 
 # 远程服务器配置
 remote:
