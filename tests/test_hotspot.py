@@ -58,8 +58,9 @@ def test_parse_is_enabled(out, rc, expected):
 # --------------------------------------------------------------------------- #
 # get_state
 # --------------------------------------------------------------------------- #
-def test_get_state_non_linux_unsupported():
-    # 当前测试机非 Linux（win32）→ supported=False，且不调用 runner
+def test_get_state_non_linux_unsupported(monkeypatch):
+    # 强制非 Linux 平台 → supported=False，且不调用 runner（任意主机都确定）
+    monkeypatch.setattr(sys, "platform", "win32")
     fake = FakeRunner(lambda cmd: (0, ""))
     ha = HotspotAutostart(runner=fake)
     assert ha.get_state() == {"supported": False, "enabled": False, "active": False}
@@ -180,7 +181,8 @@ def test_apply_autostart_routes(monkeypatch):
 # --------------------------------------------------------------------------- #
 # reconcile_with_config
 # --------------------------------------------------------------------------- #
-def test_reconcile_skips_non_linux():
+def test_reconcile_skips_non_linux(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
     fake = FakeRunner(lambda cmd: (0, ""))
     hotspot.reconcile_with_config(True, runner=fake)
     assert fake.calls == []  # 非 Linux 直接跳过，不调 runner
