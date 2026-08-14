@@ -1709,6 +1709,32 @@ class WSHandler:
         except Exception as e:
             _log(f"[WARN] bootstrap-hotspot.sh 异常: {e}")
 
+        # 同步主服务配置（与 update.sh 一致）：deploy/ai-dhlr.service → /etc/systemd/system/
+        # 用于随 git 下发 systemd 配置变更（如 MALLOC_ARENA_MAX=2）。
+        # 不一致才 cp + daemon-reload，幂等；必须在 restart 之前，否则新进程仍用旧 service。
+        # 旧设备多经前端“立即更新系统”按钮升级，不同步则 service 变更永远到不了设备。
+        from pathlib import Path
+        deploy_service = project_root / "deploy" / "ai-dhlr.service"
+        etc_service = Path("/etc/systemd/system/ai-dhlr.service")
+        try:
+            if deploy_service.exists():
+                deploy_bytes = deploy_service.read_bytes()
+                etc_bytes = etc_service.read_bytes() if etc_service.exists() else b""
+                if deploy_bytes != etc_bytes:
+                    for cmd in (
+                        ["sudo", "-S", "cp", str(deploy_service), str(etc_service)],
+                        ["sudo", "-S", "systemctl", "daemon-reload"],
+                    ):
+                        subprocess.run(
+                            cmd,
+                            input=self._SUDO_PASSWORD.encode(),
+                            capture_output=True,
+                            timeout=30,
+                        )
+                    _log("[OK]   主服务配置已同步（cp + daemon-reload）")
+        except Exception as e:
+            _log(f"[WARN] 主服务配置同步失败（不阻断重启）: {e}")
+
         # 4) 重启服务——主服务必然重启（放最后）；BLE 已 enable 则起来，未就绪由其 Restart=always 自处理
         _log("[4/4] 重启服务 ...")
         for unit in ("ai-dhlr", "ai-dhlr-ble"):
