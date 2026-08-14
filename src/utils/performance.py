@@ -95,6 +95,11 @@ class PerformanceMonitor:
             has_psutil = False
             self._logger.warning("未安装psutil，CPU/内存监控不可用")
         
+        # malloc 碎片回收周期（秒）：定期把 glibc 已释放但未归还 OS 的内存还给系统，
+        # 缓解多线程 arena 导致的 RSS 膨胀（配合 systemd 的 MALLOC_ARENA_MAX=2 使用）
+        last_trim_time = time.time()
+        trim_interval = 300.0  # 每 5 分钟回收一次
+
         while self._running:
             try:
                 if has_psutil:
@@ -108,6 +113,13 @@ class PerformanceMonitor:
                 
                 # 获取 NPU 负载 (RK3568/RK3588)
                 self._npu_load = self._get_npu_load()
+
+                # 周期性归还 glibc malloc 碎片（仅 Linux/glibc 有效，其他平台静默跳过）
+                now = time.time()
+                if now - last_trim_time >= trim_interval:
+                    if self._trim_memory() > 0:
+                        self._logger.debug("malloc_trim 已归还碎片内存")
+                    last_trim_time = now
 
                 time.sleep(1.0)
                 
@@ -136,6 +148,27 @@ class PerformanceMonitor:
             pass
         return 0
     
+    def _trim_memory(self) -> int:
+        """
+        归还 glibc malloc 碎片内存给操作系统
+
+        多线程进程下 glibc 为每个 arena 囤积已释放的内存块不归还 OS，
+        导致 RSS 长期偏高。malloc_trim(0) 强制归还空闲堆顶之上的碎片。
+        仅 glibc 平台（Linux）有效，Windows 等平台无此符号会静默跳过。
+
+        Returns:
+            >0 表示释放了内存；0 表示无内存可释放；-1 表示调用失败/平台不支持
+        """
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None)  # 复用进程已加载的 libc，跨发行版兼容
+            libc.malloc_trim.argtypes = [ctypes.c_size_t]
+            libc.malloc_trim.restype = ctypes.c_int
+            return libc.malloc_trim(0)
+        except (OSError, AttributeError) as e:
+            self._logger.debug(f"malloc_trim 不可用（忽略）: {e}")
+            return -1
+
     def record_inference_time(self, time_ms: float):
         """
         记录推理时间

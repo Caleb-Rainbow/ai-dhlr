@@ -1,0 +1,28 @@
+[Unit]
+Description=AI DHLR Python Script
+After=network.target hotspot-startup.service sound.target
+
+[Service]
+User=linaro
+# 在启动 Python 之前，由 root 执行权限修改
+PermissionsStartOnly=true
+ExecStartPre=/bin/bash -c "chmod -R 777 /sys/external_gpio/"
+# 增加音频组权限
+SupplementaryGroups=audio
+WorkingDirectory=/home/linaro/ai-dhlr
+# 强制环境变量
+Environment=SDL_AUDIODRIVER=alsa
+Environment=AUDIODEV=hw:0,0
+# 限制 glibc 内存池数量，减少多线程 malloc 碎片导致的 RSS 膨胀
+# （glibc 默认 8×核数=32 个 arena；本机 4 核 → 32 个，碎片各自囤积不归还 OS）
+# 必须在进程启动前由 systemd 注入，代码内 os.environ 设置无效
+Environment=MALLOC_ARENA_MAX=2
+# 延时启动，确保硬件就绪
+ExecStartPre=/bin/sleep 5
+ExecStart=/home/linaro/miniforge3/envs/dhlr_env/bin/python /home/linaro/ai-dhlr/src/main.py
+
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
