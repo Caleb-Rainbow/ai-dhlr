@@ -7,6 +7,10 @@ User=linaro
 # 在启动 Python 之前，由 root 执行权限修改
 PermissionsStartOnly=true
 ExecStartPre=/bin/bash -c "chmod -R 777 /sys/external_gpio/"
+# 放开 NPU debugfs 读取权限：服务降权为 linaro 后读不了 debugfs（默认仅 root），
+# 会导致 NPU 核心占用恒为 0。与 external_gpio 同理由 root 预先放开；用 || true 容错，
+# 即便 debugfs 权限修改失败也不阻断主服务启动（仅 NPU 负载采集降级为 0）
+ExecStartPre=/bin/bash -c "chmod a+x /sys/kernel/debug/ 2>/dev/null; chmod -R a+rX /sys/kernel/debug/rknpu/ 2>/dev/null || true"
 # 增加音频组权限
 SupplementaryGroups=audio
 WorkingDirectory=/home/linaro/ai-dhlr
