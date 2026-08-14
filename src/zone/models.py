@@ -25,7 +25,8 @@ class Zone:
     camera_id: str
     roi: List[Tuple[float, float]]
     enabled: bool = True
-    
+    camera_ids: List[str] = field(default_factory=list)  # 多摄像头绑定（不分区模式）
+
     # 运行时状态
     state: ZoneState = ZoneState.IDLE
     is_fire_on: bool = False           # 是否开火
@@ -37,13 +38,19 @@ class Zone:
     current_value: float = 0.0         # 实时电流值（安培 x 100，或原始值）
     temperature: float = 0.0           # 实时温度值 (°C)
     last_snapshot_path: Optional[str] = None  # 最后截图路径
-    
+
+    @property
+    def effective_camera_ids(self) -> List[str]:
+        """实际生效的摄像头列表：优先 camera_ids，为空则回退到单个 camera_id（向后兼容）"""
+        return self.camera_ids if self.camera_ids else [self.camera_id]
+
     def to_dict(self) -> dict:
         """转换为字典（用于API响应）"""
         return {
             "id": self.id,
             "name": self.name,
             "camera_id": self.camera_id,
+            "camera_ids": list(self.camera_ids),
             "roi": [list(p) for p in self.roi],
             "enabled": self.enabled,
             "state": self.state.value,

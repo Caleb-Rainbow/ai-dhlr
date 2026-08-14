@@ -39,7 +39,8 @@ class ZoneStateMachine:
             name=zone_config.name,
             camera_id=zone_config.camera_id,
             roi=zone_config.roi,
-            enabled=zone_config.enabled
+            enabled=zone_config.enabled,
+            camera_ids=list(getattr(zone_config, 'camera_ids', []) or [])
         )
         
         self._logger = get_logger()

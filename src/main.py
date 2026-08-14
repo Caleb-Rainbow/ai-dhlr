@@ -351,7 +351,33 @@ class FireSafetySystem:
         except Exception as e:
             self._logger.error(f"图像Base64编码失败: {e}")
             return None
-    
+
+    def _stitch_frames(self, frames: list):
+        """将多个摄像头帧横向拼接为一张（多摄像头留证用）
+
+        - 无帧返回 None
+        - 单帧原样返回
+        - 多帧统一到最小高度后横向拼接（cv2.hconcat），用于告警截图与上报
+        """
+        frames = [f for f in frames if f is not None]
+        if not frames:
+            return None
+        if len(frames) == 1:
+            return frames[0]
+        try:
+            target_h = min(f.shape[0] for f in frames)
+            resized = []
+            for f in frames:
+                if f.shape[0] != target_h:
+                    new_w = max(1, int(f.shape[1] * target_h / f.shape[0]))
+                    resized.append(cv2.resize(f, (new_w, target_h)))
+                else:
+                    resized.append(f)
+            return cv2.hconcat(resized)
+        except Exception as e:
+            self._logger.error(f"多摄像头帧拼接失败: {e}")
+            return frames[0]
+
     def _ensure_broadcast_manager_running(self):
         """确保播报管理线程在运行"""
         if self._broadcast_threads.get("_manager") is None or not self._broadcast_threads["_manager"].is_alive():
@@ -502,36 +528,50 @@ class FireSafetySystem:
                         sm.force_idle()
                         continue
                     
-                    # 获取对应摄像头的帧
-                    camera = camera_manager.get_camera(sm.zone.camera_id)
-                    if not camera or not camera.is_online:
+                    # 多摄像头遍历：不分区模式下 effective_camera_ids 可含多个摄像头，
+                    # 任一摄像头检测到人即视为有人（OR 聚合）；分区模式下仍为单摄像头。
+                    cam_ids = sm.zone.effective_camera_ids
+                    multi_camera = len(cam_ids) > 1
+                    has_person = False
+                    frames_for_stitch = []
+
+                    for cam_id in cam_ids:
+                        camera = camera_manager.get_camera(cam_id)
+                        if not camera or not camera.is_online:
+                            continue
+                        frame = camera.get_frame()
+                        if frame is None:
+                            continue
+                        frames_for_stitch.append(frame)
+
+                        # 单摄像头沿用 zone 的 ROI；多摄像头按全画面检测
+                        roi_for_cam = None if multi_camera else sm.zone.roi
+                        cam_has_person, _ = self._detector.check_zone_multi(
+                            sm.zone.id, cam_id, frame, roi_for_cam
+                        )
+                        has_person = has_person or cam_has_person
+
+                    # 所有摄像头均无可用帧时跳过该灶台（状态冻结，避免误判离人）
+                    if not frames_for_stitch:
                         continue
-                    
-                    frame = camera.get_frame()
-                    if frame is None:
-                        continue
-                    
-                    # 检测该区域是否有人
-                    has_person, _ = self._detector.check_zone(
-                        sm.zone.id,
-                        frame,
-                        sm.zone.roi
-                    )
-                    
+
                     # 从串口管理器获取动火状态（如果可用）
                     is_fire_on = False
                     if serial_mgr:
                         is_fire_on = serial_mgr.is_fire_on(sm.zone.id)
                     else:
                         is_fire_on = zone_manager._fire_states.get(sm.zone.id, False)
-                    
+
+                    # 多摄像头时拼接代表帧，供状态机截图与告警上传使用
+                    representative_frame = self._stitch_frames(frames_for_stitch)
+
                     # 始终更新检测结果到 zone 对象，确保巡检模式下也能获取实时状态
                     sm.zone.has_person = has_person
                     sm.zone.is_fire_on = is_fire_on
-                    
+
                     # 仅在非巡检模式下更新状态机（触发状态转换和回调）
                     if not patrol_manager.is_active:
-                        sm.update(has_person, is_fire_on, frame)
+                        sm.update(has_person, is_fire_on, representative_frame)
                 
                 # 更新 GPIO 指示灯状态
                 if hasattr(self, '_indicator_controller') and self._indicator_controller:

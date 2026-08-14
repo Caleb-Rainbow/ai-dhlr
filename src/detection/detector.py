@@ -240,9 +240,60 @@ class PersonDetector:
                 )
             
             smoothed_has_person = self._zone_states[zone_id].update(raw_has_person)
-        
+
         return smoothed_has_person, in_roi_persons
-    
+
+    def check_zone_multi(self, zone_id: str, camera_id: str, frame: np.ndarray,
+                        roi: Optional[List[Tuple[float, float]]] = None) -> Tuple[bool, List[Detection]]:
+        """
+        检查指定区域的某个摄像头是否有人（多摄像头场景）
+
+        不分区模式下，一个逻辑区域由多个摄像头共同覆盖；每个摄像头独立维护帧平滑状态，
+        避免单摄像头抖动污染整体判断。调用方对多个摄像头的返回值做 OR 聚合即可。
+
+        防抖状态按 (zone_id, camera_id) 维度独立存储，key 形如 "{zone_id}@{camera_id}"。
+
+        Args:
+            zone_id: 灶台ID
+            camera_id: 摄像头ID
+            frame: 图像帧
+            roi: ROI区域坐标（可选）；为空或不足3点时按全画面检测
+
+        Returns:
+            (该摄像头是否有人(平滑后), 该摄像头画面内的检测结果列表)
+        """
+        # 执行检测
+        persons = self.detect_frame(frame)
+
+        if not persons:
+            raw_has_person = False
+            in_roi_persons = []
+        elif roi and len(roi) >= 3:
+            # 有有效 ROI 才过滤
+            h, w = frame.shape[:2]
+            in_roi_persons = [
+                p for p in persons
+                if detection_in_roi(p, roi, w, h, use_center=True)
+            ]
+            raw_has_person = len(in_roi_persons) > 0
+        else:
+            # 全画面检测（不分区多摄像头默认）
+            in_roi_persons = persons
+            raw_has_person = True
+
+        # 按 (zone_id, camera_id) 维度做帧平滑
+        state_key = f"{zone_id}@{camera_id}"
+        with self._lock:
+            if state_key not in self._zone_states:
+                self._zone_states[state_key] = ZoneDetectionState(
+                    zone_id=state_key,
+                    no_person_threshold=self._detection_config.no_person_threshold,
+                    person_present_threshold=self._detection_config.person_present_threshold
+                )
+            smoothed_has_person = self._zone_states[state_key].update(raw_has_person)
+
+        return smoothed_has_person, in_roi_persons
+
     def get_zone_state(self, zone_id: str) -> bool:
         """获取灶台区域的当前状态"""
         with self._lock:
@@ -251,10 +302,12 @@ class PersonDetector:
         return False
     
     def reset_zone(self, zone_id: str):
-        """重置灶台区域状态"""
+        """重置灶台区域状态（含该 zone 下所有摄像头的多摄像头防抖状态）"""
         with self._lock:
-            if zone_id in self._zone_states:
-                self._zone_states[zone_id].reset()
+            prefix = f"{zone_id}@"
+            for key in list(self._zone_states.keys()):
+                if key == zone_id or key.startswith(prefix):
+                    self._zone_states[key].reset()
     
     def release(self):
         """释放资源"""

@@ -27,7 +27,7 @@ const canAddZone = computed(() => {
 const showAddModal = ref(false);
 const showEditModal = ref(false);
 
-const addForm = ref({ camera_id: '', serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false });
+const addForm = ref({ camera_id: '', camera_ids: [] as string[], serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false });
 
 // 根据灶台名称提取编号
 const extractZoneNumber = (zoneName: string): number => {
@@ -44,6 +44,14 @@ const calculateSerialIndex = (zoneNumber: number): number => {
 const getCameraName = (cameraId: string): string => {
     const camera = cameras.value.find(c => c.id === cameraId);
     return camera?.name || cameraId;
+};
+
+// 获取灶台关联的所有摄像头名称（多摄像头用顿号拼接，用于卡片展示）
+const getCameraNames = (zone: ZoneConfig): string => {
+    if (zone.camera_ids && zone.camera_ids.length > 0) {
+        return zone.camera_ids.map(id => getCameraName(id)).join('、');
+    }
+    return getCameraName(zone.camera_id);
 };
 
 // 自动生成灶台名称
@@ -88,7 +96,7 @@ const updateNextZoneName = () => {
 
 // Edit Zone State
 const currentEditZone = ref<ZoneConfig | null>(null);
-const editForm = ref({ name: '', camera_id: '', serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false });
+const editForm = ref({ name: '', camera_id: '', camera_ids: [] as string[], serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false });
 
 // ROI Editor State
 const roiCanvas = ref<HTMLCanvasElement | null>(null);
@@ -145,21 +153,33 @@ const toggleZone = async (zone: ZoneConfig) => {
 };
 
 const submitAdd = async () => {
-    if (!addForm.value.camera_id) {
+    // 不分区模式校验多摄像头；分区模式校验单摄像头
+    if (isSingleMode.value) {
+        if (addForm.value.camera_ids.length === 0) {
+            alert('请至少选择一个摄像头');
+            return;
+        }
+    } else if (!addForm.value.camera_id) {
         alert('请选择摄像头');
         return;
     }
     try {
         const zoneName = nextZoneName.value;
-        await ws.request('create_zone', {
+        const payload: Record<string, unknown> = {
             name: zoneName,
-            camera_id: addForm.value.camera_id,
             serial_index: addForm.value.serial_index,
             fire_current_threshold: Math.round(addForm.value.fire_current_threshold * 100),
             enable_temp_sensor: addForm.value.enable_temp_sensor
-        });
+        };
+        if (isSingleMode.value) {
+            payload.camera_ids = addForm.value.camera_ids;
+            payload.camera_id = addForm.value.camera_ids[0];
+        } else {
+            payload.camera_id = addForm.value.camera_id;
+        }
+        await ws.request('create_zone', payload);
         showAddModal.value = false;
-        addForm.value = { camera_id: '', serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false };
+        addForm.value = { camera_id: '', camera_ids: [], serial_index: 1, fire_current_threshold: 1.00, enable_temp_sensor: false };
         await loadData();
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : '添加失败';
@@ -246,6 +266,7 @@ const openEditZone = (zone: ZoneConfig) => {
     editForm.value = {
         name: zone.name,
         camera_id: zone.camera_id,
+        camera_ids: [...(zone.camera_ids || [])],
         serial_index: zone.serial_index || 0,
         fire_current_threshold: (zone.fire_current_threshold || 100) / 100,
         enable_temp_sensor: zone.temp_sensor_address != null
@@ -253,8 +274,10 @@ const openEditZone = (zone: ZoneConfig) => {
     roiPoints.value = zone.roi || [];
     showEditModal.value = true;
 
-    // 使用 WebSocket 获取摄像头预览
-    loadCameraPreview(zone.camera_id);
+    // 分区模式才加载摄像头预览用于画 ROI；不分区多摄像头为全画面检测，无需画 ROI
+    if (!isSingleMode.value) {
+        loadCameraPreview(zone.camera_id);
+    }
 };
 
 // 当摄像头变化时刷新预览
@@ -596,21 +619,33 @@ const findNearestPoint = (x: number, y: number, threshold: number = 0.05): numbe
 
 const saveEditZone = async () => {
     if (!currentEditZone.value) return;
-    if (!editForm.value.camera_id) {
+    if (isSingleMode.value) {
+        if (editForm.value.camera_ids.length === 0) {
+            alert('请至少选择一个摄像头');
+            return;
+        }
+    } else if (!editForm.value.camera_id) {
         alert('请选择关联摄像头');
         return;
     }
 
     try {
-        await ws.request('update_zone', {
+        const payload: Record<string, unknown> = {
             zone_id: currentEditZone.value.id,
             name: editForm.value.name,
-            camera_id: editForm.value.camera_id,
             serial_index: editForm.value.serial_index,
             fire_current_threshold: Math.round(editForm.value.fire_current_threshold * 100),
-            enable_temp_sensor: editForm.value.enable_temp_sensor,
-            roi: roiPoints.value
-        });
+            enable_temp_sensor: editForm.value.enable_temp_sensor
+        };
+        if (isSingleMode.value) {
+            payload.camera_ids = editForm.value.camera_ids;
+            payload.camera_id = editForm.value.camera_ids[0];
+            // 不分区多摄像头为全画面检测，不传 ROI
+        } else {
+            payload.camera_id = editForm.value.camera_id;
+            payload.roi = roiPoints.value;
+        }
+        await ws.request('update_zone', payload);
         showEditModal.value = false;
         await loadData();
     } catch (e) {
@@ -713,7 +748,7 @@ onUnmounted(() => {
                                 <div class="flex items-center gap-2 mt-1">
                                     <span class="text-xs text-text-muted flex items-center gap-1">
                                         <CameraIcon class="w-3 h-3 text-blue-400" />
-                                        {{ getCameraName(zone.camera_id) }}
+                                        {{ getCameraNames(zone) }}
                                     </span>
                                     <span class="w-1 h-1 rounded-full bg-text-muted"></span>
                                     <span class="text-xs text-amber-400">阈值: {{ ((zone.fire_current_threshold || 100) /
@@ -768,8 +803,12 @@ onUnmounted(() => {
                     <p class="text-xs text-text-muted mt-1">系统自动生成</p>
                 </div>
                 <div class="space-y-1">
-                    <label class="text-xs text-text-muted">关联摄像头</label>
-                    <div class="relative">
+                    <label class="text-xs text-text-muted">
+                        关联摄像头
+                        <span v-if="isSingleMode" class="opacity-70">（可多选，任一检测到人即视为有人）</span>
+                    </label>
+                    <!-- 分区模式：单选 -->
+                    <div v-if="!isSingleMode" class="relative">
                         <select v-model="addForm.camera_id"
                             class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary"
                             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
@@ -778,6 +817,18 @@ onUnmounted(() => {
                         </select>
                         <!-- Chevron Icon -->
                         <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">▼</div>
+                    </div>
+                    <!-- 不分区模式：多选 -->
+                    <div v-else class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 rounded-xl border"
+                        style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                        <label v-for="cam in cameras" :key="cam.id"
+                            class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all"
+                            :class="addForm.camera_ids.includes(cam.id) ? 'bg-primary/20 text-text-primary' : 'text-text-muted hover:bg-white/5'">
+                            <input type="checkbox" :value="cam.id" v-model="addForm.camera_ids" class="accent-primary w-4 h-4">
+                            <CameraIcon class="w-3 h-3 text-blue-400 shrink-0" />
+                            <span class="text-sm truncate">{{ cam.name }}</span>
+                        </label>
+                        <p v-if="cameras.length === 0" class="col-span-2 text-xs text-text-muted text-center py-2">暂无摄像头，请先添加</p>
                     </div>
                 </div>
                 <div class="space-y-1">
@@ -840,8 +891,12 @@ onUnmounted(() => {
                 </div>
                 <!-- 关联摄像头 -->
                 <div class="space-y-1">
-                    <label class="text-xs text-text-muted">关联摄像头</label>
-                    <div class="relative">
+                    <label class="text-xs text-text-muted">
+                        关联摄像头
+                        <span v-if="isSingleMode" class="opacity-70">（可多选，任一检测到人即视为有人）</span>
+                    </label>
+                    <!-- 分区模式：单选 -->
+                    <div v-if="!isSingleMode" class="relative">
                         <select v-model="editForm.camera_id" @change="onCameraChange"
                             class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all appearance-none cursor-pointer text-text-primary"
                             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
@@ -849,6 +904,18 @@ onUnmounted(() => {
                                 cam.name }}</option>
                         </select>
                         <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">▼</div>
+                    </div>
+                    <!-- 不分区模式：多选 -->
+                    <div v-else class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 rounded-xl border"
+                        style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
+                        <label v-for="cam in cameras" :key="cam.id"
+                            class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all"
+                            :class="editForm.camera_ids.includes(cam.id) ? 'bg-primary/20 text-text-primary' : 'text-text-muted hover:bg-white/5'">
+                            <input type="checkbox" :value="cam.id" v-model="editForm.camera_ids" class="accent-primary w-4 h-4">
+                            <CameraIcon class="w-3 h-3 text-blue-400 shrink-0" />
+                            <span class="text-sm truncate">{{ cam.name }}</span>
+                        </label>
+                        <p v-if="cameras.length === 0" class="col-span-2 text-xs text-text-muted text-center py-2">暂无摄像头，请先添加</p>
                     </div>
                 </div>
                 <!-- 串口索引和电流阈值 -->
@@ -899,8 +966,8 @@ onUnmounted(() => {
                     当前传感器地址: {{ currentEditZone.temp_sensor_address }}
                 </p>
 
-                <!-- ROI 区域编辑 -->
-                <div class="space-y-2">
+                <!-- ROI 区域编辑（仅分区模式；不分区多摄像头为全画面检测，无需画 ROI） -->
+                <div v-if="!isSingleMode" class="space-y-2">
                     <label class="text-xs text-text-muted">ROI 区域</label>
                     <div
                         class="relative bg-black rounded-xl overflow-hidden select-none touch-none border border-white/10 aspect-video flex items-center justify-center">

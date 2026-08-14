@@ -48,6 +48,7 @@ export interface ZoneConfig {
     id: string;
     name: string;
     camera_id: string;
+    camera_ids?: string[];  // 多摄像头绑定（不分区模式）：任一检测到人即视为有人
     enabled: boolean;
     roi: number[][]; // [[x,y], [x,y], ...]
     serial_index?: number;  // 串口分区索引

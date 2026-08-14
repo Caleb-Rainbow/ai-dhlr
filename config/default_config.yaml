@@ -55,6 +55,15 @@ zones: []
   #   enabled: true
   #   serial_index: 0  # 串口分区索引
   #   fire_current_threshold: 100  # 动火电流阈值 (100=1.00A)
+  # 不分区模式多摄像头示例（任一摄像头检测到人即视为有人，全画面检测，无需 ROI）:
+  # - id: "zone_1"
+  #   name: "灶台区域"
+  #   camera_id: "camera_1"  # 兼容字段，取 camera_ids 首个
+  #   camera_ids: ["camera_1", "camera_2"]  # 多摄像头绑定（不分区模式）
+  #   roi: []
+  #   enabled: true
+  #   serial_index: 1
+  #   fire_current_threshold: 100
 
 # API服务配置
 api:

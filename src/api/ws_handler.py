@@ -192,6 +192,7 @@ class WSHandler:
                 "id": z.zone.id,
                 "name": z.zone.name,
                 "camera_id": z.zone.camera_id,
+                "camera_ids": list(z.zone.camera_ids),
                 "roi": [list(p) for p in z.zone.roi],
                 "enabled": z.zone.enabled
             }
@@ -221,6 +222,7 @@ class WSHandler:
             "id": z.id,
             "name": z.name,
             "camera_id": z.camera_id,
+            "camera_ids": list(z.camera_ids),
             "roi": [list(p) for p in z.roi],
             "enabled": z.enabled
         }
@@ -229,21 +231,30 @@ class WSHandler:
         """创建灶台"""
         name = params.get("name")
         camera_id = params.get("camera_id")
+        camera_ids = list(params.get("camera_ids", []) or [])
         roi = params.get("roi", [])
         enabled = params.get("enabled", True)
         serial_index = params.get("serial_index", 0)
         fire_current_threshold = params.get("fire_current_threshold", 100)
         enable_temp_sensor = params.get("enable_temp_sensor", False)  # 是否启用温度传感器
-        
+
         if not name:
             raise ValueError("灶台名称不能为空")
-        if not camera_id:
-            raise ValueError("摄像头ID不能为空")
-        
-        # 验证摄像头存在
+
+        # 摄像头校验：优先多摄像头（不分区模式）；为空则回退单摄像头（向后兼容）
         from ..camera.manager import camera_manager
-        if not camera_manager.get_camera(camera_id):
-            raise ValueError(f"摄像头 '{camera_id}' 不存在")
+        if camera_ids:
+            for cid in camera_ids:
+                if not camera_manager.get_camera(cid):
+                    raise ValueError(f"摄像头 '{cid}' 不存在")
+            # 兼容：未单独提供 camera_id 时取首个
+            if not camera_id:
+                camera_id = camera_ids[0]
+        else:
+            if not camera_id:
+                raise ValueError("摄像头ID不能为空")
+            if not camera_manager.get_camera(camera_id):
+                raise ValueError(f"摄像头 '{camera_id}' 不存在")
         
         # 生成ID
         from ..zone.state_machine import zone_manager
@@ -286,7 +297,8 @@ class WSHandler:
             enabled=enabled,
             serial_index=serial_index,
             fire_current_threshold=fire_current_threshold,
-            temp_sensor_address=temp_sensor_address
+            temp_sensor_address=temp_sensor_address,
+            camera_ids=camera_ids
         )
         
         # 添加到配置
@@ -316,6 +328,7 @@ class WSHandler:
             "id": zone_id,
             "name": name,
             "camera_id": camera_id,
+            "camera_ids": camera_ids,
             "roi": roi,
             "enabled": enabled,
             "serial_index": serial_index,
@@ -340,6 +353,13 @@ class WSHandler:
             sm.zone.name = params["name"]
         if "camera_id" in params:
             sm.zone.camera_id = params["camera_id"]
+        if "camera_ids" in params:
+            new_camera_ids = list(params["camera_ids"] or [])
+            from ..camera.manager import camera_manager
+            for cid in new_camera_ids:
+                if not camera_manager.get_camera(cid):
+                    raise ValueError(f"摄像头 '{cid}' 不存在")
+            sm.zone.camera_ids = new_camera_ids
         if "roi" in params:
             sm.update_config(roi=params["roi"])
         if "enabled" in params:
@@ -361,6 +381,8 @@ class WSHandler:
                     cfg.name = params["name"]
                 if "camera_id" in params:
                     cfg.camera_id = params["camera_id"]
+                if "camera_ids" in params:
+                    cfg.camera_ids = list(params["camera_ids"] or [])
                 if "roi" in params:
                     cfg.roi = [tuple(p) for p in params["roi"]]
                 if "enabled" in params:

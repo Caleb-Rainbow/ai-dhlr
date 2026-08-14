@@ -35,6 +35,12 @@ class ZoneConfig:
     serial_index: int = 1  # 串口分区索引（从1开始，1对应地址0x01）
     fire_current_threshold: int = 100  # 动火电流阈值（100=1.00A）
     temp_sensor_address: Optional[int] = None  # 温度传感器地址, None 表示未绑定
+    camera_ids: List[str] = field(default_factory=list)  # 多摄像头绑定（不分区模式）：任一摄像头检测到人即视为有人
+
+    @property
+    def effective_camera_ids(self) -> List[str]:
+        """实际生效的摄像头列表：优先使用 camera_ids，为空则回退到单个 camera_id（向后兼容）"""
+        return self.camera_ids if self.camera_ids else [self.camera_id]
 
 
 
@@ -291,15 +297,21 @@ class ConfigManager:
         zones = []
         for zone_raw in raw.get('zones', []):
             roi = [tuple(point) for point in zone_raw.get('roi', [])]
+            camera_ids_raw = list(zone_raw.get('camera_ids', []) or [])
+            # camera_id 兼容：未配置时回退到 camera_ids 首个（多摄像头场景）
+            camera_id = zone_raw.get('camera_id')
+            if not camera_id and camera_ids_raw:
+                camera_id = camera_ids_raw[0]
             zones.append(ZoneConfig(
                 id=zone_raw['id'],
                 name=zone_raw.get('name', zone_raw['id']),
-                camera_id=zone_raw['camera_id'],
+                camera_id=camera_id or '',
                 roi=roi,
                 enabled=zone_raw.get('enabled', True),
                 serial_index=zone_raw.get('serial_index', 0),
                 fire_current_threshold=zone_raw.get('fire_current_threshold', 100),
-                temp_sensor_address=zone_raw.get('temp_sensor_address')  # None 表示未绑定
+                temp_sensor_address=zone_raw.get('temp_sensor_address'),  # None 表示未绑定
+                camera_ids=camera_ids_raw
             ))
         
         # 解析API配置
@@ -489,6 +501,7 @@ class ConfigManager:
                     'id': zone.id,
                     'name': zone.name,
                     'camera_id': zone.camera_id,
+                    'camera_ids': list(zone.camera_ids),
                     'roi': [list(point) for point in zone.roi],
                     'enabled': zone.enabled,
                     'serial_index': zone.serial_index,
