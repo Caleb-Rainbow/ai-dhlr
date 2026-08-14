@@ -143,6 +143,16 @@ class HotspotConfig:
 
 
 @dataclass
+class DiscoveryConfig:
+    """局域网设备发现（UDP 广播）配置"""
+    enabled: bool = True                  # 是否启用发现服务
+    udp_port: int = 32100                 # UDP 监听/广播端口
+    announce_interval: int = 15           # 主动广播周期(秒)，0=仅被动应答不主动广播
+    model: str = "DHLR-RK3568"            # 设备型号（广播用）
+    require_private_source: bool = True   # 仅应答来源为私有网段的请求
+
+
+@dataclass
 class RemoteServerConfig:
     """远程服务器配置"""
     enabled: bool = False                    # 是否启用远程连接
@@ -171,6 +181,7 @@ class AppConfig:
     remote: RemoteServerConfig = None  # 远程服务器配置
     serial: SerialConfig = None    # 串口配置
     hotspot: HotspotConfig = None  # WiFi 热点配置
+    discovery: DiscoveryConfig = None  # 局域网设备发现配置
 
     def __post_init__(self):
         """初始化可选配置"""
@@ -182,6 +193,8 @@ class AppConfig:
             self.serial = SerialConfig()
         if self.hotspot is None:
             self.hotspot = HotspotConfig()
+        if self.discovery is None:
+            self.discovery = DiscoveryConfig()
 
 
 class ConfigManager:
@@ -371,6 +384,16 @@ class ConfigManager:
             auto_start_on_boot=hotspot_raw.get('auto_start_on_boot', True)
         )
 
+        # 解析设备发现配置
+        discovery_raw = raw.get('discovery', {})
+        discovery = DiscoveryConfig(
+            enabled=discovery_raw.get('enabled', True),
+            udp_port=int(discovery_raw.get('udp_port', 32100)),
+            announce_interval=int(discovery_raw.get('announce_interval', 15)),
+            model=discovery_raw.get('model', 'DHLR-RK3568'),
+            require_private_source=discovery_raw.get('require_private_source', True)
+        )
+
         return AppConfig(
             system=system,
             inference=inference,
@@ -384,7 +407,8 @@ class ConfigManager:
             alarm=alarm,
             remote=remote,
             serial=serial,
-            hotspot=hotspot
+            hotspot=hotspot,
+            discovery=discovery
         )
 
     def _migrate_config(self, config: AppConfig) -> AppConfig:
@@ -530,6 +554,13 @@ class ConfigManager:
             },
             'hotspot': {
                 'auto_start_on_boot': config.hotspot.auto_start_on_boot
+            },
+            'discovery': {
+                'enabled': config.discovery.enabled,
+                'udp_port': config.discovery.udp_port,
+                'announce_interval': config.discovery.announce_interval,
+                'model': config.discovery.model,
+                'require_private_source': config.discovery.require_private_source
             }
         }
     

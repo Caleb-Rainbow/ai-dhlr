@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>动火离人监测设备 - 局域网发现（Web 版）</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; background: #f5f6f8; color: #222; }
+  h2 { margin-top: 0; }
+  .bar { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 16px; }
+  label { display: inline-block; margin-right: 12px; }
+  input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; width: 120px; }
+  button { padding: 8px 18px; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; font-size: 14px; }
+  button:disabled { background: #9bb4e6; }
+  #progress { margin-top: 10px; color: #666; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .card { background: #fff; border-radius: 8px; padding: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08); border-left: 4px solid #22c55e; }
+  .card .ip { font-size: 18px; font-weight: 600; }
+  .card .name { color: #555; margin: 4px 0 8px; }
+  .card .row { font-size: 13px; color: #444; display:flex; justify-content:space-between; }
+  .card a { color: #2563eb; text-decoration: none; }
+  .hint { color:#888; font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+<h2>局域网设备发现（浏览器版）</h2>
+<div class="bar">
+  <label>网段前缀 <input id="prefix" value="192.168.2"></label>
+  <label>端口 <input id="port" value="8000" style="width:70px"></label>
+  <label>单点超时(ms) <input id="timeout" value="1200" style="width:80px"></label>
+  <button id="btn" onclick="scan()">开始扫描</button>
+  <div id="progress"></div>
+  <div class="hint">原理：浏览器对网段内每个 IP 的 <code>/.well-known/dhlr</code> 并发探测（设备已开 CORS=*）。
+  因浏览器无法收 UDP 广播，这是 Web 端唯一的发现方式，比 UDP 扫描慢，请耐心等待。</div>
+</div>
+<div id="results" class="grid"></div>
+
+<script>
+async function scan() {
+  const prefix = document.getElementById('prefix').value.trim().replace(/\.$/, '');
+  const port = document.getElementById('port').value.trim();
+  const timeout = parseInt(document.getElementById('timeout').value) || 1200;
+  const btn = document.getElementById('btn');
+  const prog = document.getElementById('progress');
+  const out = document.getElementById('results');
+  out.innerHTML = '';
+  btn.disabled = true;
+
+  const found = [];
+  let done = 0;
+  const total = 254;
+  const BATCH = 32;
+
+  for (let base = 1; base <= total; base += BATCH) {
+    const batch = [];
+    for (let i = 0; i < BATCH && base + i <= total; i++) {
+      const ip = `${prefix}.${base + i}`;
+      batch.push(probe(ip, port, timeout).then(info => {
+        if (info) { found.push({ip, info}); render(found); }
+      }).finally(() => { done++; prog.textContent = `扫描进度: ${done}/${total}，已发现 ${found.length} 台`; }));
+    }
+    await Promise.all(batch);
+  }
+  prog.textContent = `完成。共发现 ${found.length} 台设备。`;
+  btn.disabled = false;
+}
+
+async function probe(ip, port, timeout) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const r = await fetch(`http://${ip}:${port}/.well-known/dhlr`, { signal: ctrl.signal, mode: 'cors' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j && j.magic === 'DHLR_DEVICE') return j;
+  } catch (e) { /* 超时/拒绝/非设备：忽略 */ }
+  finally { clearTimeout(timer); }
+  return null;
+}
+
+function render(found) {
+  const out = document.getElementById('results');
+  out.innerHTML = found.map(({ip, info: i}) => `
+    <div class="card">
+      <div class="ip">${ip}</div>
+      <div class="name">${i.name || ''} <span style="color:#888">(${i.device_id || ''})</span></div>
+      <div class="row"><span>型号</span><span>${i.model || '-'}</span></div>
+      <div class="row"><span>固件</span><span>${i.firmware || '-'}</span></div>
+      <div class="row"><span>MAC</span><span>${i.mac || '-'}</span></div>
+      <div class="row"><span>在线</span><span>${i.online ? '是' : '否'}</span></div>
+      <div class="row"><span>API/WS 端口</span><span>${i.api_port || '-'}</span></div>
+      <div class="row"><span>操作</span><a target="_blank" href="http://${ip}:${i.api_port || port}">打开管理页 →</a></div>
+    </div>`).join('');
+}
+</script>
+</body>
+</html>

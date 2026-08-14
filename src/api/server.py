@@ -104,7 +104,14 @@ async def lifespan(app: FastAPI):
         await network_monitor.start_async(interval=10.0)
     except Exception as e:
         logger.warning(f"网络监测启动失败: {e}")
-    
+
+    # 启动局域网设备发现服务（UDP 广播，供 APP/PC/脚本扫描发现）
+    try:
+        from ..discovery import discovery_service
+        await discovery_service.start()
+    except Exception as e:
+        logger.warning(f"设备发现服务启动失败: {e}")
+
     # 启动远程 WebSocket 客户端（如果配置了）
     try:
         from ..utils.config import config_manager
@@ -155,6 +162,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    # 停止设备发现服务
+    try:
+        from ..discovery import discovery_service
+        await discovery_service.stop()
+    except Exception:
+        pass
+
 
 
 def create_app() -> FastAPI:
@@ -178,6 +192,16 @@ def create_app() -> FastAPI:
     # 内部配网接口（仅本机回环；供 ai-dhlr-ble.service 下发 remote/system 配置）
     from .internal_provisioning import router as internal_router
     app.include_router(internal_router)
+
+    # 设备身份识别（返回与 UDP 广播一致的 JSON）
+    # 供 Web 浏览器等无法收 UDP 广播的客户端做网段 HTTP 探测发现设备
+    from ..discovery import discovery_service
+
+    @app.get("/api/device/identify")
+    @app.get("/.well-known/dhlr")
+    async def device_identify():
+        """设备身份识别（局域网发现 - HTTP 路径）"""
+        return discovery_service.get_announcement()
 
     # WebSocket端点
     @app.websocket("/ws/status")

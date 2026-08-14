@@ -29,6 +29,7 @@
 - **LoRa配置**：支持LoRa模块配置和通信
 - **火焰模拟**：支持模拟火焰开关状态
 - **远程链路**：支持与远程服务器的WebSocket通信
+- **局域网设备发现**：通过UDP广播（默认端口32100）+ HTTP识别端点，让局域网内的App/PC/浏览器像搜索IP摄像头一样自动发现设备
 
 ## 系统架构
 
@@ -390,6 +391,16 @@ WebSocket协议支持丰富的操作，包括：
 - **巡检操作**：开始/停止巡检、设备自检、报警演示等
 
 详细协议规范请参考 `docs/websocket_protocol.md`。
+
+## 局域网设备发现协议
+
+设备在局域网内广播自身信息（IP、端口、设备ID、型号、固件版本、MAC等），供 App / PC / 脚本 / Web 浏览器自动发现，工作方式类似 IP 摄像头厂商的扫描软件。
+
+- **UDP 主动扫描**（推荐）：客户端向 `255.255.255.255:32100` 广播 `DHLR_DISCOVER/1`，设备秒回设备信息 JSON。
+- **UDP 被动监听**：设备默认每 15s 主动广播一次，客户端静默接收即可发现。
+- **HTTP 探测**：浏览器无法收 UDP，改用 `GET http://{ip}:8000/.well-known/dhlr`（或 `/api/device/identify`）逐 IP 探测。
+
+设备返回字段定义与组装逻辑见 `src/discovery/broadcaster.py`；可直接运行的扫描脚本见 `scripts/discovery_scan.py`（Python，主动扫描 + 被动监听）与 `scripts/discovery_scan.html`（浏览器网段探测）。
 
 ## 性能监控
 

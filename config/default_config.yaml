@@ -113,6 +113,15 @@ hotspot:
   auto_start_on_boot: true
 
 
+# 局域网设备发现配置（UDP 广播，供 APP/PC/脚本像搜索摄像头一样发现本设备）
+discovery:
+  enabled: true                    # 是否启用发现服务
+  udp_port: 32100                  # UDP 监听/广播端口
+  announce_interval: 15            # 主动广播周期(秒)，0=仅被动应答不主动广播
+  model: "DHLR-RK3568"             # 设备型号（广播用）
+  require_private_source: true     # 仅应答来源为私有网段的请求，防公网探测
+
+
 # 远程服务器配置
 remote:
   enabled: false
