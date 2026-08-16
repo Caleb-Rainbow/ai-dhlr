@@ -8,8 +8,12 @@
 #   - 按文件名日期的日志清理失效（disk_guard 已改按 mtime 兜底）
 #   - TLS/JWT 等依赖时间的功能不可用
 #
-# 方案：优先 chrony（大偏差直接步进 makestep、断网容忍好、rtcsync 持续回写
-# RTC）；安装失败则退回 ntpsec 自带 ntpdate 的 oneshot + timer。
+# 方案：优先 chrony（大偏差直接步进 makestep、断网容忍好）；
+# 安装失败则退回 ntpsec 自带 ntpdate 的 oneshot + timer。
+#
+# ⚠️ 刻意不写 RTC（无 hwclock --systohc / chrony rtcsync）：实测 rk808 RTC
+# 写入曾直接导致设备崩溃重启，且该 RTC 无备用电池断电即丢，写入无收益纯风险。
+# 开机时钟错误由本脚本的 boot timer 在 1 分钟内网络对时纠正。
 #
 # 要求 root 运行：sudo bash deploy/time-sync.sh
 set -u
@@ -35,9 +39,6 @@ driftfile /var/lib/chrony/chrony.drift
 
 # 开机时钟可能是任意值（RTC 无电池），任何时刻偏差>1s 都直接步进
 makestep 1 -1
-
-# 同步后持续把系统时间回写 RTC，供电期间断重启也不丢
-rtcsync
 EOF
     mkdir -p /var/lib/chrony
     systemctl enable --now chrony >/dev/null 2>&1 \
@@ -67,10 +68,9 @@ fi
 
 cat > /usr/local/sbin/dhlr-ntpdate.sh <<EOF
 #!/bin/bash
-# 依次尝试多个 NTP 源，成功后回写 RTC
+# 依次尝试多个 NTP 源（不回写 RTC：rk808 写 RTC 实测会崩板，且无电池断电即丢）
 for s in ${NTP_SERVERS[*]}; do
     if "$NTPDATE_BIN" -b "\$s" >/dev/null 2>&1; then
-        hwclock --systohc 2>/dev/null || true
         echo "dhlr-ntpdate: 已同步到 \$s"
         exit 0
     fi
