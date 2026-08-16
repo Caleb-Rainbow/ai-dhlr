@@ -8,10 +8,12 @@ import threading
 import time
 import base64
 from pathlib import Path
-import cv2
 
-# 设置OpenCV日志级别为错误级，屏蔽枚举设备时的警告
-os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
+# 必须在 import cv2 之前设置：OpenCV 在模块加载时读取该变量并缓存日志级别，
+# 之后设置无效（实测 obsensor UVC 扫描警告仍会刷满 stderr → journald → syslog）
+os.environ.setdefault('OPENCV_LOG_LEVEL', 'ERROR')
+
+import cv2
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -48,6 +50,9 @@ class FireSafetySystem:
         # 急停监听器（GPIO 输入）
         self._estop_monitor = None
 
+        # 磁盘空间看门狗
+        self._disk_guard = None
+
     
     def initialize(self) -> bool:
         """初始化系统"""
@@ -61,7 +66,8 @@ class FireSafetySystem:
                 log_dir=config.logging.log_dir,
                 snapshot_dir=config.logging.snapshot_dir,
                 log_retention_days=config.logging.log_retention_days,
-                snapshot_retention_days=config.logging.snapshot_retention_days
+                snapshot_retention_days=config.logging.snapshot_retention_days,
+                console_level=config.logging.console_level
             )
             self._logger = get_logger()
             self._logger.info("=" * 50)
@@ -609,9 +615,17 @@ class FireSafetySystem:
         """启动系统"""
         if self._running:
             return
-        
+
         self._running = True
-        
+
+        # 启动磁盘看门狗（周期巡检+自动清理，防止日志/快照积累撑满 eMMC）
+        from src.utils.disk_guard import DiskGuard
+        self._disk_guard = DiskGuard(
+            config.disk_guard,
+            Path(__file__).parent.parent
+        )
+        self._disk_guard.start()
+
         # 启动检测线程
         self._detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
         self._detection_thread.start()
@@ -621,11 +635,14 @@ class FireSafetySystem:
             self._estop_monitor.start()
 
         self._logger.info("系统已启动")
-    
+
     def stop(self):
         """停止系统"""
         self._running = False
-        
+
+        if self._disk_guard:
+            self._disk_guard.stop()
+
         if self._detection_thread:
             self._detection_thread.join(timeout=2.0)
 

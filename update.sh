@@ -35,6 +35,12 @@ if [ -f deploy/ai-dhlr.service ] && ! sudo cmp -s deploy/ai-dhlr.service /etc/sy
     echo "主服务配置已更新（daemon-reload）"
 fi
 
+# 5. 日志防膨胀：logrotate 定时 + journald 上限 + rsyslog 垃圾过滤（幂等）
+#    曾有设备运行一年日志撑满根分区导致写配置 Errno 28 故障
+if [ -f deploy/log-hygiene.sh ]; then
+    sudo bash deploy/log-hygiene.sh
+fi
+
 echo "正在重启服务..."
 # 重启 Python 服务
 sudo systemctl restart ai-dhlr.service

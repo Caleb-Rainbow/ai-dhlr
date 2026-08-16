@@ -106,6 +106,18 @@ class LoggingConfig:
     snapshot_dir: str = "snapshots"
     log_retention_days: int = 7        # 日志保留天数（按天轮转时清理，0=永不清理）
     snapshot_retention_days: int = 3   # 告警快照保留天数（按文件 mtime 清理，0=永不清理）
+    # 控制台(stderr)日志级别：systemd 下 stderr 进 journald 再转 rsyslog 写 /var/log/syslog，
+    # INFO 级双写一年可积累数 GB；默认 WARNING 只让告警及以上进系统日志，INFO 仍完整落盘到日志文件
+    console_level: str = "WARNING"
+
+
+@dataclass
+class DiskGuardConfig:
+    """磁盘空间看门狗配置"""
+    enabled: bool = True
+    check_interval_seconds: int = 3600  # 巡检周期
+    warn_usage_pct: int = 85            # 使用率超过后执行常规清理（按保留天数）并告警
+    critical_usage_pct: int = 92        # 使用率超过后激进清理（日志只留当天、快照只留24h）
 
 
 @dataclass
@@ -188,6 +200,7 @@ class AppConfig:
     serial: SerialConfig = None    # 串口配置
     hotspot: HotspotConfig = None  # WiFi 热点配置
     discovery: DiscoveryConfig = None  # 局域网设备发现配置
+    disk_guard: DiskGuardConfig = None  # 磁盘空间看门狗
 
     def __post_init__(self):
         """初始化可选配置"""
@@ -201,6 +214,8 @@ class AppConfig:
             self.hotspot = HotspotConfig()
         if self.discovery is None:
             self.discovery = DiscoveryConfig()
+        if self.disk_guard is None:
+            self.disk_guard = DiskGuardConfig()
 
 
 class ConfigManager:
@@ -338,7 +353,17 @@ class ConfigManager:
             log_dir=log_raw.get('log_dir', 'logs'),
             snapshot_dir=log_raw.get('snapshot_dir', 'snapshots'),
             log_retention_days=int(log_raw.get('log_retention_days', 7)),
-            snapshot_retention_days=int(log_raw.get('snapshot_retention_days', 3))
+            snapshot_retention_days=int(log_raw.get('snapshot_retention_days', 3)),
+            console_level=log_raw.get('console_level', 'WARNING')
+        )
+
+        # 解析磁盘看门狗配置
+        guard_raw = raw.get('disk_guard', {})
+        disk_guard = DiskGuardConfig(
+            enabled=guard_raw.get('enabled', True),
+            check_interval_seconds=int(guard_raw.get('check_interval_seconds', 3600)),
+            warn_usage_pct=int(guard_raw.get('warn_usage_pct', 85)),
+            critical_usage_pct=int(guard_raw.get('critical_usage_pct', 92))
         )
         
         # 解析GPIO配置
@@ -526,7 +551,14 @@ class ConfigManager:
                 'log_dir': config.logging.log_dir,
                 'snapshot_dir': config.logging.snapshot_dir,
                 'log_retention_days': config.logging.log_retention_days,
-                'snapshot_retention_days': config.logging.snapshot_retention_days
+                'snapshot_retention_days': config.logging.snapshot_retention_days,
+                'console_level': config.logging.console_level
+            },
+            'disk_guard': {
+                'enabled': config.disk_guard.enabled,
+                'check_interval_seconds': config.disk_guard.check_interval_seconds,
+                'warn_usage_pct': config.disk_guard.warn_usage_pct,
+                'critical_usage_pct': config.disk_guard.critical_usage_pct
             },
             'gpio': {
                 'enabled': config.gpio.enabled,

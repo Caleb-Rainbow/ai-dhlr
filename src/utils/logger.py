@@ -103,8 +103,16 @@ class EventLogger:
         self._last_snapshot_cleanup = 0.0
 
     def setup(self, level: str = "INFO", log_dir: str = "logs", snapshot_dir: str = "snapshots",
-              log_retention_days: int = 7, snapshot_retention_days: int = 3):
-        """初始化日志配置"""
+              log_retention_days: int = 7, snapshot_retention_days: int = 3,
+              console_level: str = "WARNING"):
+        """初始化日志配置
+
+        Args:
+            level: 文件日志级别（INFO 起，完整审计记录落盘，按天轮转+保留期清理）
+            console_level: 控制台(stderr)日志级别。systemd 下 stderr 进 journald 转发
+                rsyslog 写 /var/log/syslog 且系统未必有 logrotate，INFO 双写长期可积累
+                数 GB 撑满 eMMC；默认 WARNING，需要现场调试时可临时调成 INFO
+        """
         self._log_retention_days = max(0, int(log_retention_days))
         self._snapshot_retention_days = max(0, int(snapshot_retention_days))
 
@@ -126,9 +134,9 @@ class EventLogger:
         # 清除已有handler
         self._logger.handlers.clear()
 
-        # 控制台handler
+        # 控制台handler（独立级别，默认 WARNING）
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(log_level)
+        console_handler.setLevel(getattr(logging, console_level.upper(), logging.WARNING))
         console_format = logging.Formatter(
             '%(asctime)s [%(levelname)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'

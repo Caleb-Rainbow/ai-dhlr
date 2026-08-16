@@ -21,6 +21,10 @@ Environment=AUDIODEV=hw:0,0
 # （glibc 默认 8×核数=32 个 arena；本机 4 核 → 32 个，碎片各自囤积不归还 OS）
 # 必须在进程启动前由 systemd 注入，代码内 os.environ 设置无效
 Environment=MALLOC_ARENA_MAX=2
+# 抑制 OpenCV obsensor 模块 UVC 扫描警告：每次 VideoCapture 操作都往 stderr 刷
+# 数条，经 journald→rsyslog 双写进 syslog，一年可积累数 GB。代码里 main.py 也在
+# import cv2 前设置了同值，此处兜底（进程级注入不受 import 顺序影响）
+Environment=OPENCV_LOG_LEVEL=ERROR
 # 延时启动，确保硬件就绪
 ExecStartPre=/bin/sleep 5
 ExecStart=/home/linaro/miniforge3/envs/dhlr_env/bin/python /home/linaro/ai-dhlr/src/main.py

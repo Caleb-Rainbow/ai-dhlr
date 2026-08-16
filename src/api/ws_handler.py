@@ -1731,6 +1731,30 @@ class WSHandler:
         except Exception as e:
             _log(f"[WARN] bootstrap-hotspot.sh 异常: {e}")
 
+        # 3.5) log-hygiene.sh（logrotate 定时 + journald 上限 + rsyslog 垃圾过滤，幂等）
+        #      与 update.sh 第 5 步保持一致，防止设备运行一年日志撑满根分区
+        try:
+            _log("[3.5/4] deploy/log-hygiene.sh ...")
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "-S", "bash", str(project_root / "deploy" / "log-hygiene.sh"),
+                cwd=project_root,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(input=self._SUDO_PASSWORD.encode()), timeout=120.0
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                _log("[WARN] log-hygiene.sh 超时（>120s）")
+            else:
+                out = stdout.decode("utf-8", errors="replace") if stdout else ""
+                _log(f"[INFO ] log-hygiene.sh rc={proc.returncode}:\n{out[-800:]}")
+        except Exception as e:
+            _log(f"[WARN] log-hygiene.sh 异常: {e}")
+
         # 同步主服务配置（与 update.sh 一致）：deploy/ai-dhlr.service → /etc/systemd/system/
         # 用于随 git 下发 systemd 配置变更（如 MALLOC_ARENA_MAX=2）。
         # 不一致才 cp + daemon-reload，幂等；必须在 restart 之前，否则新进程仍用旧 service。
