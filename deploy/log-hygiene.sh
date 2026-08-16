@@ -19,8 +19,17 @@ log() { echo "[log-hygiene] $*"; }
 
 # ---------- 1. logrotate 每日定时 ----------
 LOGROTATE_BIN=$(command -v logrotate || true)
+if [ -z "$LOGROTATE_BIN" ]; then
+    # 精简镜像常缺此包；设备能访问 github 一般也能访问 apt 源，尽力补装
+    log "logrotate 未安装，尝试 apt-get install logrotate ..."
+    apt-get install -y logrotate >/dev/null 2>&1 || log "[WARN] logrotate 安装失败（网络不通？），跳过"
+    LOGROTATE_BIN=$(command -v logrotate || true)
+fi
+
 if [ -n "$LOGROTATE_BIN" ] && [ -f /etc/logrotate.conf ]; then
-    cat > /etc/systemd/system/logrotate.service <<EOF
+    # 包通常自带 /lib/systemd/system/logrotate.timer；仅当镜像缺单元文件时才自建
+    if [ ! -f /lib/systemd/system/logrotate.timer ] && [ ! -f /usr/lib/systemd/system/logrotate.timer ]; then
+        cat > /etc/systemd/system/logrotate.service <<EOF
 [Unit]
 Description=Rotate log files
 
@@ -28,7 +37,7 @@ Description=Rotate log files
 Type=oneshot
 ExecStart=${LOGROTATE_BIN} /etc/logrotate.conf
 EOF
-    cat > /etc/systemd/system/logrotate.timer <<'EOF'
+        cat > /etc/systemd/system/logrotate.timer <<'EOF'
 [Unit]
 Description=Daily logrotate
 
@@ -40,11 +49,13 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
-    systemctl daemon-reload
+        systemctl daemon-reload
+        log "已自建 logrotate 定时单元（镜像缺失）"
+    fi
     systemctl enable --now logrotate.timer
     log "logrotate 每日定时已启用"
 else
-    log "[WARN] logrotate 未安装或缺少 /etc/logrotate.conf，跳过（journald/rsyslog 防线仍生效）"
+    log "[WARN] logrotate 不可用，跳过定时轮转（journald/rsyslog 防线仍生效）"
 fi
 
 # ---------- 2. journald 磁盘配额 ----------
