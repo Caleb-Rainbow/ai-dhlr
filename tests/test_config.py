@@ -127,10 +127,10 @@ class TestInferenceConfig:
     """测试 InferenceConfig 数据类"""
     
     def test_default_values(self):
-        """测试默认值"""
+        """测试默认值（须与 config/default_config.yaml 模板一致）"""
         config = InferenceConfig()
-        assert config.engine == "pytorch"
-        assert config.model_path == "yolo11n.pt"
+        assert config.engine == "rknn"
+        assert config.model_path == "yolov11m-sim.rknn"
         assert config.confidence_threshold == 0.5
         assert config.person_class_id == 0
 

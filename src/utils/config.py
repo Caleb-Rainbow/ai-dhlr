@@ -70,8 +70,10 @@ class AlarmConfig:
 @dataclass
 class InferenceConfig:
     """推理引擎配置"""
-    engine: str = "pytorch"  # pytorch 或 rknn
-    model_path: str = "yolo11n.pt"
+    # 兜底默认值须与 config/default_config.yaml 一致（rknn）：设备侧没装 ultralytics，
+    # 配置缺 key 时落回 pytorch 会静默选到无依赖引擎，检测加载失败只有日志可查
+    engine: str = "rknn"  # pytorch（仅开发机）或 rknn
+    model_path: str = "yolov11m-sim.rknn"
     confidence_threshold: float = 0.5
     person_class_id: int = 0
 
@@ -296,11 +298,11 @@ class ConfigManager:
             zone_mode=system_raw.get('zone_mode', 'zoned')
         )
         
-        # 解析推理配置
+        # 解析推理配置（缺 key 兜底与 dataclass 默认/模板一致：rknn）
         inf_raw = raw.get('inference', {})
         inference = InferenceConfig(
-            engine=inf_raw.get('engine', 'pytorch'),
-            model_path=inf_raw.get('model_path', 'yolo11n.pt'),
+            engine=inf_raw.get('engine', 'rknn'),
+            model_path=inf_raw.get('model_path', 'yolov11m-sim.rknn'),
             confidence_threshold=inf_raw.get('confidence_threshold', 0.5),
             person_class_id=inf_raw.get('person_class_id', 0)
         )

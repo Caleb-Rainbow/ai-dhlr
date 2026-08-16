@@ -10,7 +10,10 @@ opencv-python>=4.9.0
 numpy>=1.24.0
 
 # YOLO推理
+# ultralytics 仅开发机 pytorch 引擎使用；设备侧走 RKNN，故意不进清单
 #ultralytics>=8.1.0
+# RKNN 推理（rknnlite）：装仓库根目录的本地轮子 rknn_toolkit_lite2-2.3.2-cp311-*aarch64.whl
+# 平台/解释器专属（设备 conda env 为 cp311），无法进本清单，设备侧手动 pip 安装
 
 # 配置管理
 pyyaml>=6.0
