@@ -1779,6 +1779,30 @@ class WSHandler:
         except Exception as e:
             _log(f"[WARN] time-sync.sh 异常: {e}")
 
+        # 3.7) usb-otg-persist.sh（USB OTG 模式开机回放服务，幂等）
+        #      与 update.sh 第 7 步保持一致；仅注册服务，不回放当前值
+        try:
+            _log("[3.7/4] deploy/usb-otg-persist.sh ...")
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "-S", "bash", str(project_root / "deploy" / "usb-otg-persist.sh"),
+                cwd=project_root,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(input=self._SUDO_PASSWORD.encode()), timeout=60.0
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                _log("[WARN] usb-otg-persist.sh 超时（>60s）")
+            else:
+                out = stdout.decode("utf-8", errors="replace") if stdout else ""
+                _log(f"[INFO ] usb-otg-persist.sh rc={proc.returncode}:\n{out[-600:]}")
+        except Exception as e:
+            _log(f"[WARN] usb-otg-persist.sh 异常: {e}")
+
         # 同步主服务配置（与 update.sh 一致）：deploy/ai-dhlr.service → /etc/systemd/system/
         # 用于随 git 下发 systemd 配置变更（如 MALLOC_ARENA_MAX=2）。
         # 不一致才 cp + daemon-reload，幂等；必须在 restart 之前，否则新进程仍用旧 service。
@@ -1949,6 +1973,9 @@ class WSHandler:
     # ==================== USB OTG 模式处理器 ====================
 
     _OTG_MODE_PATH = "/sys/devices/platform/fe8a0000.usb2-phy/otg_mode"
+    # 用户上次显式选择的 OTG 模式；开机由 dhlr-usb-otg-restore.service 回放
+    # （deploy/usb-otg-persist.sh 安装）。sysfs 本身重启即失，不落盘则切换不持久。
+    _OTG_PERSIST_FILE = "/var/lib/dhlr/usb_otg_mode"
     _SUDO_PASSWORD = "linaro"
 
     async def _get_usb_otg_mode(self, params: dict) -> dict:
@@ -1994,8 +2021,23 @@ class WSHandler:
                 if "No such file" in stderr:
                     raise ValueError("当前设备不支持 USB OTG 模式切换")
                 raise ValueError(f"设置失败: {stderr}")
+
+            # 持久化用户选择，重启后回放。失败仅告警不报错：本次切换已生效，
+            # 只是退化为旧行为（重启回出厂 peripheral），不应让用户以为切换失败
+            persist = subprocess.run(
+                ["sudo", "-S", "sh", "-c",
+                 f"mkdir -p $(dirname {self._OTG_PERSIST_FILE}) && echo {mode} > {self._OTG_PERSIST_FILE}"],
+                input=self._SUDO_PASSWORD.encode(),
+                capture_output=True,
+                timeout=5,
+            )
+            if persist.returncode != 0:
+                logger.warning(
+                    f"USB OTG 模式持久化失败（重启后不回放）: {persist.stderr.decode().strip()}"
+                )
+
             logger.info(f"USB OTG 模式已切换为: {mode}")
-            return {"mode": mode, "message": f"已切换为 {mode} 模式"}
+            return {"mode": mode, "message": f"已切换为 {mode} 模式，重启后保持"}
         except FileNotFoundError:
             raise ValueError("当前设备不支持 sudo 命令")
         except ValueError:

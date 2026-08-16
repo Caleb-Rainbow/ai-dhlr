@@ -47,6 +47,12 @@ if [ -f deploy/time-sync.sh ]; then
     sudo bash deploy/time-sync.sh
 fi
 
+# 7. USB OTG 模式持久化：注册开机回放服务（幂等）
+#    界面切换 OTG 只写 sysfs，重启即回出厂 peripheral；此服务开机回放用户上次选择
+if [ -f deploy/usb-otg-persist.sh ]; then
+    sudo bash deploy/usb-otg-persist.sh
+fi
+
 echo "正在重启服务..."
 # 重启 Python 服务
 sudo systemctl restart ai-dhlr.service
