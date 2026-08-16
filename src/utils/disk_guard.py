@@ -15,7 +15,6 @@
 系统日志（/var/log/syslog 等 root 文件）本进程（linaro 用户）无权清理，
 由 log-hygiene.sh 安装的 logrotate 定时器与 journald 大小上限负责。
 """
-import os
 import shutil
 import threading
 import time

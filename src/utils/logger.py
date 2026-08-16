@@ -2,7 +2,6 @@
 日志工具模块
 提供统一的日志记录和事件保存功能
 """
-import os
 import time
 import logging
 import datetime

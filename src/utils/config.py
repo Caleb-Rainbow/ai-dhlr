@@ -465,7 +465,8 @@ class ConfigManager:
             remote=remote,
             serial=serial,
             hotspot=hotspot,
-            discovery=discovery
+            discovery=discovery,
+            disk_guard=disk_guard
         )
 
     def _migrate_config(self, config: AppConfig) -> AppConfig:

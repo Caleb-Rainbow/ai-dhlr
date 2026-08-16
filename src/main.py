@@ -621,7 +621,7 @@ class FireSafetySystem:
         # 启动磁盘看门狗（周期巡检+自动清理，防止日志/快照积累撑满 eMMC）
         from src.utils.disk_guard import DiskGuard
         self._disk_guard = DiskGuard(
-            config.disk_guard,
+            get_config().disk_guard,
             Path(__file__).parent.parent
         )
         self._disk_guard.start()
