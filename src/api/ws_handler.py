@@ -1614,9 +1614,12 @@ class WSHandler:
             )
             branch = result.stdout.strip() or "main"
 
-            # 强制更新代码
-            subprocess.run(["git", "fetch", "origin"], cwd=project_root, check=True)
-            subprocess.run(["git", "reset", "--hard", f"origin/{branch}"], cwd=project_root, check=True)
+            # 强制更新代码（capture_output：不加则 e.stderr=None，设备上只报
+            # "更新失败: None"，真实原因（DNS/SSH 认证/known_hosts 等 exit 128）无从排查）
+            subprocess.run(["git", "fetch", "origin"], cwd=project_root, check=True,
+                           capture_output=True, text=True)
+            subprocess.run(["git", "reset", "--hard", f"origin/{branch}"], cwd=project_root, check=True,
+                           capture_output=True, text=True)
 
             logger.info(f"代码已更新到 origin/{branch}，后台开始部署 BLE 并重启服务...")
         except subprocess.CalledProcessError as e:
