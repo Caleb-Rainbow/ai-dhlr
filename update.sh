@@ -9,7 +9,18 @@ echo "开始执行更新程序..."
 SELF_HASH_BEFORE=$(sha256sum update.sh 2>/dev/null | cut -d' ' -f1)
 
 # 2. 拉取最新代码
-git pull
+#    git 一律以仓库属主 linaro 执行：sudo/远程 root 跑 update.sh 时若以 root 拉取，
+#    写入的 .git/objects 与工作区文件会变 root 属主，主服务（linaro）之后 git fetch
+#    写不进对象库，报 exit 128（2026-08-16 实际踩过）。runuser 同时把 HOME 指回
+#    /home/linaro，SSH 部署密钥/known_hosts 走 linaro 默认路径，无需 GIT_SSH_COMMAND。
+run_git() {
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u linaro -- env HOME=/home/linaro git "$@"
+    else
+        git "$@"
+    fi
+}
+run_git pull
 if [ $? -ne 0 ]; then
     echo "代码更新失败，请检查网络或 Git 配置。"
     exit 1
