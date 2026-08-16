@@ -3,6 +3,8 @@
 加载和管理系统配置
 """
 import os
+import shutil
+import time
 import yaml
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
@@ -248,7 +250,6 @@ class ConfigManager:
             # 尝试从 default_config.yaml 复制
             default_config_path = config_path.parent / "default_config.yaml"
             if default_config_path.exists():
-                import shutil
                 shutil.copy(default_config_path, config_path)
                 print(f"已从 {default_config_path} 创建配置文件: {config_path}")
             else:
@@ -259,6 +260,25 @@ class ConfigManager:
         
         with open(config_path, 'r', encoding='utf-8') as f:
             raw_config = yaml.safe_load(f)
+
+        # 配置损坏自愈：空文件/非字典内容（如磁盘满时 save 写一半被截断成 0 字节）
+        # 曾导致 _parse_config 对 None 调 .get 而崩溃循环。保留现场后回退默认模板，
+        # 让服务先跑起来，具体业务参数由运维在界面上重配。
+        if not isinstance(raw_config, dict):
+            corrupt_backup = config_path.with_name(
+                config_path.name + f'.corrupt-{int(time.time())}')
+            try:
+                config_path.rename(corrupt_backup)
+                print(f"[config] 配置文件无效（空或损坏），已备份为 {corrupt_backup.name}，使用默认配置")
+            except OSError:
+                pass
+            default_config_path = config_path.parent / "default_config.yaml"
+            if default_config_path.exists():
+                shutil.copy(default_config_path, config_path)
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    raw_config = yaml.safe_load(f)
+            if not isinstance(raw_config, dict):
+                raw_config = {}
 
         self._config = self._parse_config(raw_config)
         self._config = self._migrate_config(self._config)
@@ -478,13 +498,29 @@ class ConfigManager:
         return self._config
     
     def save(self) -> None:
-        """保存配置到文件"""
+        """保存配置到文件（原子写）
+
+        先写同目录临时文件再 os.replace 原子替换：磁盘满时只会在临时文件上
+        失败并抛错，现有 config.yaml 不受影响。此前直接 open('w') 截断后写入，
+        磁盘满（Errno 28）曾把设备配置文件毁成 0 字节。
+        """
         if self._config is None or self._config_path is None:
             return
-        
+
         raw = self._to_dict(self._config)
-        with open(self._config_path, 'w', encoding='utf-8') as f:
-            yaml.dump(raw, f, allow_unicode=True, default_flow_style=False)
+        tmp_path = self._config_path.with_name(self._config_path.name + '.tmp')
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                yaml.dump(raw, f, allow_unicode=True, default_flow_style=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self._config_path)
+        finally:
+            # replace 成功时 tmp 已不存在；失败时清掉半成品，避免残留
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
     
     def _to_dict(self, config: AppConfig) -> Dict[str, Any]:
         """将配置对象转换为字典"""
