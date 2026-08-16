@@ -5,6 +5,8 @@ nmcli/http 调用经注入的 fake runner/poster 替换，覆盖：
 - 切网成功路径与失败→回退热点路径（命令构造正确）
 - dhlr 配置下发成功/失败/空跳过
 """
+import json
+
 import pytest
 
 from src.ble.network_applier import (
@@ -192,3 +194,47 @@ def test_dhlr_client_apply_skips_empty():
     res = c.apply_config()
     assert res["ok"] is True and res["skipped"] is True
     assert called["n"] == 0  # 无内容不下发
+
+
+def test_default_poster_real_http():
+    """默认 poster 走真实 HTTP 回环（标准库 urllib，零第三方依赖）。
+
+    曾因默认实现 import httpx 而设备未装，配网报 No module named httpx；
+    且旧测试全注入 fake poster，默认路径零覆盖。此测试直接调 _default_poster，
+    若再引入未声明依赖会在此立即失败。
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from src.ble.dhlr_client import _default_poster
+
+    received = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            payload = json.loads(body)
+            received.append((self.headers.get("Content-Type"), payload))
+            # 带 remote 的请求回 200，其余回 500，覆盖两条返回路径
+            code = 200 if "remote" in payload else 500
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}' if code == 200 else b'{"detail": "boom"}')
+
+        def log_message(self, *args):  # 静默测试期访问日志
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}/internal/apply-provisioning"
+        status, text = _default_poster(base, {"remote": {"server_url": "x"}})
+        assert status == 200 and '"ok"' in text
+        # 非 2xx：HTTPError 被转成 (code, body) 返回而非抛异常
+        status2, text2 = _default_poster(base, {"system": {"name": "y"}})
+        assert status2 == 500 and "boom" in text2
+        # 发出的请求体是 JSON 且带正确 Content-Type
+        assert received[0] == ("application/json", {"remote": {"server_url": "x"}})
+    finally:
+        srv.shutdown()

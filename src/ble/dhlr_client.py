@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.error
+import urllib.request
 from typing import Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -18,10 +20,20 @@ Poster = Callable[[str, dict], Tuple[int, str]]
 
 
 def _default_poster(url: str, payload: dict) -> Tuple[int, str]:
-    import httpx
-
-    r = httpx.post(url, json=payload, timeout=10)
-    return r.status_code, r.text
+    # 用标准库而非 httpx：设备侧 git pull 即可用，无需 pip 装额外依赖
+    # （曾因 httpx 未进 requirements 导致设备配网报 No module named httpx）
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        # urlopen 对 4xx/5xx 抛 HTTPError 而非返回响应，读出响应体维持契约
+        return e.code, e.read().decode("utf-8", "replace")
 
 
 class DhlrClient:

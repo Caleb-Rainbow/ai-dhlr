@@ -2,7 +2,7 @@
 
 ProvisioningService 把 BLE 收到的命令（scan_wifi/set_config/apply/cancel）
 分派到 network_applier + dhlr_client，按状态机经 notify 下发 STATUS 事件。
-阻塞的 nmcli/httpx 调用用 asyncio.to_thread 包裹，不阻塞 bless 事件循环。
+阻塞的 nmcli/HTTP 调用用 asyncio.to_thread 包裹，不阻塞 bless 事件循环。
 """
 from __future__ import annotations
 
