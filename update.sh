@@ -41,6 +41,12 @@ if [ -f deploy/log-hygiene.sh ]; then
     sudo bash deploy/log-hygiene.sh
 fi
 
+# 6. 时间同步：chrony（或 ntpdate 退路），镜像自带的时间服务全是坏的，
+#    RTC 无电池断电丢时间，时钟可偏差一年以上
+if [ -f deploy/time-sync.sh ]; then
+    sudo bash deploy/time-sync.sh
+fi
+
 echo "正在重启服务..."
 # 重启 Python 服务
 sudo systemctl restart ai-dhlr.service
