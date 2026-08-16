@@ -1118,17 +1118,29 @@ class WSHandler:
             remote.token = ""  # 清除旧Token
         
         config_manager.save()
-        
-        # 重新连接
+
+        # 重启远程连接。不能在处理器内 await stop()：远程模式下本请求的
+        # 响应要沿这条连接送回浏览器，先断线会让响应丢在死连接上
+        # （send 静默返回 False），前端只能等满 30s 超时、按钮卡在"保存中"。
+        # 丢到独立任务并延迟 1s：先让响应发出，也给前端紧随其后的回读
+        # 请求（get_remote_config 等）留出在旧连接上完成的窗口。
         if remote.enabled:
             try:
                 from .websocket_client import remote_ws_client
                 import asyncio
-                await remote_ws_client.stop()
-                asyncio.create_task(remote_ws_client.start())
+
+                async def _reconnect_later():
+                    await asyncio.sleep(1.0)
+                    try:
+                        await remote_ws_client.stop()
+                        await remote_ws_client.start()
+                    except Exception as e:
+                        logger.warning(f"应用远程配置后重启连接失败: {e}")
+
+                asyncio.create_task(_reconnect_later())
             except Exception as e:
                 return {"message": f"配置已保存，但连接启动失败: {e}"}
-        
+
         return {"message": "远程配置已更新"}
     
     async def _verify_remote_login(self, params: dict) -> dict:

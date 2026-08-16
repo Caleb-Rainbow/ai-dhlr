@@ -345,10 +345,17 @@ const saveRemoteConfig = async () => {
       username: remoteForm.value.username,
       password: remoteForm.value.password || undefined
     });
-    // 重新加载远程状态
-    remoteConfig.value = await ws.request<RemoteServerConfig>('get_remote_config');
   } catch (e: any) {
     alert('保存远程配置失败: ' + (e.message || e));
+    return;
+  }
+  // 重新加载远程状态。设备应用新配置后会重启远程连接，回读若撞上
+  // 重连窗口（连接短暂断开）属预期：配置本身已保存，静默跳过，
+  // 等重连完成后的状态推送或下次进页面自然刷新
+  try {
+    remoteConfig.value = await ws.request<RemoteServerConfig>('get_remote_config');
+  } catch {
+    // 忽略回读失败
   }
 };
 
@@ -358,9 +365,10 @@ const saveSettings = async () => {
   saveError.value = '';
   try {
     await ws.request('update_settings', { category: 'alarm', settings: alarmSettings.value });
-    await saveRemoteConfig();
-    // 保存串口配置
+    // 串口配置先于远程配置保存：update_remote_config 会触发设备重启远程连接，
+    // 放在后面会撞上重连窗口（连接短暂断开），白等 30s 超时
     await ws.request('update_serial_config', serialConfig.value);
+    await saveRemoteConfig();
     saveSuccess.value = true;
     // 3秒后自动隐藏成功提示
     setTimeout(() => {
