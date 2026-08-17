@@ -317,7 +317,7 @@ ROI（Region of Interest）是指定灶台在画面中的监测区域。
 |------|------|
 | 启用远程连接 | 开关控制是否连接远程服务器 |
 | 服务器地址 | 远程服务器URL，如 `https://vis.example.com` |
-| WebSocket路径 | WebSocket端点路径，默认 `dhlr/socket` |
+| WebSocket路径 | 设备端 WebSocket 对外端点路径，默认 `/websocket/ws/dhlr/device/` |
 | 登录接口 | 登录API路径，默认 `/login` |
 | 用户名 | 远程平台账号 |
 | 密码 | 远程平台密码（已保存会显示占位符） |

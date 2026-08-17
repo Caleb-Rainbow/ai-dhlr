@@ -10,7 +10,12 @@ from typing import Dict, Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass
 
 from ..utils.logger import get_logger
-from ..utils.config import config_manager, ZoneConfig, CameraConfig
+from ..utils.config import (
+    config_manager,
+    ZoneConfig,
+    CameraConfig,
+    normalize_remote_websocket_path,
+)
 
 logger = get_logger()
 
@@ -990,13 +995,43 @@ class WSHandler:
         if not device_id:
             raise ValueError("设备ID不能为空")
 
+        old_device_id = config_manager.config.system.device_id
+        if old_device_id == device_id:
+            return {"device_id": device_id, "message": "设备ID未变化", "remote_reconnecting": False}
+
         # 保存到配置
         config_manager.config.system.device_id = device_id
         config_manager.save()
 
         logger.info(f"设备ID已更新为: {device_id}")
 
-        return {"device_id": device_id, "message": "设备ID已更新"}
+        # 远程服务器按连接 URL 中的 deviceId 建立会话索引。修改 ID 后必须
+        # 延迟重连；立即断开会导致本次响应无法沿旧连接返回给远程页面。
+        remote_reconnecting = False
+        if config_manager.config.remote.enabled:
+            try:
+                import asyncio
+                from .websocket_client import remote_ws_client
+
+                async def _reconnect_with_new_device_id():
+                    await asyncio.sleep(1.0)
+                    try:
+                        await remote_ws_client.stop()
+                        await remote_ws_client.start()
+                    except Exception as e:
+                        logger.warning(f"设备ID更新后重连远程服务器失败: {e}")
+
+                asyncio.create_task(_reconnect_with_new_device_id())
+                remote_reconnecting = True
+            except Exception as e:
+                logger.warning(f"设备ID已保存，但无法安排远程重连: {e}")
+
+        return {
+            "device_id": device_id,
+            "previous_device_id": old_device_id,
+            "message": "设备ID已更新",
+            "remote_reconnecting": remote_reconnecting,
+        }
     
     async def _get_volume(self, params: dict) -> dict:
         """获取当前语音音量"""
@@ -1108,7 +1143,7 @@ class WSHandler:
         if "server_url" in params:
             remote.server_url = params["server_url"]
         if "websocket_path" in params:
-            remote.websocket_path = params["websocket_path"]
+            remote.websocket_path = normalize_remote_websocket_path(params["websocket_path"])
         if "login_path" in params:
             remote.login_path = params["login_path"]
         if "username" in params:

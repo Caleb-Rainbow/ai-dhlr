@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse, urljoin
 
 from ..utils.logger import get_logger
-from ..utils.config import config_manager
+from ..utils.config import config_manager, normalize_remote_websocket_path
 
 logger = get_logger()
 
@@ -71,7 +71,7 @@ class RemoteWebSocketClient:
         根据服务器地址构建登录 URL 和 WebSocket URL
         返回 (login_url, ws_url)
 
-        WebSocket URL 格式: ws://host/ws/dhlr/device/{deviceId}?token={token}
+        WebSocket URL 格式: ws://host/websocket/ws/dhlr/device/{deviceId}?token={token}
         """
         config = config_manager.config.remote
         server_url = config.server_url.strip()
@@ -92,14 +92,15 @@ class RemoteWebSocketClient:
         login_url = f"{parsed.scheme}://{parsed.netloc}{login_path}"
 
         # 构建 WebSocket URL
-        # 路径格式: /ws/dhlr/device/{deviceId}?token={token}
+        # 对外路径格式: /websocket/ws/dhlr/device/{deviceId}?token={token}
         ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
-        ws_path = config.websocket_path.strip()
+        ws_path = normalize_remote_websocket_path(config.websocket_path)
+        config.websocket_path = ws_path
         if not ws_path.startswith('/'):
             ws_path = '/' + ws_path
 
         # 确保路径以 / 结尾，然后追加 deviceId
-        # 例如: /ws/dhlr/device/ -> /ws/dhlr/device/{deviceId}
+        # 例如: /websocket/ws/dhlr/device/ -> /websocket/ws/dhlr/device/{deviceId}
         ws_base = ws_path.rstrip('/')
 
         # 获取设备ID（从全局配置）
@@ -212,7 +213,7 @@ class RemoteWebSocketClient:
                     return False
             
             # 构建 WebSocket URL（包含 token 参数）
-            # Java 端期望: /ws/dhlr/device/{deviceId}?token={jwt_token}
+            # 网关对外地址: /websocket/ws/dhlr/device/{deviceId}?token={jwt_token}
             ws_url_with_token = f"{ws_url}?token={config.token}"
 
             # 创建 session

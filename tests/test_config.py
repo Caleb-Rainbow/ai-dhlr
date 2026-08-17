@@ -21,6 +21,7 @@ from src.utils.config import (
     SystemConfig,
     SerialConfig,
     RemoteServerConfig,
+    DEFAULT_REMOTE_WEBSOCKET_PATH,
     HotspotConfig,
 )
 
@@ -198,7 +199,33 @@ class TestRemoteServerConfig:
         config = RemoteServerConfig()
         assert config.enabled is False
         assert config.server_url == ""
-        assert config.websocket_path == "dhlr/socket"
+        assert config.websocket_path == DEFAULT_REMOTE_WEBSOCKET_PATH
+
+    @pytest.mark.parametrize("legacy_path", [
+        "/ws/dhlr/client",
+        "ws/dhlr/client/",
+        "/websocket/ws/dhlr/client",
+        "/ws/dhlr/device",
+        "/websocket/ws/dhlr/device",
+    ])
+    def test_legacy_endpoint_is_migrated_to_device_endpoint(self, legacy_path):
+        """旧客户端端点及缺少网关前缀的设备端点必须自动纠正。"""
+        from src.utils.config import ConfigManager
+
+        config = ConfigManager()._parse_config({
+            "remote": {"websocket_path": legacy_path}
+        })
+
+        assert config.remote.websocket_path == DEFAULT_REMOTE_WEBSOCKET_PATH
+
+    def test_custom_device_endpoint_is_preserved(self):
+        from src.utils.config import ConfigManager
+
+        config = ConfigManager()._parse_config({
+            "remote": {"websocket_path": "/custom/device"}
+        })
+
+        assert config.remote.websocket_path == "/custom/device"
 
 
 class TestHotspotConfig:

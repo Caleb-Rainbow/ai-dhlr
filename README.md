@@ -205,7 +205,9 @@ lora:
 
 remote:
   enabled: false
-  server_url: "wss://vis.example.com/dhlr/socket"
+  server_url: "https://vis.example.com"
+  websocket_path: "/websocket/ws/dhlr/device/"
+  login_path: "/login"
   token: ""
 
 api:
@@ -381,7 +383,8 @@ npm run preview
 | 链路类型 | 地址格式 | 示例 |
 |---------|---------|------|
 | 本地链路 | `ws://localhost:{port}/ws/status` | `ws://localhost:8000/ws/status` |
-| 远程链路 | `ws(s)://{server}/{path}` | `wss://vis.example.com/dhlr/socket` |
+| 远程设备链路 | `ws(s)://{server}/websocket/ws/dhlr/device/{deviceId}` | `wss://vis.example.com/websocket/ws/dhlr/device/DHLR001` |
+| 远程浏览器链路 | `ws(s)://{server}/websocket/ws/dhlr/client/{deviceId}` | `wss://vis.example.com/websocket/ws/dhlr/client/DHLR001` |
 
 ### 主要功能
 

@@ -99,7 +99,7 @@ tests/
 
 | 测试方法 | 描述 |
 |----------|------|
-| `test_default_values` | 验证远程服务器配置默认值（默认禁用、WebSocket 路径 dhlr/socket） |
+| `test_default_values` | 验证远程服务器配置默认值（默认禁用、设备 WebSocket 路径 `/websocket/ws/dhlr/device/`） |
 
 ---
 

@@ -65,15 +65,18 @@ Content-Type: application/json
 
 | 项目 | 说明 |
 |------|------|
-| 地址格式 | `ws(s)://{host}{websocket_path}/{deviceId}?token={jwt}` |
-| 示例 | `wss://vis.example.com/ws/dhlr/device/DHLR001?token=eyJhbGci...` |
+| 地址格式 | `ws(s)://{host}{websocket_path}{deviceId}?token={jwt}`，`websocket_path` 默认 `/websocket/ws/dhlr/device/` |
+| 示例 | `wss://vis.example.com/websocket/ws/dhlr/device/DHLR001?token=eyJhbGci...` |
 | 认证 | Token 通过 URL 查询参数 `token` 传递 |
 | 心跳间隔 | 10 秒（设备发送 `ping`，不可配置） |
 | 接收超时 | 30 秒（超过未收到消息则断开） |
 
-> **对接方注意：** 远程服务器需要实现两个 WebSocket 端点：
-> - 设备端：`{websocket_path}/{deviceId}` — 设备连接此端点，Token 通过 query 参数传递
-> - 客户端端：`/ws/dhlr/client/{deviceId}` — 前端 Web 连接此端点
+> **对接方注意：** Nginx 对外暴露两个 WebSocket 地址：
+> - 设备端：`{websocket_path}{deviceId}` — 设备连接此地址，Token 通过 query 参数传递
+> - 客户端端：`/websocket/ws/dhlr/client/{deviceId}` — 前端 Web 连接此地址
+>
+> `/websocket` 是 Nginx 网关前缀；Java 内部 `@ServerEndpoint` 仍分别为
+> `/ws/dhlr/device/{deviceId}` 和 `/ws/dhlr/client/{deviceId}`。
 
 #### Token 失效处理
 
@@ -1132,7 +1135,7 @@ Content-Type: application/json
 {
     "enabled": true,
     "server_url": "https://vis.example.com",
-    "websocket_path": "/ws/dhlr/device/",
+    "websocket_path": "/websocket/ws/dhlr/device/",
     "login_path": "/login",
     "username": "admin",
     "has_token": true,

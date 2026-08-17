@@ -134,7 +134,7 @@ discovery:
 remote:
   enabled: false
   server_url: ""
-  websocket_path: "dhlr/socket"
+  websocket_path: "/websocket/ws/dhlr/device/"
   login_path: "/login"
   username: ""
   password: ""

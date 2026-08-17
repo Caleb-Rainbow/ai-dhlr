@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ..utils.config import config_manager
+from ..utils.config import config_manager, normalize_remote_websocket_path
 from ..utils.logger import get_logger
 
 logger = get_logger()
@@ -61,6 +61,7 @@ async def apply_provisioning(payload: ProvisioningPayload) -> dict:
     """
     config = config_manager.config
     remote_changed = False
+    identity_changed = False
 
     if payload.remote is not None:
         r = config.remote
@@ -72,7 +73,7 @@ async def apply_provisioning(payload: ProvisioningPayload) -> dict:
             r.server_url = rp.server_url
             remote_changed = True
         if rp.websocket_path is not None:
-            r.websocket_path = rp.websocket_path
+            r.websocket_path = normalize_remote_websocket_path(rp.websocket_path)
             remote_changed = True
         if rp.login_path is not None:
             r.login_path = rp.login_path
@@ -92,7 +93,10 @@ async def apply_provisioning(payload: ProvisioningPayload) -> dict:
         if payload.system.name is not None:
             config.system.name = payload.system.name
         if payload.system.device_id:  # 非空才改
-            config.system.device_id = payload.system.device_id
+            new_device_id = payload.system.device_id.strip()
+            if new_device_id and new_device_id != config.system.device_id:
+                config.system.device_id = new_device_id
+                identity_changed = True
 
     config_manager.save()
     logger.info(
@@ -102,7 +106,7 @@ async def apply_provisioning(payload: ProvisioningPayload) -> dict:
 
     # 远程链路配置变化且启用 → 热重连
     remote_reconnect = False
-    if remote_changed and config.remote.enabled:
+    if (remote_changed or identity_changed) and config.remote.enabled:
         try:
             from .websocket_client import remote_ws_client
 

@@ -13,6 +13,24 @@ from pathlib import Path
 from src.version import __version__
 
 
+DEFAULT_REMOTE_WEBSOCKET_PATH = "/websocket/ws/dhlr/device/"
+
+
+def normalize_remote_websocket_path(path: Any) -> str:
+    """统一远程设备端点，并迁移曾被前端误写入的客户端端点。"""
+    value = str(path or "").strip()
+    normalized = value.strip("/")
+    legacy_paths = {
+        "ws/dhlr/client",
+        "websocket/ws/dhlr/client",
+        "ws/dhlr/device",
+        "websocket/ws/dhlr/device",
+    }
+    if not normalized or normalized in legacy_paths:
+        return DEFAULT_REMOTE_WEBSOCKET_PATH
+    return value
+
+
 @dataclass
 class CameraConfig:
     """摄像头配置"""
@@ -182,7 +200,7 @@ class RemoteServerConfig:
     """远程服务器配置"""
     enabled: bool = False                    # 是否启用远程连接
     server_url: str = ""                     # 服务器地址（含协议和可选端口）
-    websocket_path: str = "dhlr/socket"      # WebSocket 路径
+    websocket_path: str = DEFAULT_REMOTE_WEBSOCKET_PATH  # 设备端 WebSocket 路径
     login_path: str = "/login"               # 登录接口路径
     username: str = ""                       # 用户名
     password: str = ""                       # 密码
@@ -422,7 +440,9 @@ class ConfigManager:
         remote = RemoteServerConfig(
             enabled=remote_raw.get('enabled', False),
             server_url=remote_raw.get('server_url', ''),
-            websocket_path=remote_raw.get('websocket_path', 'dhlr/socket'),
+            websocket_path=normalize_remote_websocket_path(
+                remote_raw.get('websocket_path', DEFAULT_REMOTE_WEBSOCKET_PATH)
+            ),
             login_path=remote_raw.get('login_path', '/login'),
             username=remote_raw.get('username', ''),
             password=remote_raw.get('password', ''),

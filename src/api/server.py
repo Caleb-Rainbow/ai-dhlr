@@ -59,7 +59,7 @@ async def status_broadcast_loop():
             statuses = zone_manager.get_all_status()
             current_hash = _status_hash(statuses)
 
-            if ws_manager.active_connections:
+            if _has_status_subscribers():
                 # 状态变化时广播，或每10秒强制广播一次（保持心跳）
                 if current_hash != last_status_hash:
                     await broadcast_status_update(statuses)
@@ -80,6 +80,14 @@ async def status_broadcast_loop():
         except Exception as e:
             logger.error(f"状态广播错误: {e}")
             await asyncio.sleep(1.0)
+
+
+def _has_status_subscribers() -> bool:
+    """本地浏览器或远程服务器任一在线时，都需要生成实时状态推送。"""
+    if ws_manager.active_connections:
+        return True
+    remote_client = message_dispatcher.remote_client
+    return bool(remote_client and remote_client.is_connected)
 
 
 @asynccontextmanager
