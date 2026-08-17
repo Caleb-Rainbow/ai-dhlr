@@ -7,6 +7,7 @@
 """
 import pytest
 
+from src.version import __version__
 from src.utils.config import (
     CameraConfig,
     ZoneConfig,
@@ -175,7 +176,18 @@ class TestSystemConfig:
         """测试默认值"""
         config = SystemConfig()
         assert "监测" in config.name or "动火" in config.name
+        assert config.version == __version__
         assert config.debug is True
+
+    def test_version_comes_from_build_not_device_config(self):
+        """旧设备配置中的 version 不得覆盖当前代码版本，也不再写回。"""
+        from src.utils.config import ConfigManager
+
+        manager = ConfigManager()
+        config = manager._parse_config({"system": {"version": "9.9.9"}})
+
+        assert config.system.version == __version__
+        assert "version" not in manager._to_dict(config)["system"]
 
 
 class TestRemoteServerConfig:

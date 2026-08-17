@@ -148,7 +148,6 @@ npm run dev
 ```yaml
 system:
   name: 动火离人安全监测系统
-  version: 0.1.0
   debug: true
   device_id: ""
 
@@ -219,6 +218,20 @@ logging:
   log_dir: logs
   snapshot_dir: snapshots
 ```
+
+系统版本不属于设备配置，统一读取仓库根目录的 `VERSION`。
+
+### 版本管理
+
+版本号遵循 SemVer `MAJOR.MINOR.PATCH`：不兼容变更升级 `major`，向后兼容的新功能升级 `minor`，修复与内部优化升级 `patch`。普通提交不涨版本；发版提交时先暂存本次代码，再运行：
+
+```bash
+python scripts/release.py patch --commit -m "fix: 修复说明"
+python scripts/release.py minor --commit -m "feat: 功能说明"
+python scripts/release.py major --commit -m "feat!: 破坏性变更说明"
+```
+
+脚本只提交已暂存代码和自动更新的 `VERSION`，不会自动执行 tag 或 push。
 
 ### 关键配置项说明
 
@@ -445,6 +458,8 @@ dhlr/
 
 ---
 
-**版本**：0.2.0  
-**更新时间**：2026-01-08  
+**版本来源**：仓库根目录 `VERSION`
+
+**更新时间**：2026-01-08
+
 **版权所有**：动火离人安全监测系统开发团队

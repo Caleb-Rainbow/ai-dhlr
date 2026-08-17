@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
+from src.version import __version__
+
 
 @dataclass
 class CameraConfig:
@@ -142,7 +144,8 @@ class GpioConfig:
 class SystemConfig:
     """系统配置"""
     name: str = "动火离人安全监测系统"
-    version: str = "0.1.0"
+    # 版本是构建属性，不属于设备可编辑配置；唯一来源为仓库根目录 VERSION。
+    version: str = __version__
     debug: bool = True
     device_id: str = ""  # 设备唯一ID，首次运行时自动生成
     zone_mode: str = "zoned"  # 监测模式: "zoned"=分区监测, "single"=不分区监测
@@ -292,7 +295,6 @@ class ConfigManager:
         system_raw = raw.get('system', {})
         system = SystemConfig(
             name=system_raw.get('name', '动火离人安全监测系统'),
-            version=system_raw.get('version', '0.1.0'),
             debug=system_raw.get('debug', True),
             device_id=system_raw.get('device_id', ''),
             zone_mode=system_raw.get('zone_mode', 'zoned')
@@ -530,7 +532,6 @@ class ConfigManager:
         return {
             'system': {
                 'name': config.system.name,
-                'version': config.system.version,
                 'debug': config.system.debug,
                 'device_id': config.system.device_id,
                 'zone_mode': config.system.zone_mode

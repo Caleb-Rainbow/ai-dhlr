@@ -10,6 +10,9 @@ FROM docker.m.daocloud.io/library/node:20-alpine AS frontend-builder
 
 WORKDIR /app/web/fire-monitor-ui
 
+# 前后端共享的唯一版本源（vite.config.ts 从仓库根目录读取）
+COPY VERSION /app/VERSION
+
 # 复制前端依赖文件
 COPY web/fire-monitor-ui/package*.json ./
 
@@ -104,6 +107,7 @@ RUN pip install pytest pytest-asyncio pytest-cov
 
 # 复制应用代码
 COPY src/ ./src/
+COPY VERSION ./VERSION
 COPY tests/ ./tests/
 COPY pytest.ini ./
 
@@ -119,6 +123,7 @@ WORKDIR /app
 
 # 1. 只复制代码仓库中确实存在的文件
 COPY src/ ./src/
+COPY VERSION ./VERSION
 
 # 2. 关键修改：不要 COPY 动态生成的目录，而是手动创建它们
 RUN mkdir -p /app/config /app/audio_assets /app/logs /app/snapshots

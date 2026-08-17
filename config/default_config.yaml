@@ -5,7 +5,6 @@
 # 系统配置
 system:
   name: "动火离人安全监测系统"
-  version: "0.1.0"
   debug: false
   device_id: ""  # 留空，首次运行时自动生成
 

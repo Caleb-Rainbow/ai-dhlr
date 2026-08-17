@@ -6,6 +6,7 @@ import { useConnectConfig } from '../composables/useConnectConfig';
 
 const router = useRouter();
 const { loadConfig, saveConfig } = useConnectConfig();
+const appVersion = __APP_VERSION__;
 
 // Form state
 const deviceId = ref('');
@@ -156,7 +157,7 @@ onMounted(() => {
 
     <!-- Footer -->
     <p class="text-xs text-text-muted mt-8 opacity-60">
-      DHLR 动火离人安全监测系统 v1.0
+      DHLR 动火离人安全监测系统 v{{ appVersion }}
     </p>
   </div>
 </template>

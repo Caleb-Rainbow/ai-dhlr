@@ -1,6 +1,13 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const appVersion = readFileSync(
+  fileURLToPath(new URL('../../VERSION', import.meta.url)),
+  'utf-8'
+).trim()
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -9,6 +16,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     base,
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
     plugins: [vue(), tailwindcss()],
     server: {
       host: '0.0.0.0',

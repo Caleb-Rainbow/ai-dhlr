@@ -4,6 +4,7 @@ FastAPI主服务
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from src.version import __version__
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import asyncio
@@ -180,7 +181,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="动火离人安全监测系统",
         description="厨房安全监测系统API",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan
     )
     
