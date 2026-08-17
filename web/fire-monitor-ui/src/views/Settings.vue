@@ -4,6 +4,10 @@ import { ws } from '../api/ws';
 import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig, GpioConfig } from '../types';
 import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb, Package, Usb } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
+import { useRoute, useRouter } from 'vue-router';
+
+const route = useRoute();
+const router = useRouter();
 
 const deviceInfo = ref<DeviceInfo | null>(null);
 const alarmSettings = ref<AlarmSettings>({
@@ -33,7 +37,7 @@ const networkStatus = ref<NetworkStatus>({
 const remoteConfig = ref<RemoteServerConfig>({
   enabled: false,
   server_url: '',
-  websocket_path: '/ws/dhlr/client',
+  websocket_path: '/websocket/ws/dhlr/device/',
   login_path: '/login',
   username: '',
   has_token: false,
@@ -95,7 +99,7 @@ const settingVolume = ref(false);
 // 编辑用的本地状态
 const remoteForm = ref({
   server_url: '',
-  websocket_path: '/ws/dhlr/client',
+  websocket_path: '/websocket/ws/dhlr/device/',
   login_path: '/login',
   username: '',
   password: '',
@@ -167,7 +171,7 @@ const loadData = async () => {
     // 初始化表单
     remoteForm.value = {
       server_url: remote.server_url || '',
-      websocket_path: remote.websocket_path || '/ws/dhlr/client',
+      websocket_path: remote.websocket_path || '/websocket/ws/dhlr/device/',
       login_path: remote.login_path || '/login',
       username: remote.username || '',
       password: '',
@@ -463,12 +467,22 @@ const saveDeviceId = async () => {
 
   savingDeviceId.value = true;
   try {
-    await ws.request('set_device_id', { device_id: newId });
+    const result = await ws.request<{ remote_reconnecting?: boolean }>('set_device_id', { device_id: newId });
     if (deviceInfo.value) {
       deviceInfo.value.device_id = newId;
     }
     editingDeviceId.value = false;
     tempDeviceId.value = '';
+
+    // 远程页面订阅路径包含 deviceId。等待设备使用新 ID 重新注册后，
+    // 切换到新路径；ws.connect 会检测 URL 变化并关闭旧连接。
+    if (ws.isRemoteMode && result.remote_reconnecting) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await router.replace({
+        path: `/device/${encodeURIComponent(newId)}/settings`,
+        query: route.query
+      });
+    }
   } catch (e: any) {
     alert('设置设备ID失败: ' + (e.message || e));
   } finally {
@@ -520,7 +534,11 @@ const installDependencies = async () => {
   installResult.value = null;
 
   try {
-    const result = await ws.request<{ success: boolean; message: string; output?: string }>('install_dependencies');
+    const result = await ws.request<{ success: boolean; message: string; output?: string }>(
+      'install_dependencies',
+      {},
+      310_000
+    );
     installResult.value = result;
     // 10秒后隐藏结果提示
     setTimeout(() => {
@@ -596,8 +614,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-24 pt-6">
-    <div class="flex items-center justify-between">
+  <div class="settings-page space-y-6 pb-24 pt-6 lg:pb-4">
+    <div class="settings-page-header flex items-center justify-between">
       <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary to-text-secondary">
         系统设置</h2>
     </div>
@@ -712,7 +730,7 @@ onUnmounted(() => {
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1">
             <label class="text-xs text-text-muted ml-1">WebSocket 路径</label>
-            <input v-model="remoteForm.websocket_path" type="text" placeholder="/ws/dhlr/client"
+            <input v-model="remoteForm.websocket_path" type="text" placeholder="/websocket/ws/dhlr/device/"
               class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
               style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
           </div>
@@ -1422,11 +1440,11 @@ onUnmounted(() => {
     </Transition>
 
     <!-- 悬浮保存按钮容器 - 限制在内容区域内 -->
-    <div class="fixed inset-0 pointer-events-none z-50 max-w-md mx-auto">
+    <div class="settings-floating fixed inset-0 lg:left-64 pointer-events-none z-50">
       <!-- 悬浮保存按钮 -->
       <Transition name="save-btn">
         <button v-if="showSaveButton" @click="saveSettings"
-          class="pointer-events-auto absolute bottom-20 right-4 px-5 py-3 bg-primary hover:bg-primary-light text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-primary/30 transition-all active:scale-95 disabled:opacity-50 hover:scale-105"
+          class="pointer-events-auto absolute bottom-20 lg:bottom-8 right-4 lg:right-8 px-5 py-3 bg-primary hover:bg-primary-light text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-primary/30 transition-all active:scale-95 disabled:opacity-50 hover:scale-105"
           :disabled="saving">
           <Loader v-if="saving" class="w-5 h-5 animate-spin" />
           <Save v-else class="w-5 h-5" />
@@ -1437,7 +1455,7 @@ onUnmounted(() => {
       <!-- 保存成功提示 Toast -->
       <Transition name="toast">
         <div v-if="saveSuccess"
-          class="pointer-events-auto absolute bottom-36 right-4 px-5 py-3 bg-success text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-success/30">
+          class="pointer-events-auto absolute bottom-36 lg:bottom-24 right-4 lg:right-8 px-5 py-3 bg-success text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-success/30">
           <CheckCircle class="w-5 h-5" />
           <span>保存成功</span>
         </div>
@@ -1446,7 +1464,7 @@ onUnmounted(() => {
       <!-- 保存失败提示 Toast -->
       <Transition name="toast">
         <div v-if="saveError"
-          class="pointer-events-auto absolute bottom-36 right-4 px-5 py-3 bg-red-500 text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-red-500/30">
+          class="pointer-events-auto absolute bottom-36 lg:bottom-24 right-4 lg:right-8 px-5 py-3 bg-red-500 text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-red-500/30">
           <XCircle class="w-5 h-5" />
           <span>{{ saveError }}</span>
         </div>
@@ -1456,6 +1474,28 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+@media (min-width: 1280px) {
+  .settings-page {
+    column-count: 2;
+    column-gap: 1.5rem;
+  }
+
+  .settings-page > * {
+    margin-block-start: 0 !important;
+  }
+
+  .settings-page-header {
+    column-span: all;
+    margin-bottom: 1.5rem;
+  }
+
+  .settings-page > :not(.settings-page-header):not(.settings-floating) {
+    width: 100%;
+    margin-bottom: 1.5rem;
+    break-inside: avoid;
+  }
+}
+
 /* 保存按钮进入动画 */
 .save-btn-enter-active {
   animation: save-btn-bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);

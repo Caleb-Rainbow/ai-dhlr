@@ -74,20 +74,47 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col items-center justify-center p-6"
+  <div class="relative min-h-[100dvh] overflow-x-hidden overflow-y-auto flex items-center justify-center p-4 sm:p-6 lg:p-10"
        style="background: var(--theme-bg-primary);">
+    <div class="pointer-events-none absolute -top-32 -left-32 w-96 h-96 rounded-full bg-primary/10 blur-3xl"></div>
+    <div class="pointer-events-none absolute -bottom-40 -right-24 w-[30rem] h-[30rem] rounded-full bg-orange-500/10 blur-3xl"></div>
+
+    <div class="relative w-full max-w-5xl grid lg:grid-cols-[1.1fr_0.9fr] items-center gap-10 lg:gap-20">
+      <section>
     <!-- Logo / Title -->
-    <div class="text-center mb-8">
-      <div class="w-20 h-20 mx-auto mb-4 rounded-3xl flex items-center justify-center"
+    <div class="text-center lg:text-left mb-8 lg:mb-0">
+      <div class="w-20 h-20 mx-auto lg:mx-0 mb-4 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/10"
            style="background: var(--theme-glass-bg); border: 1px solid var(--theme-glass-border);">
         <Flame class="w-10 h-10 text-orange-500" />
       </div>
-      <h1 class="text-2xl font-bold text-text-primary">动火离人安全监测</h1>
-      <p class="text-sm text-text-muted mt-1">远程设备连接</p>
+      <h1 class="text-2xl lg:text-4xl font-bold text-text-primary tracking-tight">动火离人安全监测</h1>
+      <p class="text-sm lg:text-base text-text-muted mt-2 lg:mt-4 lg:max-w-md lg:leading-relaxed">
+        实时掌握设备、灶台与巡检状态，获得清晰完整的安全监控视野。
+      </p>
+      <div class="hidden lg:grid grid-cols-3 gap-3 mt-8 max-w-lg">
+        <div class="rounded-2xl p-4 border border-[var(--theme-border-input)] bg-[var(--theme-bg-input)]">
+          <div class="text-xl font-bold text-orange-400">实时</div>
+          <div class="text-xs text-text-muted mt-1">状态监控</div>
+        </div>
+        <div class="rounded-2xl p-4 border border-[var(--theme-border-input)] bg-[var(--theme-bg-input)]">
+          <div class="text-xl font-bold text-emerald-400">智能</div>
+          <div class="text-xs text-text-muted mt-1">安全告警</div>
+        </div>
+        <div class="rounded-2xl p-4 border border-[var(--theme-border-input)] bg-[var(--theme-bg-input)]">
+          <div class="text-xl font-bold text-blue-400">统一</div>
+          <div class="text-xs text-text-muted mt-1">设备管理</div>
+        </div>
+      </div>
     </div>
+      </section>
 
     <!-- Connection Form -->
-    <div class="w-full max-w-sm space-y-4">
+    <section class="w-full max-w-md mx-auto rounded-3xl border border-[var(--theme-glass-border)] bg-[var(--theme-glass-bg)] backdrop-blur-xl p-5 sm:p-7 shadow-2xl shadow-black/10">
+    <div class="space-y-4">
+      <div class="mb-5">
+        <h2 class="text-lg font-bold text-text-primary">连接设备</h2>
+        <p class="text-xs text-text-muted mt-1">输入设备信息，或直接进入本地模式</p>
+      </div>
       <!-- Device ID Input -->
       <div class="space-y-1">
         <label class="text-xs text-text-muted ml-1">设备 ID <span class="text-red-400">*</span></label>
@@ -159,6 +186,8 @@ onMounted(() => {
     <p class="text-xs text-text-muted mt-8 opacity-60">
       DHLR 动火离人安全监测系统 v{{ appVersion }}
     </p>
+    </section>
+    </div>
   </div>
 </template>
 

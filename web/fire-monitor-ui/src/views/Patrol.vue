@@ -225,9 +225,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-24">
+  <div class="patrol-page space-y-6 pb-24 lg:pb-4">
     <!-- Header -->
-    <div class="sticky top-0 z-50 transition-all duration-500">
+    <div class="patrol-header sticky top-0 z-50 transition-all duration-500">
       <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] backdrop-saturate-150 bg-white/[0.01] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between rounded-10 transition-all">
         <div>
           <h2 class="text-xl font-bold text-text-primary tracking-tight flex items-center gap-2">
@@ -257,7 +257,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 功能区 -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+    <div class="patrol-control backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
         <SearchCheck class="w-4 h-4" /> 巡检控制
       </h3>
@@ -282,7 +282,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 灶台列表 -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+    <div class="patrol-zones backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
         <Flame class="w-4 h-4" /> 灶台操作
       </h3>
@@ -336,7 +336,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 强制动作组 -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+    <div class="patrol-actions backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
         <AlertTriangle class="w-4 h-4" /> 全局强制动作
       </h3>
@@ -369,7 +369,7 @@ onUnmounted(() => {
 
     <!-- 进度显示 -->
     <Transition name="fade" mode="out-in">
-      <div v-if="isActive && isBusy" class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+      <div v-if="isActive && isBusy" class="patrol-progress backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
         <div class="flex items-center justify-between">
           <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
             <Clock class="w-4 h-4 animate-spin" /> 执行中
@@ -393,7 +393,7 @@ onUnmounted(() => {
     </Transition>
 
     <!-- 结果区域 -->
-    <div class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+    <div class="patrol-results backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-5 space-y-4 shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <h3 class="text-sm font-bold text-text-muted uppercase tracking-wider flex items-center gap-2">
         <CheckCircle class="w-4 h-4" /> 巡检结果
       </h3>
@@ -439,6 +439,39 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+@media (min-width: 1024px) {
+  .patrol-page {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr);
+    gap: 1.5rem;
+    padding-top: 1.5rem;
+  }
+
+  .patrol-page > * {
+    margin-block-start: 0;
+  }
+
+  .patrol-header,
+  .patrol-progress,
+  .patrol-results {
+    grid-column: 1 / -1;
+  }
+
+  .patrol-header {
+    position: static;
+  }
+
+  .patrol-header > div {
+    margin-inline: 0;
+    border-radius: 1rem;
+  }
+
+  .patrol-zones {
+    grid-column: 2;
+    grid-row: 2 / span 2;
+  }
+}
+
 .slide-fade-enter-active,
 .slide-fade-leave-active {
   transition: all 0.3s ease;

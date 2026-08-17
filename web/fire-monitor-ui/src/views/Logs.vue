@@ -108,7 +108,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full space-y-4 pb-20 overflow-hidden px-4">
+  <div class="flex flex-col h-full min-h-[calc(100dvh-5rem)] lg:min-h-full space-y-4 pb-20 lg:pb-0 overflow-hidden">
     <div class="flex items-center justify-between pt-6">
       <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary to-text-secondary">系统日志</h2>
     </div>

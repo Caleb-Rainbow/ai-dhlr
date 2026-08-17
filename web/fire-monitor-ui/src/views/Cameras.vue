@@ -32,6 +32,7 @@ const previewCameraId = ref('');
 const previewImage = ref('');
 const previewLoading = ref(true);
 let previewInterval: ReturnType<typeof setInterval> | null = null;
+let previewRequestInFlight = false;
 
 // Actions
 const loadCameras = async () => {
@@ -107,12 +108,18 @@ const deleteCamera = async (id: string) => {
 };
 
 const loadPreviewImage = async (cameraId: string) => {
+  if (previewRequestInFlight) return;
+  previewRequestInFlight = true;
   try {
     const result = await ws.request<{ image: string }>('preview_camera', { camera_id: cameraId });
-    previewImage.value = result.image;
-    previewLoading.value = false;
+    if (previewCameraId.value === cameraId && showPreviewModal.value) {
+      previewImage.value = result.image;
+      previewLoading.value = false;
+    }
   } catch (e) {
     console.error('预览加载失败:', e);
+  } finally {
+    previewRequestInFlight = false;
   }
 };
 
@@ -150,7 +157,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-20 pt-6">
+  <div class="space-y-6 pb-20 pt-6 lg:pb-4">
     <div class="flex items-center justify-between">
       <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary to-text-secondary">
         摄像头管理</h2>
@@ -172,7 +179,7 @@ onUnmounted(() => {
 
       <!-- Camera List with Animation -->
       <div v-else key="content" class="space-y-4">
-        <TransitionGroup name="list" tag="div" class="space-y-4 relative">
+        <TransitionGroup name="list" tag="div" class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4 relative">
           <div v-for="(cam, index) in cameras" :key="cam.id"
             class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-4 rounded-2xl flex items-center gap-4 transition-all hover:border-white/20 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
             :style="{ animationDelay: `${index * 0.05}s` }">
@@ -225,7 +232,7 @@ onUnmounted(() => {
     <!-- Floating Action Button with Animation -->
     <Teleport to="#portal-target" defer>
       <Transition name="pop">
-        <div v-if="!loading" class="absolute bottom-24 right-6 pointer-events-auto">
+        <div v-if="!loading" class="absolute bottom-24 right-6 lg:bottom-8 lg:right-8 pointer-events-auto">
           <button @click="openAddModal"
             class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-blue-600 text-white rounded-2xl flex items-center justify-center shadow-[0_8px_25px_rgba(79,70,229,0.4)] hover:shadow-[0_10px_30px_rgba(79,70,229,0.5)] active:scale-95 transition-all border border-white/10 group hover-glow">
             <Plus class="w-7 h-7 group-hover:rotate-90 transition-transform duration-300" />

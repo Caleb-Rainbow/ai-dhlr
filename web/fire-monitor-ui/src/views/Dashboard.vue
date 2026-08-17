@@ -131,12 +131,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6 pb-24">
+  <div class="space-y-6 pb-24 lg:pb-4">
     <!-- Header Controls -->
     <div class="sticky top-0 z-50 transition-all duration-500">
       <!-- Hyper-transparent glass with saturation boost -->
       <div
-        class="backdrop-blur-sm backdrop-saturate-150 bg-[var(--theme-glass-bg)] bg-white/[0.01] border border-[var(--theme-glass-border)] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 flex items-center justify-between rounded-10 transition-all">
+        class="backdrop-blur-sm backdrop-saturate-150 bg-[var(--theme-glass-bg)] bg-white/[0.01] border border-[var(--theme-glass-border)] border-b border-white/[0.05] shadow-xl shadow-black/10 px-4 py-4 -mx-4 lg:mx-0 lg:mt-6 lg:px-5 flex items-center justify-between rounded-10 lg:rounded-2xl transition-all">
         <div>
           <h2 class="text-xl font-bold text-text-primary tracking-tight flex items-center gap-2">
             实时监控
@@ -209,7 +209,7 @@ onUnmounted(() => {
     <!-- Zone Cards - 统一使用 mode="out-in" 确保先消失再显示 -->
     <Transition name="fade" mode="out-in">
       <!-- Loading Skeleton -->
-      <div v-if="loading" key="skeleton" class="grid grid-cols-2 gap-3">
+      <div v-if="loading" key="skeleton" class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4">
         <Skeleton v-for="i in 4" :key="i" />
       </div>
 
@@ -221,7 +221,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Zone Cards Grid with Animation -->
-      <div v-else key="content" class="grid grid-cols-2 gap-3">
+      <div v-else key="content" class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 lg:gap-4">
         <TransitionGroup name="card">
           <div v-for="(zone, index) in enabledZones" :key="zone.id"
             class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl p-4 relative overflow-hidden group transition-all duration-300 hover:border-white/10 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
@@ -325,7 +325,7 @@ onUnmounted(() => {
           <Activity class="w-3.5 h-3.5" /> 性能监控
         </h3>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
           <!-- FPS Chart -->
           <div class="rounded-2xl p-3 border transition-all duration-300 hover-lift"
             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
@@ -348,7 +348,7 @@ onUnmounted(() => {
           </div>
 
           <!-- NPU Chart - Full Width Row 2 -->
-          <div class="col-span-2 rounded-2xl p-3 border transition-all duration-300 hover-lift"
+          <div class="col-span-2 md:col-span-1 rounded-2xl p-3 border transition-all duration-300 hover-lift"
             style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
             <div class="flex justify-between items-end mb-2">
               <span class="text-[10px] text-purple-400 font-bold">NPU 核心占用</span>
@@ -359,7 +359,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Stats Row -->
-          <div class="col-span-2 grid grid-cols-3 gap-2">
+          <div class="col-span-2 md:col-span-3 grid grid-cols-3 gap-2">
             <div class="rounded-xl p-2 flex flex-col items-center justify-center transition-all duration-300 hover-lift"
               style="background: var(--theme-bg-input);">
               <Zap class="w-3 h-3 text-yellow-500 mb-1" />

@@ -8,10 +8,17 @@ import {
   CookingPot,
   ClipboardList,
   Settings,
-  SearchCheck
+  SearchCheck,
+  Flame
 } from 'lucide-vue-next';
 
 const route = useRoute();
+const appVersion = __APP_VERSION__;
+
+const deviceLabel = computed(() => {
+  const deviceId = route.params.deviceId;
+  return deviceId ? `远程设备 · ${deviceId}` : '本地设备';
+});
 
 // 根据当前路由动态生成导航路径
 const basePath = computed(() => {
@@ -85,10 +92,51 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full max-w-md mx-auto relative min-h-screen shadow-2xl" style="background: var(--theme-bg-primary);">
+  <div class="flex h-[100dvh] min-h-screen w-full overflow-hidden" style="background: var(--theme-bg-primary);">
+    <!-- Desktop Sidebar -->
+    <aside
+      class="hidden lg:flex w-64 shrink-0 flex-col border-r border-[var(--theme-glass-border)] bg-[var(--theme-glass-bg)] backdrop-blur-xl"
+    >
+      <div class="flex items-center gap-3 px-6 py-6 border-b border-[var(--theme-glass-border)]">
+        <div class="w-11 h-11 rounded-2xl flex items-center justify-center bg-gradient-to-br from-orange-500/25 to-red-500/10 border border-orange-500/20">
+          <Flame class="w-6 h-6 text-orange-500" />
+        </div>
+        <div class="min-w-0">
+          <div class="font-bold text-text-primary tracking-tight">DHLR 安全监测</div>
+          <div class="text-[10px] text-text-muted mt-0.5 truncate">{{ deviceLabel }}</div>
+        </div>
+      </div>
+
+      <nav class="flex-1 px-3 py-5 space-y-1.5">
+        <RouterLink
+          v-for="item in navItems"
+          :key="item.name"
+          :to="item.path"
+          replace
+          class="group flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium text-text-muted transition-all hover:text-text-primary hover:bg-[var(--theme-bg-input-hover)]"
+          exact-active-class="!text-text-primary !bg-primary/15 ring-1 ring-primary/20 shadow-lg shadow-primary/5"
+        >
+          <component :is="item.icon" class="w-5 h-5 shrink-0 transition-transform group-hover:scale-110" />
+          <span>{{ item.label }}</span>
+        </RouterLink>
+      </nav>
+
+      <div class="m-4 p-3.5 rounded-2xl border border-[var(--theme-border-input)] bg-[var(--theme-bg-input)]">
+        <div class="flex items-center gap-2 text-xs text-text-secondary">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          系统运行中
+        </div>
+        <div class="text-[10px] text-text-muted mt-2">版本 v{{ appVersion }}</div>
+      </div>
+    </aside>
+
+    <div class="relative flex min-w-0 flex-1 flex-col">
     <!-- 全局告警弹窗（急停 estop 红色脉冲，不自动消失） -->
-    <div class="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-md z-[60] px-3 pt-3 space-y-2 pointer-events-none">
-      <transition-group name="alarm">
+    <div class="fixed inset-x-0 top-0 lg:left-64 z-[60] px-3 pt-3 pointer-events-none">
+      <transition-group name="alarm" tag="div" class="w-full max-w-2xl mx-auto space-y-2">
         <div
           v-for="item in alarmEvents"
           :key="item.id"
@@ -111,19 +159,21 @@ onUnmounted(() => {
     </div>
 
     <!-- Main Content -->
-    <main class="flex-1 overflow-y-auto pt-0 pb-20 px-4 scroll-smooth" style="-webkit-overflow-scrolling: touch;">
-      <RouterView v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </RouterView>
+    <main class="flex-1 min-h-0 overflow-y-auto scroll-smooth px-4 pb-20 sm:px-6 lg:px-8 lg:pb-8 xl:px-10" style="-webkit-overflow-scrolling: touch;">
+      <div class="mx-auto min-h-full w-full max-w-[1600px]">
+        <RouterView v-slot="{ Component }">
+          <transition name="fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </RouterView>
+      </div>
     </main>
     
     <!-- Portal for FABs to avoid transition issues -->
-    <div id="portal-target" class="fixed inset-0 pointer-events-none z-50 max-w-md mx-auto"></div>
+    <div id="portal-target" class="fixed inset-0 lg:left-64 pointer-events-none z-50"></div>
 
-    <!-- Bottom Nav -->
-    <nav class="h-16 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] flex items-center justify-around fixed bottom-0 w-full max-w-md z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
+    <!-- Mobile Bottom Nav -->
+    <nav class="lg:hidden h-16 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] flex items-center justify-around fixed inset-x-0 bottom-0 z-40 border-t border-white/5 pb-[env(safe-area-inset-bottom)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <RouterLink
         v-for="item in navItems"
         :key="item.name"
@@ -136,6 +186,7 @@ onUnmounted(() => {
         <span class="text-[10px] font-medium tracking-wide">{{ item.label }}</span>
       </RouterLink>
     </nav>
+    </div>
   </div>
 </template>
 

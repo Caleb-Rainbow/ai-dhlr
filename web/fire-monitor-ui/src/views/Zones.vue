@@ -691,7 +691,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="space-y-6 pb-20 pt-6">
+    <div class="space-y-6 pb-20 pt-6 lg:pb-4">
         <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <h2
@@ -721,7 +721,7 @@ onUnmounted(() => {
 
             <!-- Zone List with Animation -->
             <div v-else key="content" class="space-y-4">
-                <TransitionGroup name="list" tag="div" class="space-y-4 relative">
+                <TransitionGroup name="list" tag="div" class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4 relative">
                     <div v-for="(zone, index) in zones" :key="zone.id"
                         class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-5 rounded-3xl flex items-center justify-between group transition-all hover:border-white/20 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
                         :style="{ animationDelay: `${index * 0.05}s` }">
@@ -778,7 +778,7 @@ onUnmounted(() => {
         <!-- Floating Action Button with Animation -->
         <Teleport to="#portal-target" defer>
             <Transition name="pop">
-                <div v-if="!loading" class="absolute bottom-24 right-6 pointer-events-auto">
+                <div v-if="!loading" class="absolute bottom-24 right-6 lg:bottom-8 lg:right-8 pointer-events-auto">
                     <button @click="canAddZone && (showAddModal = true)" :disabled="!canAddZone"
                         class="w-14 h-14 text-white rounded-2xl flex items-center justify-center transition-all border border-white/10 group"
                         :class="canAddZone

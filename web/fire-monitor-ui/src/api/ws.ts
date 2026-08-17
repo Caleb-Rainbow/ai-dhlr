@@ -56,7 +56,7 @@ function detectConnectionMode(): ConnectionMode {
         // 远程模式
         return {
             isRemote: true,
-            deviceId: pathMatch[1],
+            deviceId: decodeURIComponent(pathMatch[1]),
             serverUrl: decodeURIComponent(serverParam)
         };
     }
@@ -75,19 +75,26 @@ function detectConnectionMode(): ConnectionMode {
 function buildWebSocketUrl(mode: ConnectionMode): string {
     if (mode.isRemote) {
         // 远程模式: 连接 Java 服务器
-        // URL 格式: ws://host/ws/dhlr/client/{deviceId}
-        const serverUrl = mode.serverUrl;
+        // 网关对外 URL: ws://host/websocket/ws/dhlr/client/{deviceId}
+        const serverUrl = mode.serverUrl
+            .replace(/^https:\/\//, 'wss://')
+            .replace(/^http:\/\//, 'ws://');
+        const url = new URL(serverUrl);
+        let basePath = url.pathname.replace(/\/+$/, '');
 
-        if (serverUrl.startsWith('ws://') || serverUrl.startsWith('wss://')) {
-            // 已经是完整的 WebSocket URL
-            const baseUrl = serverUrl.replace(/\/+$/, '');
-            return `${baseUrl}/ws/dhlr/client/${mode.deviceId}`;
-        } else {
-            // HTTP URL，转换为 WebSocket
-            const wsProtocol = serverUrl.startsWith('https://') ? 'wss://' : 'ws://';
-            const host = serverUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-            return `${wsProtocol}${host}/ws/dhlr/client/${mode.deviceId}`;
+        // 兼容用户填写主机、/websocket 或旧的完整客户端端点，避免重复拼接路径。
+        for (const suffix of ['/websocket/ws/dhlr/client', '/ws/dhlr/client', '/websocket']) {
+            if (basePath.endsWith(suffix)) {
+                basePath = basePath.slice(0, -suffix.length);
+                break;
+            }
         }
+
+        url.pathname = `${basePath}/websocket/ws/dhlr/client/${encodeURIComponent(mode.deviceId)}`
+            .replace(/\/{2,}/g, '/');
+        url.search = '';
+        url.hash = '';
+        return url.toString();
     } else {
         // 本地模式: 连接设备端 Python 服务
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -156,8 +163,14 @@ class WebSocketClient {
      */
     private refreshConnectionMode(): void {
         const detectedMode = detectConnectionMode();
+        const detectedUrl = buildWebSocketUrl(detectedMode);
+
+        // 路由从本地/远程或一个设备切到另一个设备时，不能复用旧连接。
+        if (this._url && this._url !== detectedUrl && this.ws) {
+            this.disconnect();
+        }
         this._mode = detectedMode;
-        this._url = buildWebSocketUrl(detectedMode);
+        this._url = detectedUrl;
 
         if (detectedMode.isRemote) {
             console.log('[WS] 远程模式，连接到 Java 服务器:', this._url);
@@ -237,7 +250,11 @@ class WebSocketClient {
     /**
      * 发送请求并等待响应
      */
-    async request<T = any>(action: string, params: Record<string, any> = {}): Promise<T> {
+    async request<T = any>(
+        action: string,
+        params: Record<string, any> = {},
+        timeoutMs: number = this.requestTimeout
+    ): Promise<T> {
         // 确保已连接
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             await this.connect();
@@ -257,7 +274,7 @@ class WebSocketClient {
             const timeout = setTimeout(() => {
                 this.pendingRequests.delete(msgId);
                 reject(new Error(`请求超时: ${action}`));
-            }, this.requestTimeout);
+            }, timeoutMs);
 
             this.pendingRequests.set(msgId, { resolve, reject, timeout });
 
