@@ -427,6 +427,20 @@ const toggleSerialDebug = async () => {
   }
 };
 
+// 快捷生成设备ID：AILRBJ + YYMMDD + 两位序号（例：AILRBJ26081701）
+// 若输入框已是当天编号则序号自增，便于连续出号
+const generateDeviceId = () => {
+  const now = new Date();
+  const date = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  let seq = 1;
+  const m = /^AILRBJ(\d{6})(\d{2})$/.exec(tempDeviceId.value.trim());
+  if (m && m[1] === date && m[2] !== undefined) {
+    seq = parseInt(m[2], 10) + 1;
+    if (seq > 99) seq = 1;
+  }
+  tempDeviceId.value = `AILRBJ${date}${String(seq).padStart(2, '0')}`;
+};
+
 // 开始编辑设备ID
 const startEditDeviceId = () => {
   tempDeviceId.value = deviceInfo.value?.device_id || 'dhlr';
@@ -1193,6 +1207,11 @@ onUnmounted(() => {
                 style="background: var(--theme-bg-card); border-color: var(--theme-border-input);"
                 @keyup.enter="saveDeviceId" @keyup.escape="cancelEditDeviceId">
               <div class="flex items-center justify-end gap-2">
+                <button @click="generateDeviceId"
+                  class="px-3 py-1 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors text-xs font-medium flex items-center gap-1">
+                  <RefreshCw class="w-3.5 h-3.5" />
+                  生成
+                </button>
                 <button @click="cancelEditDeviceId"
                   class="px-3 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors text-xs font-medium flex items-center gap-1">
                   <XCircle class="w-3.5 h-3.5" />
