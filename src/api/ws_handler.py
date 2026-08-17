@@ -1124,11 +1124,11 @@ class WSHandler:
         # （send 静默返回 False），前端只能等满 30s 超时、按钮卡在"保存中"。
         # 丢到独立任务并延迟 1s：先让响应发出，也给前端紧随其后的回读
         # 请求（get_remote_config 等）留出在旧连接上完成的窗口。
-        if remote.enabled:
-            try:
-                from .websocket_client import remote_ws_client
-                import asyncio
+        try:
+            from .websocket_client import remote_ws_client
+            import asyncio
 
+            if remote.enabled:
                 async def _reconnect_later():
                     await asyncio.sleep(1.0)
                     try:
@@ -1138,8 +1138,19 @@ class WSHandler:
                         logger.warning(f"应用远程配置后重启连接失败: {e}")
 
                 asyncio.create_task(_reconnect_later())
-            except Exception as e:
-                return {"message": f"配置已保存，但连接启动失败: {e}"}
+            else:
+                # 关闭远程模式同样要延迟断线：本请求的响应还走在这条
+                # 远程连接上，立即 stop 会让响应丢在死连接上
+                async def _stop_later():
+                    await asyncio.sleep(1.0)
+                    try:
+                        await remote_ws_client.stop()
+                    except Exception as e:
+                        logger.warning(f"关闭远程连接失败: {e}")
+
+                asyncio.create_task(_stop_later())
+        except Exception as e:
+            return {"message": f"配置已保存，但连接重启失败: {e}"}
 
         return {"message": "远程配置已更新"}
     

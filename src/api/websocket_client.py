@@ -57,8 +57,9 @@ class RemoteWebSocketClient:
         return self._state.is_connected and self._ws is not None and not self._ws.closed
     
     async def add_message_handler(self, handler: Callable[[dict], Awaitable[None]]):
-        """添加异步消息处理器"""
-        self._message_handlers.append(handler)
+        """添加异步消息处理器（重复注册只保留一份，避免请求被处理两次）"""
+        if handler not in self._message_handlers:
+            self._message_handlers.append(handler)
 
     async def remove_message_handler(self, handler: Callable[[dict], Awaitable[None]]):
         """移除消息处理器"""

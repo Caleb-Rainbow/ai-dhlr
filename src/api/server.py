@@ -115,20 +115,24 @@ async def lifespan(app: FastAPI):
     # 启动远程 WebSocket 客户端（如果配置了）
     try:
         from ..utils.config import config_manager
+        from .websocket_client import remote_ws_client
+        from .ws_handler import ws_handler
+
+        # 注册远程消息处理器。必须无条件注册：配置页热启用远程模式时
+        # _update_remote_config 只重启连接、不会注册处理器，若此处随
+        # enabled 跳过，设备能推 status_update 但所有请求被静默丢弃，
+        # 断电重启才恢复
+        async def handle_remote_request(message: dict):
+            """处理来自远程服务器的请求"""
+            if message.get('type') == 'request':
+                response = await ws_handler.handle_request(message)
+                await remote_ws_client.send(response)
+
+        await remote_ws_client.add_message_handler(handle_remote_request)
+
         if config_manager.config.remote.enabled:
-            from .websocket_client import remote_ws_client
-            from .ws_handler import ws_handler
-
-            # 注册远程消息处理器
-            async def handle_remote_request(message: dict):
-                """处理来自远程服务器的请求"""
-                if message.get('type') == 'request':
-                    response = await ws_handler.handle_request(message)
-                    await remote_ws_client.send(response)
-
-            await remote_ws_client.add_message_handler(handle_remote_request)
             asyncio.create_task(remote_ws_client.start())
-            logger.info("远程 WebSocket 客户端已启动，消息处理器已注册")
+            logger.info("远程 WebSocket 客户端已启动")
     except Exception as e:
         logger.warning(f"远程 WebSocket 客户端启动失败: {e}")
     
