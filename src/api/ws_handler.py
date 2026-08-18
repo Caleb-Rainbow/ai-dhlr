@@ -5,6 +5,7 @@ WebSocket 请求处理器
 import time
 import uuid
 import os
+import asyncio
 import threading
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass
@@ -112,6 +113,7 @@ class WSHandler:
             "get_currents": self._get_currents,
             "get_lora_config": self._get_lora_config,
             "set_lora_config": self._set_lora_config,
+            "query_lora_config": self._query_lora_config,
             "set_serial_debug": self._set_serial_debug,
             
             # 巡检相关
@@ -1533,6 +1535,25 @@ class WSHandler:
             return {"message": "LoRa配置已更新: " + ", ".join(messages)}
         except Exception as e:
             raise ValueError(f"设置LoRa配置失败: {e}")
+
+    async def _query_lora_config(self, params: dict) -> dict:
+        """广播查询LoRa编号和信道，等待设备响应后返回结果"""
+        from ..serial_port.serial_manager import serial_manager
+
+        try:
+            query_future = serial_manager.query_lora_config()
+            if query_future is None:
+                return {"success": False, "message": "串口未连接"}
+
+            # 后端最多等待两条查询命令各自的3s响应窗口
+            result = await asyncio.wait_for(
+                asyncio.wrap_future(query_future), timeout=12.0
+            )
+            return result
+        except asyncio.TimeoutError:
+            return {"success": False, "message": "查询超时"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
     
     async def _set_serial_debug(self, params: dict) -> dict:
         """

@@ -116,17 +116,33 @@ class TestCommandBuilder:
         assert cmd == expected
     
     def test_build_get_lora_id_command(self, helper):
-        """测试构建获取 LoRa ID 命令"""
+        """测试构建获取 LoRa ID 命令（广播）"""
         cmd = helper.build_get_lora_id_command()
-        
-        # 命令格式: FF AA FF + 01 03 00 30 00 01 + CRC(2)
+
+        # 命令格式: FF AA FF + FF 03 00 30 00 01 + CRC(2)
         # 总长度: 3 + 6 + 2 = 11 字节
         assert len(cmd) == 11
         # 验证前导码
         assert cmd[0:3] == bytes([0xFF, 0xAA, 0xFF])
-        assert cmd[3] == 0x01  # 地址
+        assert cmd[3] == 0xFF  # 广播地址
         assert cmd[4] == 0x03  # 功能码 (读取保持寄存器)
         assert cmd[5:7] == bytes([0x00, 0x30])  # 寄存器地址 0x0030
+        # 完整命令含 CRC: FF AA FF FF 03 00 30 00 01 91 DB
+        assert cmd == bytes.fromhex("FFAAFFFF030030000191DB")
+
+    def test_build_get_lora_channel_command(self, helper):
+        """测试构建获取 LoRa 信道命令（广播）"""
+        cmd = helper.build_get_lora_channel_command()
+
+        # 命令格式: FF AA FF + FF 03 00 31 00 01 + CRC(2)
+        # 总长度: 3 + 6 + 2 = 11 字节
+        assert len(cmd) == 11
+        assert cmd[0:3] == bytes([0xFF, 0xAA, 0xFF])
+        assert cmd[3] == 0xFF  # 广播地址
+        assert cmd[4] == 0x03  # 功能码 (读取保持寄存器)
+        assert cmd[5:7] == bytes([0x00, 0x31])  # 寄存器地址 0x0031
+        # 完整命令含 CRC: FF AA FF FF 03 00 31 00 01 C0 1B
+        assert cmd == bytes.fromhex("FFAAFFFF0300310001C01B")
     
     def test_build_set_lora_id_command(self, helper):
         """测试构建设置 LoRa ID 命令"""

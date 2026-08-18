@@ -404,6 +404,36 @@ const setLoraConfig = async () => {
   }
 };
 
+// LoRa查询状态: idle-空闲 loading-查询中 success-查询成功 fail-查询失败（无响应）
+const loraQueryState = ref<'idle' | 'loading' | 'success' | 'fail'>('idle');
+let loraQueryTimer: ReturnType<typeof setTimeout> | undefined;
+
+// 查询LoRa配置（广播查询，等待设备响应）
+const queryLoraConfig = async () => {
+  if (loraQueryState.value === 'loading') return;
+  loraQueryState.value = 'loading';
+  clearTimeout(loraQueryTimer);
+  try {
+    const res = await ws.request<{ success: boolean; id: number; channel: number; message?: string }>(
+      'query_lora_config', {}, 15000
+    );
+    if (res.success) {
+      // 用设备实际返回值刷新输入框
+      loraConfig.value.id = res.id;
+      loraConfig.value.channel = res.channel;
+      loraQueryState.value = 'success';
+    } else {
+      loraQueryState.value = 'fail';
+    }
+  } catch (e: any) {
+    console.error('LoRa查询失败', e);
+    loraQueryState.value = 'fail';
+  } finally {
+    // 结果状态展示3秒后恢复
+    loraQueryTimer = setTimeout(() => { loraQueryState.value = 'idle'; }, 3000);
+  }
+};
+
 // 设置音量
 const updateVolume = async () => {
   settingVolume.value = true;
@@ -919,12 +949,31 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 设置按钮单独一行 -->
-      <button @click="setLoraConfig" :disabled="settingLora"
-        class="w-full py-3 bg-primary hover:bg-primary-light text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
-        <Loader v-if="settingLora" class="w-4 h-4 animate-spin" />
-        <span>{{ settingLora ? '设置中...' : '应用 LoRa 配置' }}</span>
-      </button>
+      <!-- 查询/设置按钮一行 -->
+      <div class="grid grid-cols-2 gap-3">
+        <button @click="queryLoraConfig" :disabled="loraQueryState === 'loading'"
+          class="w-full py-3 rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 border"
+          :class="loraQueryState === 'success'
+            ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-500'
+            : loraQueryState === 'fail'
+            ? 'bg-red-500/15 border-red-500/50 text-red-500'
+            : 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/20'">
+          <Loader v-if="loraQueryState === 'loading'" class="w-4 h-4 animate-spin" />
+          <CheckCircle v-else-if="loraQueryState === 'success'" class="w-4 h-4" />
+          <XCircle v-else-if="loraQueryState === 'fail'" class="w-4 h-4" />
+          <Wifi v-else class="w-4 h-4" />
+          <span>{{
+            loraQueryState === 'loading' ? '查询中...' :
+            loraQueryState === 'success' ? '查询成功' :
+            loraQueryState === 'fail' ? '查询失败（无响应）' : '查询 LoRa 配置'
+          }}</span>
+        </button>
+        <button @click="setLoraConfig" :disabled="settingLora"
+          class="w-full py-3 bg-primary hover:bg-primary-light text-white rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+          <Loader v-if="settingLora" class="w-4 h-4 animate-spin" />
+          <span>{{ settingLora ? '设置中...' : '应用 LoRa 配置' }}</span>
+        </button>
+      </div>
     </div>
 
     <!-- GPIO Config - GPIO指示灯配置 -->

@@ -43,6 +43,7 @@ class SerialCommand:
     zone_id: Optional[str] = None  # 灶台ID（用于日志）
     future: Optional[asyncio.Future] = None  # 用于等待命令完成
     expect_response: bool = True  # 是否期待响应（写命令也有响应）
+    response_received: bool = False  # 是否已收到设备响应（future只反映发送成功）
 
 
 @dataclass
@@ -519,6 +520,55 @@ class SerialManager:
         """请求LoRa配置（供外部调用）"""
         if self._helper and self._helper.is_open:
             await self._request_lora_internal()
+
+    def query_lora_config(self):
+        """
+        发起LoRa配置查询并等待设备响应（供外部线程调用）
+
+        通过广播命令查询编号和信道，等待命令队列处理完成后返回结果。
+
+        Returns:
+            concurrent.futures.Future: 完成后结果为
+            {"success": bool, "id": int, "channel": int}；
+            串口未运行时返回 None
+        """
+        if self._loop and self._command_queue is not None:
+            return asyncio.run_coroutine_threadsafe(
+                self._query_lora_and_wait(),
+                self._loop
+            )
+        return None
+
+    async def _query_lora_and_wait(self) -> dict:
+        """发送LoRa广播查询并等待结果（运行在串口事件循环中）"""
+        id_cmd = SerialCommand(type=CommandType.GET_LORA_ID, expect_response=True)
+        id_cmd.future = self._loop.create_future()
+        ch_cmd = SerialCommand(type=CommandType.GET_LORA_CHANNEL, expect_response=True)
+        ch_cmd.future = self._loop.create_future()
+
+        await self._enqueue_command(id_cmd)
+        await asyncio.sleep(0.1)
+        await self._enqueue_command(ch_cmd)
+
+        # 等待两个命令处理完成（无响应时各占3s超时窗口）
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(id_cmd.future, ch_cmd.future),
+                timeout=8.0
+            )
+        except asyncio.TimeoutError:
+            pass
+
+        success = id_cmd.response_received or ch_cmd.response_received
+        self._logger.info(
+            f"LoRa查询结果: {'成功' if success else '无响应'} "
+            f"(编号响应={id_cmd.response_received}, 信道响应={ch_cmd.response_received})"
+        )
+        return {
+            "success": success,
+            "id": self._lora_config.id,
+            "channel": self._lora_config.channel
+        }
     
     def _on_data_received(self, response: SerialResponse):
         """处理串口响应 (Called from Loop)"""
@@ -535,10 +585,12 @@ class SerialManager:
                 # 根据当前命令类型处理响应
                 if current_cmd:
                     if current_cmd.type == CommandType.GET_LORA_ID:
+                        current_cmd.response_received = True
                         self._lora_config.id = value
                         self._lora_config.last_update = time.time()
                         self._logger.info(f"LoRa编号: {value}")
                     elif current_cmd.type == CommandType.GET_LORA_CHANNEL:
+                        current_cmd.response_received = True
                         self._lora_config.channel = value
                         self._lora_config.last_update = time.time()
                         self._logger.info(f"LoRa信道: {value}")

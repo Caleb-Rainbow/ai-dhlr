@@ -479,18 +479,18 @@ class SerialHelper:
 
     def build_get_lora_id_command(self) -> bytes:
         """
-        构建获取LoRa编号命令
-        
-        协议格式: FF AA FF 01 03 00 30 00 01 [CRC16]
+        构建获取LoRa编号命令（广播）
+
+        协议格式: FF AA FF FF 03 00 30 00 01 [CRC16]
         - FF AA FF: 前导码
-        - 01: 设备地址
+        - FF: 广播地址
         - 03: 功能码（读保持寄存器）
         - 00 30: 寄存器地址
         - 00 01: 读取1个寄存器
         - CRC: 对命令体计算
         """
         preamble = bytes([0xFF, 0xAA, 0xFF])
-        command = bytes([0x01, 0x03, 0x00, 0x30, 0x00, 0x01])
+        command = bytes([0xFF, 0x03, 0x00, 0x30, 0x00, 0x01])
         return preamble + append_crc16(command)
     
     def build_set_lora_id_command(self, lora_id: int) -> bytes:
@@ -514,18 +514,18 @@ class SerialHelper:
     
     def build_get_lora_channel_command(self) -> bytes:
         """
-        构建获取LoRa信道命令
-        
-        协议格式: FF AA FF 01 03 00 31 00 01 [CRC16]
+        构建获取LoRa信道命令（广播）
+
+        协议格式: FF AA FF FF 03 00 31 00 01 [CRC16]
         - FF AA FF: 前导码
-        - 01: 设备地址
+        - FF: 广播地址
         - 03: 功能码（读保持寄存器）
         - 00 31: 寄存器地址
         - 00 01: 读取1个寄存器
         - CRC: 对命令体计算
         """
         preamble = bytes([0xFF, 0xAA, 0xFF])
-        command = bytes([0x01, 0x03, 0x00, 0x31, 0x00, 0x01])
+        command = bytes([0xFF, 0x03, 0x00, 0x31, 0x00, 0x01])
         return preamble + append_crc16(command)
     
     def build_set_lora_channel_command(self, channel: int) -> bytes:
