@@ -2,6 +2,7 @@
 离线消息缓存模块
 用于断网时缓存报警记录，恢复后自动补发
 """
+import os
 import threading
 import time
 import json
@@ -130,13 +131,18 @@ class OfflineCache:
             return count
 
     def _save_to_file(self):
-        """持久化到文件"""
+        """持久化到文件（先写临时文件再原子替换，避免断电/被杀留下空文件或截断的 JSON）"""
+        tmp_file = self._cache_dir / (self._cache_file.name + '.tmp')
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
-            with open(self._cache_file, 'w', encoding='utf-8') as f:
+            with open(tmp_file, 'w', encoding='utf-8') as f:
                 json.dump(list(self._queue), f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, self._cache_file)
         except Exception as e:
             logger.error(f"保存离线缓存失败: {e}")
+            tmp_file.unlink(missing_ok=True)
 
     def _load_from_file(self):
         """从文件加载缓存"""
