@@ -111,6 +111,9 @@ class ApiConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    # Web 终端开关：终端等效于 SSH 登录设备（运行用户具有 sudo 权限），
+    # 远程模式下等于网关认证后的任意 shell，现场可按需关闭
+    terminal_enabled: bool = True
 
 
 @dataclass
@@ -376,7 +379,8 @@ class ConfigManager:
         api = ApiConfig(
             host=api_raw.get('host', '0.0.0.0'),
             port=api_raw.get('port', 8000),
-            cors_origins=api_raw.get('cors_origins', ['*'])
+            cors_origins=api_raw.get('cors_origins', ['*']),
+            terminal_enabled=api_raw.get('terminal_enabled', True)
         )
         
         # 解析语音配置
@@ -598,7 +602,8 @@ class ConfigManager:
             'api': {
                 'host': config.api.host,
                 'port': config.api.port,
-                'cors_origins': config.api.cors_origins
+                'cors_origins': config.api.cors_origins,
+                'terminal_enabled': config.api.terminal_enabled
             },
             'voice': {
                 'enabled': config.voice.enabled,

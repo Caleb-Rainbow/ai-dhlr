@@ -131,10 +131,12 @@ async def lifespan(app: FastAPI):
         # _update_remote_config 只重启连接、不会注册处理器，若此处随
         # enabled 跳过，设备能推 status_update 但所有请求被静默丢弃，
         # 断电重启才恢复
+        from .terminal import REMOTE_SENDER
+
         async def handle_remote_request(message: dict):
             """处理来自远程服务器的请求"""
             if message.get('type') == 'request':
-                response = await ws_handler.handle_request(message)
+                response = await ws_handler.handle_request(message, sender=REMOTE_SENDER)
                 await remote_ws_client.send(response)
 
         await remote_ws_client.add_message_handler(handle_remote_request)
@@ -172,6 +174,13 @@ async def lifespan(app: FastAPI):
     try:
         from .websocket_client import remote_ws_client
         await remote_ws_client.stop()
+    except Exception:
+        pass
+
+    # 回收全部终端会话（杀掉 PTY 子进程，避免残留 shell）
+    try:
+        from .terminal import terminal_manager
+        await terminal_manager.shutdown()
     except Exception:
         pass
 
@@ -242,6 +251,10 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"WebSocket错误: {e}")
             await ws_manager.disconnect(websocket)
+        finally:
+            # 回收该连接创建的终端会话（幂等）
+            from .terminal import terminal_manager
+            await terminal_manager.on_connection_closed(websocket)
 
     # =========================================================================
     # 前端静态资源托管

@@ -6,6 +6,7 @@ import Zones from '../views/Zones.vue';
 import Logs from '../views/Logs.vue';
 import Settings from '../views/Settings.vue';
 import Patrol from '../views/Patrol.vue';
+import Terminal from '../views/Terminal.vue';
 import Connect from '../views/Connect.vue';
 
 // 提取公共子路由配置
@@ -16,6 +17,7 @@ const commonChildren = [
     { path: 'patrol', name: 'Patrol', component: Patrol },
     { path: 'logs', name: 'Logs', component: Logs },
     { path: 'settings', name: 'Settings', component: Settings },
+    { path: 'terminal', name: 'Terminal', component: Terminal },
 ];
 
 const routes: RouteRecordRaw[] = [

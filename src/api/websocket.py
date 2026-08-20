@@ -123,9 +123,9 @@ class LocalConnectionManager:
         msg_type = message.get('type', '')
         
         if msg_type == 'request':
-            # 请求-响应模式
+            # 请求-响应模式（sender 用于终端类 action 的输出定向推送）
             from .ws_handler import ws_handler
-            response = await ws_handler.handle_request(message)
+            response = await ws_handler.handle_request(message, sender=websocket)
             await self.send_personal(websocket, response)
             return response
         elif msg_type == 'ping':

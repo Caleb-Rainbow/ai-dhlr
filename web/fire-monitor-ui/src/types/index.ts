@@ -146,3 +146,23 @@ export interface AlarmRecordAck {
     record_id?: number;
     error?: string;
 }
+
+// 终端会话创建结果（terminal_start）
+export interface TerminalStartResult {
+    session_id: string;
+    shell: string;
+    pid: number;
+}
+
+// 终端输出推送（terminal_output，定向推送）
+export interface TerminalOutputEvent {
+    session_id: string;
+    chunk_b64: string;  // PTY 原始输出字节的 Base64
+}
+
+// 终端会话结束推送（terminal_exit，定向推送）
+export interface TerminalExitEvent {
+    session_id: string;
+    reason: 'exited' | 'stopped' | 'idle_timeout' | 'connection_closed' | 'server_shutdown';
+    exit_code?: number;
+}

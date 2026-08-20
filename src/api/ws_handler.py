@@ -54,7 +54,8 @@ class WSHandler:
     """WebSocket 请求处理器"""
     
     def __init__(self):
-        self._handlers: Dict[str, Callable[[Dict[str, Any]], Awaitable[Any]]] = {}
+        # 值为 handler：普通 action 收 (params)，终端类 sender 感知 action 收 (params, sender)
+        self._handlers: Dict[str, Callable[..., Awaitable[Any]]] = {}
         self._register_handlers()
     
     def _register_handlers(self):
@@ -148,35 +149,104 @@ class WSHandler:
 
             # 依赖安装
             "install_dependencies": self._install_dependencies,
+
+            # 终端会话（输出需定向回创建会话的连接，处理器感知 sender）
+            "terminal_start": self._terminal_start,
+            "terminal_input": self._terminal_input,
+            "terminal_resize": self._terminal_resize,
+            "terminal_stop": self._terminal_stop,
         }
-    
-    async def handle_request(self, message: dict) -> dict:
+
+        # 这些 action 的处理器额外接收 sender（请求来源：本地 WebSocket 对象或
+        # REMOTE_SENDER），用于终端输出定向推送，其他 action 不感知来源
+        self._sender_aware_handlers = {
+            "terminal_start", "terminal_input", "terminal_resize", "terminal_stop",
+        }
+
+    async def handle_request(self, message: dict, sender=None) -> dict:
         """
         处理 WebSocket 请求
-        
+
         Args:
             message: 请求消息，格式: {type: "request", msg_id: "...", action: "...", params: {...}}
-            
+            sender: 请求来源连接（本地 WebSocket 对象）或 REMOTE_SENDER，仅终端类 action 使用
+
         Returns:
             响应消息
         """
         msg_id = message.get("msg_id", str(uuid.uuid4()))
         action = message.get("action", "")
         params = message.get("params", {})
-        
+
         if not action:
             return WSResponse(msg_id, False, error="缺少 action 参数").to_dict()
-        
+
         handler = self._handlers.get(action)
         if not handler:
             return WSResponse(msg_id, False, error=f"未知的 action: {action}").to_dict()
-        
+
         try:
-            data = await handler(params)
+            if action in self._sender_aware_handlers:
+                data = await handler(params, sender)
+            else:
+                data = await handler(params)
             return WSResponse(msg_id, True, data=data).to_dict()
         except Exception as e:
             logger.error(f"处理 WebSocket 请求失败: action={action}, error={e}")
             return WSResponse(msg_id, False, error=str(e)).to_dict()
+
+    # ==================== 终端会话处理器 ====================
+
+    async def _terminal_start(self, params: dict, sender) -> dict:
+        """创建终端会话（bash / Python REPL），等效于在设备上打开一个交互 shell"""
+        from .terminal import terminal_manager
+
+        if sender is None:
+            raise ValueError("终端请求缺少来源信息")
+        shell = params.get("shell", "bash")
+        if shell not in ("bash", "python"):
+            raise ValueError("shell 必须是 'bash' 或 'python'")
+        try:
+            cols = max(2, min(1000, int(params.get("cols", 80))))
+            rows = max(2, min(1000, int(params.get("rows", 24))))
+        except (TypeError, ValueError):
+            raise ValueError("cols/rows 必须是整数")
+        return await terminal_manager.start_session(shell, cols, rows, sender)
+
+    async def _terminal_input(self, params: dict, sender) -> dict:
+        """向终端会话写入输入（按键原文/整行/粘贴内容）"""
+        from .terminal import terminal_manager
+
+        session_id = params.get("session_id")
+        if not session_id:
+            raise ValueError("缺少 session_id 参数")
+        data = params.get("data")
+        if not isinstance(data, str):
+            raise ValueError("缺少 data 参数")
+        return await terminal_manager.write_input(session_id, data, sender)
+
+    async def _terminal_resize(self, params: dict, sender) -> dict:
+        """调整终端会话窗口尺寸（行列数）"""
+        from .terminal import terminal_manager
+
+        session_id = params.get("session_id")
+        if not session_id:
+            raise ValueError("缺少 session_id 参数")
+        try:
+            cols = max(2, min(1000, int(params.get("cols", 80))))
+            rows = max(2, min(1000, int(params.get("rows", 24))))
+        except (TypeError, ValueError):
+            raise ValueError("cols/rows 必须是整数")
+        return await terminal_manager.resize_session(session_id, cols, rows, sender)
+
+    async def _terminal_stop(self, params: dict, sender) -> dict:
+        """结束终端会话"""
+        from .terminal import terminal_manager
+
+        session_id = params.get("session_id")
+        if not session_id:
+            raise ValueError("缺少 session_id 参数")
+        return await terminal_manager.stop_session(session_id, sender)
     
     # ==================== 灶台处理器 ====================
     

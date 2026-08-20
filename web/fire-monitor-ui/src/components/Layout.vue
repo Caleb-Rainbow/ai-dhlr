@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Settings,
   SearchCheck,
+  SquareTerminal,
   Flame
 } from 'lucide-vue-next';
 
@@ -43,6 +44,7 @@ const navItems = computed(() => [
   { name: 'zones', label: '灶台', path: `${basePath.value}/zones${serverParam.value}`, icon: CookingPot },
   { name: 'patrol', label: '巡检', path: `${basePath.value}/patrol${serverParam.value}`, icon: SearchCheck },
   { name: 'logs', label: '日志', path: `${basePath.value}/logs${serverParam.value}`, icon: ClipboardList },
+  { name: 'terminal', label: '终端', path: `${basePath.value}/terminal${serverParam.value}`, icon: SquareTerminal },
   { name: 'settings', label: '设置', path: `${basePath.value}/settings${serverParam.value}`, icon: Settings },
 ]);
 
@@ -179,7 +181,7 @@ onUnmounted(() => {
         :key="item.name"
         :to="item.path"
         replace
-        class="flex flex-col items-center gap-1.5 px-4 py-2 text-text-muted transition-all rounded-xl active:scale-90"
+        class="flex flex-col items-center gap-1.5 px-2.5 py-2 text-text-muted transition-all rounded-xl active:scale-90"
         exact-active-class="!text-text-primary"
       >
         <component :is="item.icon" class="w-5 h-5 transition-transform duration-300" />

@@ -392,6 +392,58 @@ Content-Type: application/json
 | record_id | number | 否 | 服务器存储的记录 ID（成功时） |
 | error | string | 否 | 错误信息（失败时） |
 
+#### terminal_output — 终端输出（设备→会话所属连接）
+
+Web 终端会话的输出内容。**此消息为定向推送：只发送给创建该会话的连接（本地链路为对应 WebSocket，远程链路经服务器转发），不广播到其他客户端。** 终端输出可能包含 ANSI 转义序列且不保证是合法 UTF-8，因此以 Base64 承载原始字节流，客户端应解码后交给终端组件（如 xterm.js）渲染。
+
+```json
+{
+    "type": "terminal_output",
+    "timestamp": 1704614400000,
+    "device_id": "DHLR-001",
+    "data": {
+        "session_id": "term_a1b2c3d4e5f6",
+        "chunk_b64": "dXNlckBkZXZpY2U6fiQg"
+    }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| type | string | 是 | 固定为 `"terminal_output"` |
+| timestamp | number | 是 | 消息发送时间（毫秒时间戳） |
+| device_id | string | 是 | 设备 ID |
+| data.session_id | string | 是 | 终端会话 ID（`terminal_start` 返回） |
+| data.chunk_b64 | string | 是 | PTY 原始输出字节的 Base64 编码（单块最大 64KB） |
+
+> **注意：** 待推送输出缓冲上限为 256KB，超出后会丢弃最旧数据并在流中插入形如 `[终端输出超出缓冲上限，已丢弃最旧的 N 字节]` 的标记文本。
+
+#### terminal_exit — 终端会话结束（设备→会话所属连接）
+
+Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客户端收到后应将对应会话置为结束状态，不应再发送 `terminal_input`。
+
+```json
+{
+    "type": "terminal_exit",
+    "timestamp": 1704614400000,
+    "device_id": "DHLR-001",
+    "data": {
+        "session_id": "term_a1b2c3d4e5f6",
+        "reason": "stopped",
+        "exit_code": 0
+    }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| type | string | 是 | 固定为 `"terminal_exit"` |
+| timestamp | number | 是 | 消息发送时间（毫秒时间戳） |
+| device_id | string | 是 | 设备 ID |
+| data.session_id | string | 是 | 终端会话 ID |
+| data.reason | string | 是 | 结束原因：`"exited"`（shell 正常退出）、`"stopped"`（客户端主动停止）、`"idle_timeout"`（15 分钟无输入且无输出，自动回收）、`"connection_closed"`（会话所属连接断开）、`"server_shutdown"`（设备服务关闭） |
+| data.exit_code | number | 否 | 子进程退出码（仅 `"exited"`/`"stopped"` 时可能携带） |
+
 ### 4. 心跳消息
 
 客户端定期发送心跳保持连接：
@@ -1871,6 +1923,84 @@ Content-Type: application/json
     "error": "安装失败 (exit code 1): ERROR: Could not find a version..."
 }
 ```
+
+***
+
+### 终端会话
+
+Web 终端：在设备本机通过 PTY 打开交互式会话，等效于 SSH 登录设备（运行用户与主服务一致）。输出通过 `terminal_output` / `terminal_exit` 推送事件**定向**返回给创建会话的连接，不走请求-响应的 `data`。
+
+> **注意：**
+> - 会话与创建它的连接绑定：本地链路绑定对应 WebSocket，连接断开会话即回收；远程链路绑定设备与转发服务器的长连接——浏览器与服务器之间的连接闪断**不影响**设备侧会话（断开期间的输出丢失，重连后可继续使用原 `session_id` 输入），但设备与服务器之间的链路断开时，会话在下一次产生输出时因无法送达而被回收（`terminal_exit` reason 为 `"connection_closed"`）。
+> - 并发会话上限 2 个；会话空闲（无输入且无输出）15 分钟后自动回收。
+> - 设备配置 `api.terminal_enabled` 为 `false` 时，`terminal_start` 返回 `"终端功能已被禁用"`。
+
+#### terminal_start — 创建终端会话
+
+**参数：**
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| shell | string | 否 | `"bash"` | 会话类型：`"bash"`（交互式 shell）、`"python"`（Python 交互式解释器，使用设备运行环境解释器，可直接 import 项目模块） |
+| cols | number | 否 | `80` | 终端列数（自动钳制到 2-1000） |
+| rows | number | 否 | `24` | 终端行数（自动钳制到 2-1000） |
+
+**返回值：**
+
+```json
+{
+    "session_id": "term_a1b2c3d4e5f6",
+    "shell": "bash",
+    "pid": 12345
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| session_id | string | 终端会话 ID，后续 input/resize/stop 及输出推送均以此关联 |
+| shell | string | 会话类型 |
+| pid | number | PTY 子进程 PID |
+
+**错误：** 会话数达到上限 `"终端会话数已达上限 (2)"`；功能被关闭 `"终端功能已被禁用"`；非 Linux 环境 `"终端功能仅支持 Linux 设备"`；参数非法 `"shell 必须是 'bash' 或 'python'"`、`"cols/rows 必须是整数"`。
+
+#### terminal_input — 向终端写入输入
+
+**参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| session_id | string | 是 | 终端会话 ID |
+| data | string | 是 | 输入内容原文（单次按键、整行或粘贴文本，由客户端终端组件产生）。允许空字符串（可用于探测会话是否存活）。单次长度无硬性上限，但 PTY 输入缓冲满时超出部分会被丢弃 |
+
+**返回值：** 空对象 `{}`（仅表示已写入 PTY，输出经 `terminal_output` 推送）。
+
+**错误：** 会话不存在或非本连接创建 `"终端会话 'xxx' 不存在或已结束"`。
+
+#### terminal_resize — 调整终端尺寸
+
+**参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| session_id | string | 是 | 终端会话 ID |
+| cols | number | 是 | 终端列数（2-1000） |
+| rows | number | 是 | 终端行数（2-1000） |
+
+**返回值：** 空对象 `{}`。
+
+**错误：** 同 `terminal_input`。
+
+#### terminal_stop — 结束终端会话
+
+**参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| session_id | string | 是 | 终端会话 ID |
+
+**返回值：** 空对象 `{}`。设备随后推送 `terminal_exit`（reason 为 `"stopped"`）。
+
+**错误：** 同 `terminal_input`。
 
 ***
 

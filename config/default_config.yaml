@@ -70,6 +70,8 @@ api:
   port: 8000
   cors_origins:
     - "*"
+  # Web 终端开关：终端等效于 SSH 登录设备，现场可按需关闭
+  terminal_enabled: true
 
 # 语音配置
 voice:
