@@ -233,8 +233,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full min-h-[calc(100dvh-5rem)] lg:min-h-full space-y-4 pb-20 lg:pb-0 overflow-hidden">
-    <div class="flex items-center justify-between pt-6 flex-wrap gap-3">
+  <!-- 卡片用视口高度而非 h-full 百分比链：父级高度为 auto 时百分比失效，
+       会导致终端区塌缩为 0（xterm 无固有内容高度） -->
+  <div class="flex flex-col space-y-4 pt-6 pb-20 lg:pb-8">
+    <div class="flex items-center justify-between flex-wrap gap-3">
       <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary to-text-secondary">终端</h2>
       <div class="flex items-center gap-2">
         <div class="relative group" :class="{ 'opacity-50 pointer-events-none': !!sessionId }">
@@ -269,7 +271,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="flex-1 backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl overflow-hidden flex flex-col shadow-2xl shadow-[0_8px_32px_var(--theme-shadow)] min-h-0 transition-all">
+    <div class="flex flex-col h-[calc(100dvh-12.5rem)] min-h-[420px] lg:h-[calc(100dvh-9rem)] backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] rounded-3xl overflow-hidden shadow-2xl shadow-[0_8px_32px_var(--theme-shadow)] transition-all">
       <!-- 头部状态条 -->
       <div class="px-4 py-3 border-b flex justify-between items-center" style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
         <div class="flex items-center gap-2 overflow-hidden">
