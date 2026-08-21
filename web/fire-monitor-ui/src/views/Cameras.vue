@@ -5,6 +5,7 @@ import { ws } from '../api/ws';
 import type { Camera as CameraType } from '../types';
 import Modal from '../components/Modal.vue';
 import Skeleton from '../components/Skeleton.vue';
+import { pinLeaveGeometry } from '../composables/useListTransition';
 
 const cameras = ref<CameraType[]>([]);
 const loading = ref(true);
@@ -179,7 +180,7 @@ onUnmounted(() => {
 
       <!-- Camera List with Animation -->
       <div v-else key="content" class="space-y-4">
-        <TransitionGroup name="list" tag="div" class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4 relative">
+        <TransitionGroup name="list" tag="div" class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4 relative" @before-leave="pinLeaveGeometry">
           <div v-for="(cam, index) in cameras" :key="cam.id"
             class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] p-4 rounded-2xl flex items-center gap-4 transition-all hover:border-white/20 hover-lift shadow-[0_8px_32px_var(--theme-shadow)]"
             :style="{ animationDelay: `${index * 0.05}s` }">

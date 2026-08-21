@@ -372,7 +372,8 @@ body {
 .list-leave-active {
   animation: fadeInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) reverse forwards;
   position: absolute;
-  width: 100%;
+  /* 宽度/位置由 useListTransition.pinLeaveGeometry 在脱离文档流前按原网格几何钉死，
+     不能写 width: 100%——多列 grid 下会撑满整行 */
 }
 
 .list-move {
