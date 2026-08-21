@@ -50,6 +50,8 @@ const isDeviceOfflineError = (e: unknown): boolean => {
 const fetchDeviceInfo = async () => {
   try {
     deviceInfo.value = await ws.request<DeviceInfo>('get_device');
+    // 远程模式下设备恢复不会触发 'connect'（前端到网关的连接一直在线），数据成功返回即视为已恢复
+    deviceOffline.value = false;
   } catch (e) {
     if (isDeviceOfflineError(e)) deviceOffline.value = true;
     console.error(e);
@@ -59,6 +61,7 @@ const fetchDeviceInfo = async () => {
 const refreshStatus = async () => {
   try {
     zones.value = await ws.request<ZoneStatus[]>('get_status');
+    deviceOffline.value = false;
   } catch (e) {
     if (isDeviceOfflineError(e)) deviceOffline.value = true;
     console.error(e);
@@ -71,6 +74,7 @@ const refreshPerformance = async () => {
   try {
     const stats = await ws.request<PerformanceStats>('get_performance');
     performance.value = stats;
+    deviceOffline.value = false;
 
     // Update history
     fpsHistory.value.push(stats.fps);
@@ -107,6 +111,7 @@ onMounted(async () => {
   unsubscribeStatus = ws.on('status_update', (data: ZoneStatus[]) => {
     zones.value = data;
     loading.value = false;
+    deviceOffline.value = false;
   });
 
   // 监听连接恢复事件
