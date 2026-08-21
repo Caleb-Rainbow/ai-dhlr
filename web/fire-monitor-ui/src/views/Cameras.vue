@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { Camera, Eye, Trash2, Plus, Settings } from 'lucide-vue-next';
+import { Camera, Eye, Trash2, Plus, Settings, Maximize2, Minimize2 } from 'lucide-vue-next';
 import { ws } from '../api/ws';
 import type { Camera as CameraType } from '../types';
 import Modal from '../components/Modal.vue';
@@ -32,6 +32,8 @@ const previewCameraName = ref('');
 const previewCameraId = ref('');
 const previewImage = ref('');
 const previewLoading = ref(true);
+const previewContainer = ref<HTMLElement | null>(null);
+const isPreviewFullscreen = ref(false);
 let previewInterval: ReturnType<typeof setInterval> | null = null;
 let previewRequestInFlight = false;
 
@@ -143,17 +145,57 @@ const openPreview = (cam: CameraType) => {
 const closePreview = () => {
   showPreviewModal.value = false;
   if (previewInterval) clearInterval(previewInterval);
+  exitPreviewFullscreen();
+};
+
+// 全屏优先走原生 Fullscreen API（隐藏浏览器地址栏），不支持时退化为铺满视口的 CSS 全屏
+const exitPreviewFullscreen = () => {
+  isPreviewFullscreen.value = false;
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+};
+
+const togglePreviewFullscreen = async () => {
+  if (isPreviewFullscreen.value) {
+    exitPreviewFullscreen();
+    return;
+  }
+  const el = previewContainer.value;
+  if (!el) return;
+  try {
+    if (!el.requestFullscreen) throw new Error('fullscreen unsupported');
+    await el.requestFullscreen();
+    isPreviewFullscreen.value = true;
+  } catch {
+    isPreviewFullscreen.value = true;
+  }
+};
+
+// 原生全屏下按 Esc 由浏览器退出，这里同步状态；CSS 全屏下由我们自己响应 Esc
+const onFullscreenChange = () => {
+  if (!document.fullscreenElement) isPreviewFullscreen.value = false;
+};
+
+const onKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && isPreviewFullscreen.value && !document.fullscreenElement) {
+    isPreviewFullscreen.value = false;
+  }
 };
 
 onMounted(async () => {
   await ws.connect();
   loadCameras();
   refreshTimer.value = setInterval(loadCameras, 5000);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('keydown', onKeydown);
 });
 
 onUnmounted(() => {
   if (refreshTimer.value) clearInterval(refreshTimer.value);
   if (previewInterval) clearInterval(previewInterval);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
+  document.removeEventListener('keydown', onKeydown);
 });
 </script>
 
@@ -316,7 +358,8 @@ onUnmounted(() => {
 
     <!-- Preview Modal -->
     <Modal :title="previewCameraName" :is-open="showPreviewModal" @close="closePreview">
-      <div class="bg-black aspect-video rounded-lg overflow-hidden relative">
+      <div ref="previewContainer" class="bg-black aspect-video rounded-lg overflow-hidden relative"
+        :class="{ 'preview-fallback-fs': isPreviewFullscreen }">
         <!-- Loading Spinner -->
         <Transition name="fade">
           <div v-if="previewLoading && !previewImage" class="absolute inset-0 flex items-center justify-center">
@@ -325,7 +368,30 @@ onUnmounted(() => {
         </Transition>
         <img v-if="previewImage" :src="previewImage"
           class="w-full h-full object-contain transition-opacity duration-300" alt="摄像头预览">
+        <!-- 全屏切换 -->
+        <button @click.stop="togglePreviewFullscreen" :title="isPreviewFullscreen ? '退出全屏' : '全屏'"
+          class="absolute top-3 right-3 z-10 p-2.5 rounded-xl bg-black/50 hover:bg-black/70 text-white/80 hover:text-white border border-white/10 backdrop-blur-sm transition-all press-effect">
+          <Maximize2 v-if="!isPreviewFullscreen" class="w-4 h-4" />
+          <Minimize2 v-else class="w-4 h-4" />
+        </button>
       </div>
     </Modal>
   </div>
 </template>
+
+<style scoped>
+/* 原生全屏：铺满屏幕并去掉圆角，图片由 object-contain 黑边自适应 */
+.aspect-video:fullscreen {
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+/* CSS 退化全屏（iOS Safari 等不支持元素全屏时）：盖过 Modal 铺满视口 */
+.preview-fallback-fs {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+</style>
