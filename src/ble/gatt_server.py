@@ -19,6 +19,8 @@ from bless import (
     GATTAttributePermissions,
     GATTCharacteristicProperties,
 )
+from dbus_next.constants import MessageType
+from dbus_next.message import Message
 
 from . import protocol as P
 from .network_applier import current_network_status
@@ -28,6 +30,11 @@ logger = logging.getLogger(__name__)
 # DEVICE_INFO 网络状态缓存的刷新间隔（秒）。current_network_status 同步跑 nmcli/ip，
 # 不能在读回调里现查（阻塞事件循环/超时 → BlueZ 回 0x0E），故后台定时刷新、读时取缓存。
 NETWORK_REFRESH_SEC = 3
+
+# 广播看门狗：轮询间隔与去抖跳数。连续 N 跳都停滞才恢复——单跳判定可能落在
+# 连接建立窗口内（见 _any_central_connected），去抖进一步压缩误动作概率。
+WATCHDOG_INTERVAL_SEC = 5
+WATCHDOG_STALLED_TICKS = 2
 
 
 class GattServer:
@@ -163,33 +170,101 @@ class GattServer:
             await asyncio.sleep(NETWORK_REFRESH_SEC)
 
     async def _advertising_watchdog(self) -> None:
-        """仅当广告真正停滞(not advertising)且无连接时才 stop()+start() 重广播。
+        """广告停滞(未广播且无连接)连续 [WATCHDOG_STALLED_TICKS] 跳时，仅重注册广播。
 
-        历史 bug：原逻辑还因「中央断开」(just_disconnected) 触发恢复，而
-        server.stop()+start() 会注销并重新注册整个 GATT 应用
-        (org.bluez.GattApplication1)，导致所有 characteristic 的 attribute
-        handle 被重新分配。中央(手机)若带着缓存的旧服务表重连，首个
-        readCharacteristic(DEVICE_INFO) 会命中失效 handle → 返回
-        GATT_INVALID_HANDLE(status=1)，表现为「偶发连不上、重连又好了」。
-        断开本身不影响广告(is_advertising 仍 True)，无需恢复，故移除该分支。
+        「无连接」必须查 BlueZ Device1.Connected（见 _any_central_connected），不能用
+        bless 的 server.is_connected()——其语义是「有特征值被订阅」，连接建立窗口内恒为
+        False，而连上后 BlueZ 又停了广播，单看这两项会把每次握手都误判成停滞。
+        历史教训（f7ded14）：恢复动作勿用 stop()+start()——那会注销重注册整个 GATT 应用、
+        重分配全部 attribute handle，手机带着缓存表重连即撞 GATT_INVALID_HANDLE(status=1)；
+        现改为只重注册 LEAdvertisement1（见 _restart_advertising_only），handle 永不漂移。
         """
+        stalled_ticks = 0
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(WATCHDOG_INTERVAL_SEC)
             try:
                 if self._server is None:
                     continue
-                connected = await self._server.is_connected()
                 advertising = await self._server.is_advertising()
+                connected = await self._any_central_connected()
+                if connected is None:
+                    # 连接状态查询失败：状态未知，本跳不动作也不累计
+                    stalled_ticks = 0
+                    continue
                 stalled = (not advertising) and (not connected)
-                if stalled:
+                if not stalled:
+                    stalled_ticks = 0
+                    continue
+                stalled_ticks += 1
+                if stalled_ticks < WATCHDOG_STALLED_TICKS:
                     logger.info(
-                        "[watchdog] 广告停滞, 重新广播 (connected=%s advertising=%s)",
-                        connected, advertising,
+                        "[watchdog] 广告停滞 %d/%d 跳 (connected=%s advertising=%s)",
+                        stalled_ticks, WATCHDOG_STALLED_TICKS, connected, advertising,
                     )
-                    try:
-                        await self._server.stop()
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("[watchdog] stop 忽略: %s", e)
-                    await self._server.start()
+                    continue
+                stalled_ticks = 0
+                logger.info(
+                    "[watchdog] 广告停滞连续 %d 跳, 仅重注册广播 (connected=%s advertising=%s)",
+                    WATCHDOG_STALLED_TICKS, connected, advertising,
+                )
+                await self._restart_advertising_only()
             except Exception as e:  # noqa: BLE001
+                stalled_ticks = 0
                 logger.warning("[watchdog] 异常: %s", e)
+
+    async def _any_central_connected(self) -> Optional[bool]:
+        """查 BlueZ 实际连接状态：任一 hci 下远端设备 Device1.Connected=true 即有连接。
+
+        bless 0.3.0 的 server.is_connected() 返回 subscribed_characteristics 是否非空
+        （v0.3.0 BlueZGattApplication.is_connected，源码注释自认 not the same as adapter
+        connected）。手机连接建立窗口内（LL 已连上 → App 写 CCCD 订阅 STATUS 前，约
+        0.3~2.5s）它恒为 False；旧看门狗据此误判「无连接+停广播」→ stop()+start() 杀掉
+        建立中的连接或重分配句柄，正是 App 端「读取特征值失败 status=1」「连接在建立过程
+        中断开」的根因。这里直接经 ObjectManager.GetManagedObjects 查真实连接。
+
+        返回 None 表示查询失败（调用方跳过本跳）。
+        """
+        bus = getattr(self._server, "bus", None)
+        if bus is None:
+            return None
+        reply = await bus.call(
+            Message(
+                message_type=MessageType.METHOD_CALL,
+                destination="org.bluez",
+                path="/",
+                interface="org.freedesktop.DBus.ObjectManager",
+                member="GetManagedObjects",
+            )
+        )
+        if reply.message_type != MessageType.METHOD_RETURN:
+            return None
+        for path, interfaces in reply.body[0].items():
+            if "/dev_" not in str(path):
+                continue  # 只要远端设备对象（/org/bluez/hciX/dev_XX_…）
+            dev = interfaces.get("org.bluez.Device1") or {}
+            connected = dev.get("Connected")
+            if connected is not None and connected.value:
+                return True
+        return False
+
+    async def _restart_advertising_only(self) -> None:
+        """只重注册 LE 广播（LEAdvertisement1），不注销 GATT 应用 → handle 不变。
+
+        经 BlueZGattApplication.stop/start_advertising 只动 LEAdvertisingManager1 的
+        广播注册；GATT 应用保持注册，attribute handle 不重分配，手机缓存的服务表持续有效。
+        后端属性缺失（bless 变更/非 BlueZ 平台）时退回 stop()+start() 兜底恢复广播——
+        有句柄漂移的代价，但好过永远不再广播。
+        """
+        server = self._server
+        app = getattr(server, "app", None)
+        adapter = getattr(server, "adapter", None)
+        if app is None or adapter is None or not hasattr(app, "start_advertising"):
+            logger.warning("[watchdog] 无 BlueZ 后端(app/adapter)，退回 stop()+start()")
+            await server.stop()
+            await server.start()
+            return
+        try:
+            await app.stop_advertising(adapter)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[watchdog] stop_advertising 忽略: %s", e)
+        await app.start_advertising(adapter)

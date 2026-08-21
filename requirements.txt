@@ -35,7 +35,9 @@ pyserial>=3.5
 psutil>=5.9
 
 # 蓝牙配网（BLE 外设，ai-dhlr-ble.service 依赖；原为开发期手动安装，补回依赖清单）
-bless>=0.3.0
+# 钉死 0.3.0：gatt_server 看门狗依赖 BlueZ 后端结构(server.app/adapter、
+# app.stop_advertising/start_advertising)，升级前需回归 _restart_advertising_only
+bless==0.3.0
 
 #测试框架
 pytest>=7.0.0
