@@ -176,4 +176,6 @@ def build_device_info(
     data: dict = {"type": type, "model": model, "fw": fw, "hwid": hwid, "name": name, "proto": proto}
     if network is not None:
         data["network"] = network
-    return json.dumps(data, ensure_ascii=False).encode("utf-8")
+    # bless 0.3.0 的 ReadValue 未处理 offset，DEVICE_INFO 应尽量落在一次 GATT Read
+    # 响应内；紧凑 JSON 保持协议内容不变，同时降低触发 Android Read Blob 的概率。
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

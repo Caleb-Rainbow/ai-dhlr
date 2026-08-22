@@ -110,8 +110,10 @@ async def main() -> None:
     await gatt.start()
     logger.info("BLE 配网服务就绪: %s (hwid=%s, fw=%s)", adv_name, hwid, fw)
 
-    while True:
-        await asyncio.sleep(3600)
+    # 不用无条件 sleep 保活：dbus-next 的底层连接异常后进程可能仍存活，但 BlueZ 已无法
+    # 调用任何 ReadValue/WriteValue（App 表现为 status=14）。等待 GATT 失效并非零退出，
+    # 由 systemd Restart=always 重新拉起并完整注册服务。
+    await gatt.wait_until_failed()
 
 
 if __name__ == "__main__":

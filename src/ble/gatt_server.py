@@ -19,7 +19,8 @@ from bless import (
     GATTAttributePermissions,
     GATTCharacteristicProperties,
 )
-from dbus_next.constants import MessageType
+from dbus_next.aio import MessageBus
+from dbus_next.constants import BusType, MessageType
 from dbus_next.message import Message
 
 from . import protocol as P
@@ -31,10 +32,17 @@ logger = logging.getLogger(__name__)
 # 不能在读回调里现查（阻塞事件循环/超时 → BlueZ 回 0x0E），故后台定时刷新、读时取缓存。
 NETWORK_REFRESH_SEC = 3
 
+# STATUS 通知最终会转换成 D-Bus PropertiesChanged。图片预览等大消息可能拆成上百块；
+# 若在同一事件循环 tick 内连续写入，dbus-next 的非阻塞 socket 可能因发送缓冲区耗尽抛
+# BlockingIOError(EAGAIN)，随后把整条 GATT D-Bus 连接 finalize，形成「进程仍在、特征值全读
+# 失败 0x0E」的假活状态。串行化每条消息并轻微限速，给 BlueZ/D-Bus 留出排空时间。
+NOTIFY_CHUNK_INTERVAL_SEC = 0.015
+
 # 广播看门狗：轮询间隔与去抖跳数。连续 N 跳都停滞才恢复——单跳判定可能落在
 # 连接建立窗口内（见 _any_central_connected），去抖进一步压缩误动作概率。
 WATCHDOG_INTERVAL_SEC = 5
 WATCHDOG_STALLED_TICKS = 2
+WATCHDOG_DBUS_TIMEOUT_SEC = 2
 
 
 class GattServer:
@@ -52,12 +60,20 @@ class GattServer:
         self._server: Optional[BlessServer] = None
         self._service = None  # ProvisioningService，由 bind_service 注入
         # 派发的 handle 任务引用集合：防被 GC（"Task was destroyed but it is pending!"）+ 丢失异常。
-        # 注：并发 handle 的 notify 可能跨 id 交错，但 App 端按命令 id 关联（rpc/image 各自等待器），
-        # 单个 _do_rpc/_do_get_image 内 notify 顺序 await，故跨 id 交错不破坏正确性。
         self._inflight: set = set()
+        # 同一 STATUS 特征值承载一条连续字节流，两个消息的分块绝不能交错；锁同时承担 D-Bus
+        # 背压，避免图片通知洪峰填满 dbus-next 的非阻塞发送缓冲区。
+        self._notify_lock = asyncio.Lock()
         # DEVICE_INFO 的网络状态缓存：后台任务 _refresh_network_loop 定时刷新，_read 直接读，
         # 不在读回调里现查 nmcli/ip（会阻塞 bless 事件循环 → BlueZ 回 0x0E Unlikely Error）。
         self._network: Optional[dict] = None
+        # 看门狗查询使用独立的 system-bus 连接，不能与 bless 的 GATT 注册/通知共用发送队列。
+        self._watchdog_bus: Optional[MessageBus] = None
+        # dbus-next 遇到 EAGAIN 会 finalize bless 的 bus，但不会让业务主循环退出。监控该连接，
+        # 一旦失效便使进程非零退出，由 systemd Restart=always 重新注册完整 GATT 应用。
+        self._fatal_event = asyncio.Event()
+        self._fatal_error: Optional[BaseException] = None
+        self._background_tasks: set[asyncio.Task] = set()
 
     def bind_service(self, service) -> None:
         self._service = service
@@ -96,22 +112,24 @@ class GattServer:
         bless 的 update_value(service_uuid, char_uuid) 是「读特征值当前值再通知」，
         故需先把每块 chunk 写入特征值 .value，再 update_value 触发 PropertiesChanged。
         """
-        if self._server is None:
-            return
-        try:
-            char = self._server.get_characteristic(P.STATUS_UUID)
-            if char is None:
-                logger.warning("[notify] STATUS 特征值未找到，无法通知")
+        async with self._notify_lock:
+            if self._server is None:
                 return
-            self._seq = (self._seq + 1) & 0xFFFF
-            chunks = P.encode_message(self._seq, obj, self._mtu)
-            logger.info(f"[notify] seq={self._seq} event={obj.get('event')} 分 {len(chunks)} 块")
-            for chunk in chunks:
-                char.value = bytearray(chunk)
-                self._server.update_value(P.SERVICE_UUID, P.STATUS_UUID)
-                await asyncio.sleep(0)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("notify 失败: %s", e)
+            try:
+                char = self._server.get_characteristic(P.STATUS_UUID)
+                if char is None:
+                    logger.warning("[notify] STATUS 特征值未找到，无法通知")
+                    return
+                self._seq = (self._seq + 1) & 0xFFFF
+                chunks = P.encode_message(self._seq, obj, self._mtu)
+                logger.info(f"[notify] seq={self._seq} event={obj.get('event')} 分 {len(chunks)} 块")
+                for index, chunk in enumerate(chunks):
+                    char.value = bytearray(chunk)
+                    self._server.update_value(P.SERVICE_UUID, P.STATUS_UUID)
+                    if index + 1 < len(chunks):
+                        await asyncio.sleep(NOTIFY_CHUNK_INTERVAL_SEC)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("notify 失败: %s", e)
 
     # ---------------------------- 生命周期 ---------------------------- #
     async def start(self) -> None:
@@ -147,9 +165,41 @@ class GattServer:
         await server.start()
         logger.info("BLE 配网服务已广播: name=%s advertising=%s", self._name, await server.is_advertising())
         # 看门狗：bless 广告停滞(停广播且无连接)时主动 stop()+start() 重广播
-        asyncio.create_task(self._advertising_watchdog())
+        self._track_background_task(self._advertising_watchdog(), "ble-advertising-watchdog")
         # DEVICE_INFO 网络状态缓存定时刷新（读回调不现查，见 _read 说明）
-        asyncio.create_task(self._refresh_network_loop())
+        self._track_background_task(self._refresh_network_loop(), "ble-network-refresh")
+        # bless/dbus-next 连接若被 finalize，必须退出进程让 systemd 恢复，不能继续假活。
+        self._track_background_task(self._monitor_gatt_bus(), "ble-gatt-bus-monitor")
+
+    def _track_background_task(self, coro, name: str) -> asyncio.Task:
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def _monitor_gatt_bus(self) -> None:
+        """监控 bless 的 D-Bus 连接；连接失效时触发主协程退出，由 systemd 自愈。"""
+        bus = getattr(self._server, "bus", None)
+        if bus is None:
+            error: BaseException = RuntimeError("bless 未提供 GATT D-Bus 连接")
+        else:
+            try:
+                await bus.wait_for_disconnect()
+            except asyncio.CancelledError:
+                raise
+            except BaseException as exc:  # dbus-next 会把 socket 写异常传给 disconnect future
+                error = exc
+            else:
+                error = RuntimeError("GATT D-Bus 连接已断开")
+        self._fatal_error = error
+        logger.error("GATT D-Bus 连接失效，退出进程交由 systemd 重启: %s", error)
+        self._fatal_event.set()
+
+    async def wait_until_failed(self) -> None:
+        """阻塞到 GATT 基础连接失效，然后抛错使 systemd 看到非零退出。"""
+        await self._fatal_event.wait()
+        error = self._fatal_error or RuntimeError("GATT 服务失效")
+        raise RuntimeError("GATT 服务基础连接已失效") from error
 
     async def _refresh_network(self) -> None:
         """刷新一次网络状态缓存：nmcli/ip 子进程丢线程池跑，不阻塞事件循环。失败沿用旧缓存。"""
@@ -224,18 +274,23 @@ class GattServer:
 
         返回 None 表示查询失败（调用方跳过本跳）。
         """
-        bus = getattr(self._server, "bus", None)
-        if bus is None:
-            return None
-        reply = await bus.call(
-            Message(
-                message_type=MessageType.METHOD_CALL,
-                destination="org.bluez",
-                path="/",
-                interface="org.freedesktop.DBus.ObjectManager",
-                member="GetManagedObjects",
+        try:
+            bus = await self._get_watchdog_bus()
+            reply = await asyncio.wait_for(
+                bus.call(
+                    Message(
+                        message_type=MessageType.METHOD_CALL,
+                        destination="org.bluez",
+                        path="/",
+                        interface="org.freedesktop.DBus.ObjectManager",
+                        member="GetManagedObjects",
+                    )
+                ),
+                timeout=WATCHDOG_DBUS_TIMEOUT_SEC,
             )
-        )
+        except Exception:
+            self._reset_watchdog_bus()
+            raise
         if reply.message_type != MessageType.METHOD_RETURN:
             return None
         for path, interfaces in reply.body[0].items():
@@ -246,6 +301,21 @@ class GattServer:
             if connected is not None and connected.value:
                 return True
         return False
+
+    async def _get_watchdog_bus(self) -> MessageBus:
+        bus = self._watchdog_bus
+        if bus is not None and bus.connected:
+            return bus
+        self._reset_watchdog_bus()
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        self._watchdog_bus = bus
+        return bus
+
+    def _reset_watchdog_bus(self) -> None:
+        bus = self._watchdog_bus
+        self._watchdog_bus = None
+        if bus is not None and bus.connected:
+            bus.disconnect()
 
     async def _restart_advertising_only(self) -> None:
         """只重注册 LE 广播（LEAdvertisement1），不注销 GATT 应用 → handle 不变。
