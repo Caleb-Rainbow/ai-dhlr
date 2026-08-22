@@ -36,7 +36,8 @@ NETWORK_REFRESH_SEC = 3
 # 若在同一事件循环 tick 内连续写入，dbus-next 的非阻塞 socket 可能因发送缓冲区耗尽抛
 # BlockingIOError(EAGAIN)，随后把整条 GATT D-Bus 连接 finalize，形成「进程仍在、特征值全读
 # 失败 0x0E」的假活状态。串行化每条消息并轻微限速，给 BlueZ/D-Bus 留出排空时间。
-NOTIFY_CHUNK_INTERVAL_SEC = 0.015
+# 首阶段性能优化从 15ms 保守降到 10ms；继续下调前须在真机连续大图传输下验证无 EAGAIN。
+NOTIFY_CHUNK_INTERVAL_SEC = 0.010
 
 # 广播看门狗：轮询间隔与去抖跳数。连续 N 跳都停滞才恢复——单跳判定可能落在
 # 连接建立窗口内（见 _any_central_connected），去抖进一步压缩误动作概率。

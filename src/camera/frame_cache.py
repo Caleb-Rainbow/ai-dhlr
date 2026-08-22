@@ -69,7 +69,7 @@ class FrameCache:
             return None
 
         # 节流清理过期缓存项（每 60s 最多一次）。
-        # 正常情况下键按 camera_id_quality 覆写不会无限增长，但质量/摄像头组合不再被请求时
+        # 正常情况下键按 camera_id/quality/尺寸覆写不会无限增长，但组合不再被请求时
         # 会残留过期项，靠这里周期性回收（base64 串较大，长期累积有内存压力）。
         now = time.time()
         if now - self._last_cleanup > 60:
@@ -90,7 +90,9 @@ class FrameCache:
             return None
 
         current_time = time.time()
-        cache_key = f"{camera_id}_{quality}"
+        # 同一摄像头可同时被 Web 完整预览和 BLE 缩略预览请求；尺寸必须进入键，
+        # 否则相同 quality 下可能在 TTL 内误返回另一种分辨率的缓存。
+        cache_key = f"{camera_id}_{quality}_{width}x{height}"
 
         # 尝试从缓存获取
         with self._lock:

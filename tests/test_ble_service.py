@@ -5,6 +5,8 @@ import pytest
 
 from src.ble.service import (
     APPLYING,
+    BLE_PREVIEW_JPEG_QUALITY,
+    BLE_PREVIEW_MAX_EDGE,
     CONNECTED,
     CONNECTING,
     IDLE,
@@ -275,5 +277,10 @@ async def test_get_preview_bridge_failure_sends_image_error():
     bridge = FakeBridge(result={"success": False, "data": None, "error": "摄像头离线"})
     svc, nf = _svc_with_bridge(bridge)
     await svc.handle(1, {"id": 14, "cmd": "get_preview", "camera_id": "0"})
+    assert bridge.calls == [("preview_camera", {
+        "camera_id": "0",
+        "max_edge": BLE_PREVIEW_MAX_EDGE,
+        "quality": BLE_PREVIEW_JPEG_QUALITY,
+    })]
     err = [o for o in nf.objs if o["event"] == "image_error"]
     assert err and err[0]["id"] == 14 and "离线" in err[0]["error"]

@@ -717,7 +717,8 @@ class WSHandler:
     async def _preview_camera(self, params: dict) -> dict:
         """获取摄像头预览帧 (Base64 编码)
 
-        使用帧缓存优化多客户端预览场景，减少重复编码开销。
+        使用帧缓存优化多客户端预览场景，减少重复编码开销。调用方可通过
+        max_edge/quality 请求轻量预览；未提供时保持原有完整尺寸和 quality=80。
         """
         camera_id = params.get("camera_id")
         if not camera_id:
@@ -765,8 +766,33 @@ class WSHandler:
             logger.warning(f"帧尺寸无效: {camera_id}, shape={frame.shape}")
             raise ValueError("获取预览失败，帧尺寸无效")
 
+        # BLE 预览按需缩小；Web 端不传 max_edge，保持原有完整尺寸。
+        try:
+            quality = int(params.get("quality", 80))
+        except (TypeError, ValueError):
+            quality = 80
+        quality = max(30, min(95, quality))
+
+        try:
+            max_edge = int(params.get("max_edge", 0) or 0)
+        except (TypeError, ValueError):
+            max_edge = 0
+        if max_edge > 0:
+            max_edge = max(160, min(1920, max_edge))
+            height, width = frame.shape[:2]
+            longest_edge = max(height, width)
+            if longest_edge > max_edge:
+                import cv2
+
+                scale = max_edge / longest_edge
+                target_size = (
+                    max(1, round(width * scale)),
+                    max(1, round(height * scale)),
+                )
+                frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
+
         # 使用帧缓存进行编码（减少多客户端重复编码开销）
-        result = frame_cache.get_or_encode(camera_id, frame, quality=80)
+        result = frame_cache.get_or_encode(camera_id, frame, quality=quality)
         if result:
             base64_str, from_cache = result
             if from_cache:

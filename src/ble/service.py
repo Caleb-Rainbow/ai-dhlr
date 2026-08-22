@@ -57,6 +57,11 @@ RPC_ACTION_WHITELIST = frozenset({
 # 6000 切片 + 信封 ≈ 6100B，距 8192 留 >2KB 余裕（实测最坏帧 6105B）。
 IMAGE_CHUNK_SIZE = 6000
 
+# BLE 预览仅用于手机端快速查看，不应传输摄像头原始大图。Web 管理页仍走默认的
+# preview_camera 参数，保持原分辨率和 quality=80；告警快照同样不受影响。
+BLE_PREVIEW_MAX_EDGE = 640
+BLE_PREVIEW_JPEG_QUALITY = 60
+
 # 状态机状态（与协议文档一致）
 IDLE = "IDLE"
 SCANNING = "SCANNING"
@@ -310,7 +315,14 @@ class ProvisioningService:
         if self._bridge is None:
             await self._notify({"event": "image_error", "id": cid, "error": "rpc bridge not available"})
             return
-        resp = await self._bridge.request("preview_camera", {"camera_id": camera_id})
+        resp = await self._bridge.request(
+            "preview_camera",
+            {
+                "camera_id": camera_id,
+                "max_edge": BLE_PREVIEW_MAX_EDGE,
+                "quality": BLE_PREVIEW_JPEG_QUALITY,
+            },
+        )
         if not resp.get("success"):
             await self._notify({"event": "image_error", "id": cid,
                                 "error": resp.get("error") or "preview failed"})
