@@ -271,14 +271,18 @@ class WSHandler:
                 "camera_id": z.zone.camera_id,
                 "camera_ids": list(z.zone.camera_ids),
                 "roi": [list(p) for p in z.zone.roi],
-                "enabled": z.zone.enabled
+                "enabled": z.zone.enabled,
+                "current_value": currents.get(z.zone.id, 0),
+                "temp_sensor_address": None,
+                "temp_sensor_enabled": False,
             }
             # 从配置获取serial_index和fire_current_threshold
             for cfg in config_manager.config.zones:
                 if cfg.id == z.zone.id:
                     zone_data["serial_index"] = cfg.serial_index
                     zone_data["fire_current_threshold"] = cfg.fire_current_threshold
-                    zone_data["current_value"] = currents.get(z.zone.id, 0)
+                    zone_data["temp_sensor_address"] = cfg.temp_sensor_address
+                    zone_data["temp_sensor_enabled"] = cfg.temp_sensor_address is not None
                     break
             result.append(zone_data)
         return result
@@ -293,16 +297,34 @@ class WSHandler:
         sm = zone_manager.get_zone(zone_id)
         if not sm:
             raise ValueError(f"灶台 '{zone_id}' 不存在")
-        
+
+        current_value = 0
+        try:
+            from ..serial_port.serial_manager import serial_manager
+            current_value = serial_manager.get_all_currents().get(zone_id, 0)
+        except Exception:
+            pass
+
         z = sm.zone
-        return {
+        zone_data = {
             "id": z.id,
             "name": z.name,
             "camera_id": z.camera_id,
             "camera_ids": list(z.camera_ids),
             "roi": [list(p) for p in z.roi],
-            "enabled": z.enabled
+            "enabled": z.enabled,
+            "current_value": current_value,
+            "temp_sensor_address": None,
+            "temp_sensor_enabled": False,
         }
+        for cfg in config_manager.config.zones:
+            if cfg.id == zone_id:
+                zone_data["serial_index"] = cfg.serial_index
+                zone_data["fire_current_threshold"] = cfg.fire_current_threshold
+                zone_data["temp_sensor_address"] = cfg.temp_sensor_address
+                zone_data["temp_sensor_enabled"] = cfg.temp_sensor_address is not None
+                break
+        return zone_data
     
     async def _create_zone(self, params: dict) -> dict:
         """创建灶台"""

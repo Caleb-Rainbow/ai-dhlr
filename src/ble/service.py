@@ -46,7 +46,7 @@ RPC_ACTION_WHITELIST = frozenset({
     "get_zone", "create_zone", "update_zone", "delete_zone",
     # 系统设置覆盖层：远程连接(+校验登录) / LoRA / USB OTG / 开机自启热点 / 系统维护(更新·装依赖)
     "get_remote_config", "update_remote_config", "verify_remote_login",
-    "get_lora_config", "set_lora_config",
+    "get_lora_config", "query_lora_config", "set_lora_config",
     "get_usb_otg_mode", "set_usb_otg_mode",
     "get_hotspot_autostart", "set_hotspot_autostart",
     "trigger_update", "install_dependencies",
@@ -225,7 +225,12 @@ class ProvisioningService:
             await self._error(cid, "unsupported", "rpc bridge not available")
             return
         params = command.get("params")
-        result = await self._bridge.request(action, params if isinstance(params, dict) else {})
+        bridge_timeout = 15.0 if action == "query_lora_config" else 10.0
+        result = await self._bridge.request(
+            action,
+            params if isinstance(params, dict) else {},
+            timeout=bridge_timeout,
+        )
         result_obj = {
             "event": "rpc_result",
             "id": cid,

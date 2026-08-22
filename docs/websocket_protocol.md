@@ -614,11 +614,14 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
         "id": "zone_1",
         "name": "灶台1",
         "camera_id": "0",
+        "camera_ids": ["0", "1"],
         "roi": [[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.5]],
         "enabled": true,
         "serial_index": 1,
         "fire_current_threshold": 100,
-        "current_value": 0
+        "current_value": 0,
+        "temp_sensor_address": null,
+        "temp_sensor_enabled": false
     }
 ]
 ```
@@ -627,12 +630,15 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
 |------|------|------|
 | id | string | 灶台 ID |
 | name | string | 灶台名称 |
-| camera_id | string | 绑定的摄像头 ID |
+| camera_id | string | 主摄像头 ID（兼容旧客户端） |
+| camera_ids | string[] | 实际绑定的摄像头 ID 列表；不分区模式可绑定多个，为空时回退 `camera_id` |
 | roi | array | 感兴趣区域坐标，归一化坐标 `[[x1,y1], [x2,y2], ...]`，值范围 0.0-1.0 |
 | enabled | boolean | 是否启用 |
 | serial_index | number | 电流检测分区索引 |
 | fire_current_threshold | number | 火焰电流阈值 |
 | current_value | number | 当前电流值（来自串口实时数据） |
+| temp_sensor_address | number\|null | 温度传感器地址，未启用时为 `null` |
+| temp_sensor_enabled | boolean | 温度传感器是否启用 |
 
 #### get_zone — 获取单个灶台配置
 
@@ -649,8 +655,14 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
     "id": "zone_1",
     "name": "灶台1",
     "camera_id": "0",
+    "camera_ids": ["0", "1"],
     "roi": [[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.5]],
-    "enabled": true
+    "enabled": true,
+    "serial_index": 1,
+    "fire_current_threshold": 100,
+    "current_value": 0,
+    "temp_sensor_address": null,
+    "temp_sensor_enabled": false
 }
 ```
 
@@ -658,9 +670,15 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
 |------|------|------|
 | id | string | 灶台 ID |
 | name | string | 灶台名称 |
-| camera_id | string | 绑定的摄像头 ID |
+| camera_id | string | 主摄像头 ID（兼容旧客户端） |
+| camera_ids | string[] | 实际绑定的摄像头 ID 列表；为空时回退 `camera_id` |
 | roi | array | 归一化坐标 |
 | enabled | boolean | 是否启用 |
+| serial_index | number | 电流检测分区索引 |
+| fire_current_threshold | number | 火焰电流阈值 |
+| current_value | number | 当前电流值（来自串口实时数据） |
+| temp_sensor_address | number\|null | 温度传感器地址，未启用时为 `null` |
+| temp_sensor_enabled | boolean | 温度传感器是否启用 |
 
 **错误：** 灶台不存在时返回 `success: false`，error 为 `"灶台 'xxx' 不存在"`。
 
@@ -671,7 +689,8 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | name | string | 是 | — | 灶台名称 |
-| camera_id | string | 是 | — | 摄像头 ID |
+| camera_id | string | 条件必填 | — | 主摄像头 ID；`camera_ids` 为空时必填 |
+| camera_ids | string[] | 条件必填 | `[]` | 实际绑定的摄像头 ID 列表；不分区模式可传多个 |
 | roi | array | 否 | `[]` | 归一化坐标 `[[x,y], ...]`，值范围 0.0-1.0 |
 | enabled | boolean | 否 | `true` | 是否启用 |
 | serial_index | number | 否 | `0` | 电流检测分区索引 |
@@ -685,6 +704,7 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
     "id": "zone_1",
     "name": "灶台1",
     "camera_id": "0",
+    "camera_ids": ["0", "1"],
     "roi": [],
     "enabled": true,
     "serial_index": 0,
@@ -699,6 +719,7 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
 | id | string | 自动生成的灶台 ID |
 | name | string | 灶台名称 |
 | camera_id | string | 摄像头 ID |
+| camera_ids | string[] | 实际绑定的摄像头 ID 列表 |
 | roi | array | 归一化坐标 |
 | enabled | boolean | 是否启用 |
 | serial_index | number | 电流检测分区索引 |
@@ -720,6 +741,7 @@ Web 终端会话结束通知。**定向推送，同 `terminal_output`。** 客�
 | zone_id | string | 是 | 灶台 ID |
 | name | string | 否 | 灶台名称 |
 | camera_id | string | 否 | 摄像头 ID |
+| camera_ids | string[] | 否 | 实际绑定的摄像头 ID 列表；不分区模式可传多个 |
 | roi | array | 否 | 归一化坐标 |
 | enabled | string | 否 | 设为 `false` 时会强制重置灶台状态为 `idle` |
 | serial_index | number | 否 | 电流检测分区索引 |

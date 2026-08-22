@@ -133,9 +133,11 @@ class FakeBridge:
     def __init__(self, result=None):
         self.result = result or {"success": True, "data": [{"id": "z1"}], "error": None}
         self.calls = []
+        self.timeouts = []
 
     async def request(self, action, params=None, timeout=10.0):
         self.calls.append((action, params))
+        self.timeouts.append(timeout)
         return self.result
 
 
@@ -180,7 +182,7 @@ async def test_rpc_whitelists_camera_zone_crud(action):
 
 @pytest.mark.parametrize("action", [
     "get_remote_config", "update_remote_config", "verify_remote_login",
-    "get_lora_config", "set_lora_config",
+    "get_lora_config", "query_lora_config", "set_lora_config",
     "get_usb_otg_mode", "set_usb_otg_mode",
     "trigger_update", "install_dependencies",
 ])
@@ -191,6 +193,20 @@ async def test_rpc_whitelists_system_config(action):
     await svc.handle(1, {"id": 70, "cmd": "rpc", "action": action, "params": {}})
     assert bridge.calls == [(action, {})]
     assert not any(o["event"] == "error" for o in nf.objs)
+
+
+async def test_rpc_lora_query_allows_device_response_window():
+    bridge = FakeBridge(result={
+        "success": True,
+        "data": {"success": True, "id": 1, "channel": 2},
+        "error": None,
+    })
+    svc, _ = _svc_with_bridge(bridge)
+
+    await svc.handle(1, {"id": 71, "cmd": "rpc", "action": "query_lora_config"})
+
+    assert bridge.calls == [("query_lora_config", {})]
+    assert bridge.timeouts == [15.0]
 
 
 async def test_rpc_without_bridge_reports_unsupported():
