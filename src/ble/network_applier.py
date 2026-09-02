@@ -171,17 +171,51 @@ class NetworkApplier:
 
     # ---------------------------- 切网 ---------------------------- #
     def active_hotspot_connection(self) -> Optional[str]:
-        """返回当前活动的热点连接名（若有），用于切网后回退。"""
-        rc, out = self._run(
-            ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE,MODE", "connection", "show", "--active"]
-        )
-        if rc != 0:
-            return None
-        for line in out.splitlines():
-            name, ctype, dev, mode = (line.split(":") + ["", "", "", ""])[:4]
-            if ctype.startswith("802-11-wireless") and dev == self.iface and mode in ("ap", "hotspot"):
-                return name
+        """返回当前活动的热点连接名（若有），用于切网后回退。
+
+        MODE 不是 `nmcli connection show` 的合法字段（见 _wlan_active_mode 注释），
+        旧实现 `-f NAME,TYPE,DEVICE,MODE` 恒失败返回 None——热点从不被关、切网失败
+        也从不回退热点。复用 _wlan_active_mode 的两步法：先取 wlan0 活动连接名，
+        再查其 802-11-wireless.mode。
+        """
+        mode, conn = _wlan_active_mode(self._run)
+        if conn and mode in ("ap", "hotspot"):
+            return conn
         return None
+
+    def _delete_provisioned_duplicates(self) -> None:
+        """删除所有名为 provisioned-wifi 的旧 profile（按 UUID 逐个删）。
+
+        nmcli connection add 不按 con-name 查重（UUID 才是主键），每次配网都会
+        新增一个同名 profile；而 connection up <name> 命中同名中的第一个。一旦
+        某个早期同名 profile 密码错误/缺失，之后所有配网（哪怕密码正确）都会
+        激活那个坏 profile，报「连接激活失败：需要密钥，但未提供」。真机曾因此
+        累积 14 个同名 profile、配网持续失败。新建前先清光同名，保证 up 无歧义。
+        若 wlan0 正经旧 provisioned-wifi 上网，删除会短暂断网，随后的 up 会重连。
+        """
+        rc, out = self._run(["nmcli", "-t", "-f", "NAME,UUID", "connection", "show"])
+        if rc != 0:
+            logger.warning("清理同名 profile 失败(忽略): %s", out.strip()[:120])
+            return
+        for line in out.splitlines():
+            name, uuid = (line.split(":") + ["", ""])[:2]
+            if name == PROVISIONED_CONN and uuid:
+                self._run(["nmcli", "connection", "delete", uuid])
+
+    def _target_security(self, ssid: str) -> str:
+        """查目标 SSID 当前广播的加密类型（用 nmcli 缓存列表，不触发 rescan）。
+
+        扫不到（隐藏网络/刚消失）返回 "unknown"，调用方按加密网络处理（要求密码），
+        宁可失败也不建出无 psk 的 profile。
+        """
+        rc, out = self._run(["nmcli", "-t", "-f", "SSID,SECURITY", "device", "wifi", "list"])
+        if rc != 0:
+            return "unknown"
+        for line in out.splitlines():
+            parts = line.split(":")
+            if parts[0] == ssid:
+                return map_security(parts[1] if len(parts) > 1 else "")
+        return "unknown"
 
     def connect(self, ssid: str, password: str) -> dict:
         """切 wlan0 到指定 WiFi（STA）。成功 {ok, ip}；失败回退热点 {ok:false, error}。。"""
@@ -196,22 +230,34 @@ class NetworkApplier:
         return result
 
     def _activate_sta(self, ssid: str, password: str, hotspot: Optional[str]) -> dict:
+        # 0) 加密网络空密码直接失败：App 端空密码不上送 password 字段（开放网络语义），
+        #    设备端若照建 profile 会得到 key-mgmt=wpa-psk 但无 psk 的坏件，up 报
+        #    「需要密钥，但未提供」。按扫描到的加密类型区分：开放网络不写 wifi-sec。
+        security = self._target_security(ssid)
+        secured = security != "open"
+        if secured and not password:
+            return {"ok": False, "error": f"wifi password required (ssid={ssid}, security={security})"}
         # 1) 关热点
         if hotspot:
             self._run(["nmcli", "connection", "down", hotspot])
-        # 2) 建/更新 STA 连接（idempotent）
+        # 2) 清掉历史同名 profile，再新建（add 不查重名，见 _delete_provisioned_duplicates）
+        self._delete_provisioned_duplicates()
         add_cmd = [
             "nmcli", "connection", "add", "type", "wifi", "ifname", self.iface,
             "con-name", PROVISIONED_CONN, "ssid", ssid,
-            "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password,
         ]
+        if secured:
+            add_cmd += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
         rc, out = self._run(add_cmd)
         if rc != 0:
-            # 已存在同名连接则改用 modify
-            self._run([
+            # 已存在同名连接则改用 modify（正常不会发生：上面已清光同名）；两段错误都带回
+            rc2, out2 = self._run([
                 "nmcli", "connection", "modify", PROVISIONED_CONN,
                 "ssid", ssid, "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password,
             ])
+            if rc2 != 0:
+                detail = f"add: {out.strip()[:120]} | modify: {out2.strip()[:120]}"
+                return {"ok": False, "error": f"connection setup failed: {detail}"}
         # 3) 激活
         rc, out = self._run(["nmcli", "connection", "up", PROVISIONED_CONN])
         if rc != 0:

@@ -104,7 +104,11 @@ class FakeRunner:
 def test_connect_success():
     def dispatch(cmd):
         if "show" in cmd and "--active" in cmd:
-            return 0, "Hotspot-80:802-11-wireless:wlan0:ap\n"
+            return 0, "Hotspot-80:wlan0\n"
+        if "802-11-wireless.mode" in cmd:
+            return 0, "ap\n"
+        if "wifi" in cmd and "list" in cmd:
+            return 0, "MyWiFi:WPA2\n"
         if "down" in cmd:
             return 0, ""
         if "add" in cmd:
@@ -121,16 +125,23 @@ def test_connect_success():
     assert res["ok"] is True
     assert res["ip"] == "192.168.1.50"
     assert res["ssid"] == "MyWiFi"
-    # 关热点 + 建 STA + 激活 都被调用
+    # 关热点 + 建 STA（带 psk）+ 激活 都被调用
     joined = [" ".join(c) for c in fake.calls]
     assert any("connection down Hotspot-80" in j for j in joined)
-    assert any("con-name provisioned-wifi" in j and "MyWiFi" in j for j in joined)
+    assert any(
+        "con-name provisioned-wifi" in j and "MyWiFi" in j and "wifi-sec.psk pass1234" in j
+        for j in joined
+    )
 
 
 def test_connect_failure_falls_back_to_hotspot():
     def dispatch(cmd):
         if "show" in cmd and "--active" in cmd:
-            return 0, "Hotspot-80:802-11-wireless:wlan0:ap\n"
+            return 0, "Hotspot-80:wlan0\n"
+        if "802-11-wireless.mode" in cmd:
+            return 0, "ap\n"
+        if "wifi" in cmd and "list" in cmd:
+            return 0, "BadWiFi:WPA2\n"
         if "down" in cmd:
             return 0, ""
         if "add" in cmd:
@@ -151,10 +162,121 @@ def test_connect_failure_falls_back_to_hotspot():
     assert any("connection up Hotspot-80" in j for j in joined)
 
 
+def test_connect_deletes_duplicate_profiles_before_add():
+    """nmcli add 不查重名；up <name> 命中同名第一个。切网前必须清光同名旧 profile。"""
+    duplicates = [
+        "provisioned-wifi:11111111-1111-1111-1111-111111111111",
+        "provisioned-wifi:22222222-2222-2222-2222-222222222222",
+        "other-conn:99999999-9999-9999-9999-999999999999",
+    ]
+
+    def dispatch(cmd):
+        if "NAME,UUID" in cmd:
+            return 0, "\n".join(duplicates) + "\n"
+        if "delete" in cmd:
+            return 0, ""
+        if "wifi" in cmd and "list" in cmd:
+            return 0, "MyWiFi:WPA2\n"
+        if "add" in cmd:
+            return 0, "added"
+        if "up" in cmd:
+            return 0, "activated"
+        if "IP4.ADDRESS" in cmd:
+            return 0, "192.168.1.50/24\n"
+        return 0, ""
+
+    fake = FakeRunner(dispatch)
+    ap = NetworkApplier(runner=fake)
+    assert ap.connect("MyWiFi", "pass1234")["ok"] is True
+    deletes = [c for c in fake.calls if "delete" in c]
+    assert sorted(c[-1] for c in deletes) == [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+    ]
+    # 删除发生在新建之前
+    first_delete = fake.calls.index(deletes[0])
+    first_add = next(i for i, c in enumerate(fake.calls) if "add" in c)
+    assert first_delete < first_add
+
+
+def test_connect_empty_password_on_secured_fails_fast():
+    """加密网络空密码必须立刻失败，不能建出无 psk 的坏 profile（真机踩坑）。"""
+    added = []
+
+    def dispatch(cmd):
+        if "wifi" in cmd and "list" in cmd:
+            return 0, "MyWiFi:WPA2\n"
+        if "add" in cmd:
+            added.append(cmd)
+            return 0, "added"
+        return 0, ""
+
+    ap = NetworkApplier(runner=FakeRunner(dispatch))
+    res = ap.connect("MyWiFi", "")
+    assert res["ok"] is False
+    assert "password" in res["error"]
+    assert added == []  # 未创建任何 profile
+
+
+def test_connect_open_network_omits_wifi_sec():
+    """开放网络不写 wifi-sec.*，空密码合法。"""
+
+    def dispatch(cmd):
+        if "wifi" in cmd and "list" in cmd:
+            return 0, "FreeWiFi:\n"
+        if "add" in cmd:
+            return 0, "added"
+        if "up" in cmd:
+            return 0, "activated"
+        if "IP4.ADDRESS" in cmd:
+            return 0, "10.0.0.2/24\n"
+        return 0, ""
+
+    fake = FakeRunner(dispatch)
+    ap = NetworkApplier(runner=fake)
+    res = ap.connect("FreeWiFi", "")
+    assert res["ok"] is True
+    add_cmd = next(c for c in fake.calls if "add" in c)
+    assert "wifi-sec.key-mgmt" not in add_cmd and "wifi-sec.psk" not in add_cmd
+
+
+def test_connect_setup_failure_surfaced():
+    """add 与 modify 双双失败时必须把 nmcli 错误带回给 App，而不是继续 up 报误导性错误。"""
+
+    def dispatch(cmd):
+        if "wifi" in cmd and "list" in cmd:
+            return 0, "MyWiFi:WPA2\n"
+        if "add" in cmd:
+            return 1, "Error: failed to add: boom"
+        if "modify" in cmd:
+            return 1, "Error: unknown connection"
+        return 0, ""
+
+    ap = NetworkApplier(runner=FakeRunner(dispatch))
+    res = ap.connect("MyWiFi", "pass1234")
+    assert res["ok"] is False
+    assert "connection setup failed" in res["error"] and "boom" in res["error"]
+
+
+def test_active_hotspot_detected():
+    def dispatch(cmd):
+        if "show" in cmd and "--active" in cmd:
+            return 0, "Hotspot-80:wlan0\n"
+        if "802-11-wireless.mode" in cmd:
+            return 0, "ap\n"
+        return 0, ""
+
+    ap = NetworkApplier(runner=FakeRunner(dispatch))
+    assert ap.active_hotspot_connection() == "Hotspot-80"
+
+
 def test_active_hotspot_none_when_sta():
     def dispatch(cmd):
-        # 当前是 STA，无热点
-        return 0, "provisioned-wifi:802-11-wireless:wlan0:infrastructure\n"
+        if "show" in cmd and "--active" in cmd:
+            return 0, "provisioned-wifi:wlan0\n"
+        if "802-11-wireless.mode" in cmd:
+            return 0, "infrastructure\n"
+        return 0, ""
 
     ap = NetworkApplier(runner=FakeRunner(dispatch))
     assert ap.active_hotspot_connection() is None
