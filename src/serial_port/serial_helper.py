@@ -106,6 +106,10 @@ class SerialHelper:
         
         # 调试开关：打印16进制数据
         self._debug_hex = False
+
+        # LoRa 设备当前编号（设置命令需以它作为地址字节寻址）
+        # 由编号/信道查询响应的首字节或设置编号的写入回执学习得到
+        self._lora_device_id: Optional[int] = None
     
     @property
     def is_open(self) -> bool:
@@ -137,6 +141,28 @@ class SerialHelper:
     def get_debug_hex(self) -> bool:
         """获取16进制调试日志状态"""
         return self._debug_hex
+
+    @property
+    def lora_device_id(self) -> Optional[int]:
+        """LoRa 设备当前编号，未知时为 None"""
+        return self._lora_device_id
+
+    def set_lora_device_id(self, device_id: Optional[int]):
+        """
+        记录 LoRa 设备当前编号，供设置命令寻址
+
+        编号同时是设备的 Modbus 地址：编号改变后，设置编号/信道
+        命令必须以新编号作为地址字节（如编号=0x11 时为
+        FF AA FF 11 06 ...），用旧地址设备不会响应。非法值（0 或
+        与广播冲突的 0xFF）视为未知，设置命令回退默认地址 01。
+
+        Args:
+            device_id: 设备编号 (1-254)，None 表示未知
+        """
+        if device_id is not None and 0x01 <= device_id <= 0xFE:
+            self._lora_device_id = device_id
+        else:
+            self._lora_device_id = None
     
     async def open(self) -> bool:
         """
@@ -494,21 +520,23 @@ class SerialHelper:
 
     def build_set_lora_id_command(self, lora_id: int) -> bytes:
         """
-        构建设置LoRa编号命令（协议固定格式）
+        构建设置LoRa编号命令
 
-        协议格式: FF AA FF 01 06 00 30 00 XX [CRC16]
+        协议格式: FF AA FF [当前编号] 06 00 30 00 XX [CRC16]
         - FF AA FF: 前导码
-        - 01: 设备地址（协议固定，不随设备编号变化）
+        - 当前编号: 设备现在的编号（寻址地址），未知时用默认 01；
+          编号已为 0x11 的设备须发 FF AA FF 11 06 ... 才会响应
         - 06: 功能码（写单个寄存器）
         - 00 30: 寄存器地址
-        - 00 XX: LoRa编号值
+        - 00 XX: 新的LoRa编号值
         - CRC: 对命令体计算
 
         Args:
             lora_id: LoRa编号 (0-255)
         """
+        address = self._lora_device_id if self._lora_device_id is not None else 0x01
         preamble = bytes([0xFF, 0xAA, 0xFF])
-        command = bytes([0x01, 0x06, 0x00, 0x30, 0x00, lora_id & 0xFF])
+        command = bytes([address, 0x06, 0x00, 0x30, 0x00, lora_id & 0xFF])
         return preamble + append_crc16(command)
 
     def build_get_lora_channel_command(self) -> bytes:
@@ -532,11 +560,11 @@ class SerialHelper:
 
     def build_set_lora_channel_command(self, channel: int) -> bytes:
         """
-        构建设置LoRa信道命令（协议固定格式）
+        构建设置LoRa信道命令
 
-        协议格式: FF AA FF 01 06 00 31 00 XX [CRC16]
+        协议格式: FF AA FF [当前编号] 06 00 31 00 XX [CRC16]
         - FF AA FF: 前导码
-        - 01: 设备地址（协议固定，不随设备编号变化）
+        - 当前编号: 设备现在的编号（寻址地址），未知时用默认 01
         - 06: 功能码（写单个寄存器）
         - 00 31: 寄存器地址
         - 00 XX: 信道值
@@ -545,8 +573,9 @@ class SerialHelper:
         Args:
             channel: 信道号 (0-255)
         """
+        address = self._lora_device_id if self._lora_device_id is not None else 0x01
         preamble = bytes([0xFF, 0xAA, 0xFF])
-        command = bytes([0x01, 0x06, 0x00, 0x31, 0x00, channel & 0xFF])
+        command = bytes([address, 0x06, 0x00, 0x31, 0x00, channel & 0xFF])
         return preamble + append_crc16(command)
     
     # ==================== 温度传感器命令 ====================

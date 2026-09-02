@@ -295,3 +295,57 @@ class TestLoraResponseParsing:
         assert resp.address == 0x11
         assert resp.function_code == 0x06
         assert resp.data == bytes([0x00, 0x30, 0x00, 0x12])
+
+
+class TestLoraSetCommandAddressing:
+    """测试设置命令以设备当前编号寻址
+
+    编号同时是设备的 Modbus 地址：编号=0x11 后，设置编号/信道
+    命令必须以 FF AA FF 11 06 ... 寻址，仍用 01 设备不响应。
+    查询命令不受影响，始终为协议固定的广播格式。
+    """
+
+    @pytest.fixture
+    def helper(self):
+        from src.serial_port.serial_helper import SerialHelper
+        return SerialHelper(port="/dev/null", baudrate=9600)
+
+    def test_set_lora_id_addressed_to_current_id(self, helper):
+        """设备编号=0x11 时设置新编号 0x12 应以 11 寻址"""
+        helper.set_lora_device_id(0x11)
+        cmd = helper.build_set_lora_id_command(0x12)
+        body = bytes([0x11, 0x06, 0x00, 0x30, 0x00, 0x12])
+        assert cmd == bytes([0xFF, 0xAA, 0xFF]) + append_crc16(body)
+        assert cmd[3] == 0x11
+        assert cmd[8] == 0x12
+
+    def test_set_lora_id_unknown_id_falls_back_to_01(self, helper):
+        """编号未知（如刚启动未查询到响应）时回退默认地址 01"""
+        cmd = helper.build_set_lora_id_command(0x11)
+        # 与实际抓包一致: FF AA FF 01 06 00 30 00 11 49 C9
+        assert cmd == bytes.fromhex("FFAAFF010600300011 49C9".replace(" ", ""))
+
+    def test_set_lora_channel_addressed_to_current_id(self, helper):
+        """设备编号=0x11 时设置信道应以 11 寻址"""
+        helper.set_lora_device_id(0x11)
+        cmd = helper.build_set_lora_channel_command(0x01)
+        body = bytes([0x11, 0x06, 0x00, 0x31, 0x00, 0x01])
+        assert cmd == bytes([0xFF, 0xAA, 0xFF]) + append_crc16(body)
+        assert cmd[3] == 0x11
+
+    def test_get_commands_always_broadcast(self, helper):
+        """查询命令为协议固定广播，不受已知编号影响"""
+        helper.set_lora_device_id(0x11)
+        assert helper.build_get_lora_id_command() == bytes.fromhex("FFAAFFFF030030000191DB")
+        assert helper.build_get_lora_channel_command() == bytes.fromhex("FFAAFFFF0300310001C01B")
+
+    def test_set_lora_device_id_invalid_treated_unknown(self, helper):
+        """非法编号（0 或与广播冲突的 0xFF）视为未知"""
+        helper.set_lora_device_id(0)
+        assert helper.lora_device_id is None
+        helper.set_lora_device_id(0xFF)
+        assert helper.lora_device_id is None
+        helper.set_lora_device_id(0x11)
+        assert helper.lora_device_id == 0x11
+        helper.set_lora_device_id(None)
+        assert helper.lora_device_id is None

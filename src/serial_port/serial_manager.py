@@ -589,11 +589,17 @@ class SerialManager:
                         current_cmd.response_received = True
                         self._lora_config.id = value
                         self._lora_config.last_update = time.time()
+                        # 响应首字节为设备当前编号，后续设置命令需以该编号寻址
+                        if self._helper:
+                            self._helper.set_lora_device_id(address)
                         self._logger.info(f"LoRa编号: {value}")
                     elif current_cmd.type == CommandType.GET_LORA_CHANNEL:
                         current_cmd.response_received = True
                         self._lora_config.channel = value
                         self._lora_config.last_update = time.time()
+                        # 信道响应同样以设备当前编号作为地址字节
+                        if self._helper:
+                            self._helper.set_lora_device_id(address)
                         self._logger.info(f"LoRa信道: {value}")
                     elif current_cmd.type == CommandType.GET_CURRENT:
                         self._update_current(address, value)
@@ -616,6 +622,13 @@ class SerialManager:
         
         elif function_code == 0x06:
             self._logger.info(f"寄存器写入成功: addr={address}")
+            # 编号写入成功后设备编号变为新值，设置命令的寻址地址随之更新
+            # 写入回执: [addr] 06 [寄存器地址(2)] [值(2)] [CRC]
+            if (current_cmd and current_cmd.type == CommandType.SET_LORA_ID
+                    and len(data) >= 4 and self._helper):
+                reg = (data[0] << 8) | data[1]
+                if reg == 0x0030:
+                    self._helper.set_lora_device_id(data[3])
         
         # 触发响应事件，通知命令处理器
         if self._response_event:
