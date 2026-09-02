@@ -319,72 +319,68 @@ class SerialHelper:
     
     def _parse_response(self, buffer: bytearray) -> Optional[SerialResponse]:
         """
-        解析响应数据
-        
+        解析响应数据（支持错位自动重同步）
+
         Modbus RTU 响应格式:
         - 读取响应: [地址(1)] [功能码(1)] [数据长度(1)] [数据(N)] [CRC(2)]
         - 写入响应: [地址(1)] [功能码(1)] [寄存器地址(2)] [数据(2)] [CRC(2)]
+
+        总线噪声或残留在缓冲区头部的字节会使帧起点错位，且错位头部
+        可能声明一个超过现有数据量的长度，导致解析一直等待不存在的
+        字节而错过后续到来的有效响应。因此这里从缓冲区的每个偏移
+        尝试解析一个 CRC 校验通过的完整帧，并丢弃帧前的残留字节。
         """
         if len(buffer) < 5:
             return None
-        
-        address = buffer[0]
-        function_code = buffer[1]
-        
-        # 根据功能码确定响应长度
+
+        for start in range(len(buffer) - 4):
+            parsed = self._parse_frame_at(buffer, start)
+            if parsed is not None:
+                response, total_length = parsed
+                # 移除残留字节和已解析的帧
+                del buffer[:start + total_length]
+                return response
+
+        return None
+
+    def _parse_frame_at(self, buffer: bytearray, start: int):
+        """
+        尝试从指定偏移解析一帧完整响应（不修改缓冲区）
+
+        Returns:
+            (SerialResponse, 帧总长度) 元组；该偏移不是完整合法帧时返回 None
+        """
+        function_code = buffer[start + 1]
+
         if function_code == 0x03:  # 读取保持寄存器
-            if len(buffer) < 3:
-                return None
-            data_length = buffer[2]
+            data_length = buffer[start + 2]
             total_length = 3 + data_length + 2  # 头(3) + 数据(N) + CRC(2)
-            if len(buffer) < total_length:
-                return None
-            
-            raw = bytes(buffer[:total_length])
-            data = bytes(buffer[3:3+data_length])
-            
-            # 验证CRC
-            if not self._verify_crc(raw):
-                # CRC错误，丢弃第一个字节继续查找
-                del buffer[0]
-                return None
-            
-            # 移除已解析的数据
-            del buffer[:total_length]
-            
-            return SerialResponse(
-                address=address,
-                function_code=function_code,
-                data=data,
-                raw=raw
-            )
-        
         elif function_code == 0x05 or function_code == 0x06:  # 写单个线圈/寄存器
             total_length = 8  # 固定8字节
-            if len(buffer) < total_length:
-                return None
-            
-            raw = bytes(buffer[:total_length])
-            data = bytes(buffer[2:6])
-            
-            # 验证CRC
-            if not self._verify_crc(raw):
-                del buffer[0]
-                return None
-            
-            del buffer[:total_length]
-            
-            return SerialResponse(
-                address=address,
-                function_code=function_code,
-                data=data,
-                raw=raw
-            )
-        
         else:
-            # 未知功能码，丢弃第一个字节
-            del buffer[0]
             return None
+
+        # 数据不足说明帧尚未到齐
+        if start + total_length > len(buffer):
+            return None
+
+        raw = bytes(buffer[start:start + total_length])
+
+        # 验证CRC
+        if not self._verify_crc(raw):
+            return None
+
+        if function_code == 0x03:
+            data = bytes(buffer[start + 3:start + 3 + data_length])
+        else:
+            data = bytes(buffer[start + 2:start + 6])
+
+        return SerialResponse(
+            address=buffer[start],
+            function_code=function_code,
+            data=data,
+            raw=raw
+        ), total_length
     
     def _verify_crc(self, data: bytes) -> bool:
         """验证CRC校验"""
@@ -479,67 +475,73 @@ class SerialHelper:
 
     def build_get_lora_id_command(self) -> bytes:
         """
-        构建获取LoRa编号命令（广播）
+        构建获取LoRa编号命令（广播，协议固定格式）
 
         协议格式: FF AA FF FF 03 00 30 00 01 [CRC16]
         - FF AA FF: 前导码
-        - FF: 广播地址
+        - FF: 广播地址（协议固定，不随设备编号变化）
         - 03: 功能码（读保持寄存器）
         - 00 30: 寄存器地址
         - 00 01: 读取1个寄存器
         - CRC: 对命令体计算
+
+        响应以设备当前编号作为地址字节开头，如编号=0x11 时
+        响应为 11 03 02 00 11 B9 8B。
         """
         preamble = bytes([0xFF, 0xAA, 0xFF])
         command = bytes([0xFF, 0x03, 0x00, 0x30, 0x00, 0x01])
         return preamble + append_crc16(command)
-    
+
     def build_set_lora_id_command(self, lora_id: int) -> bytes:
         """
-        构建设置LoRa编号命令
-        
+        构建设置LoRa编号命令（协议固定格式）
+
         协议格式: FF AA FF 01 06 00 30 00 XX [CRC16]
         - FF AA FF: 前导码
-        - 01: 设备地址
+        - 01: 设备地址（协议固定，不随设备编号变化）
         - 06: 功能码（写单个寄存器）
         - 00 30: 寄存器地址
         - 00 XX: LoRa编号值
         - CRC: 对命令体计算
-        
+
         Args:
             lora_id: LoRa编号 (0-255)
         """
         preamble = bytes([0xFF, 0xAA, 0xFF])
         command = bytes([0x01, 0x06, 0x00, 0x30, 0x00, lora_id & 0xFF])
         return preamble + append_crc16(command)
-    
+
     def build_get_lora_channel_command(self) -> bytes:
         """
-        构建获取LoRa信道命令（广播）
+        构建获取LoRa信道命令（广播，协议固定格式）
 
         协议格式: FF AA FF FF 03 00 31 00 01 [CRC16]
         - FF AA FF: 前导码
-        - FF: 广播地址
+        - FF: 广播地址（协议固定，不随设备编号变化）
         - 03: 功能码（读保持寄存器）
         - 00 31: 寄存器地址
         - 00 01: 读取1个寄存器
         - CRC: 对命令体计算
+
+        响应以设备当前编号作为地址字节开头，如编号=0x11 时
+        响应为 11 03 02 00 01 B8 47。
         """
         preamble = bytes([0xFF, 0xAA, 0xFF])
         command = bytes([0xFF, 0x03, 0x00, 0x31, 0x00, 0x01])
         return preamble + append_crc16(command)
-    
+
     def build_set_lora_channel_command(self, channel: int) -> bytes:
         """
-        构建设置LoRa信道命令
-        
+        构建设置LoRa信道命令（协议固定格式）
+
         协议格式: FF AA FF 01 06 00 31 00 XX [CRC16]
         - FF AA FF: 前导码
-        - 01: 设备地址
+        - 01: 设备地址（协议固定，不随设备编号变化）
         - 06: 功能码（写单个寄存器）
         - 00 31: 寄存器地址
         - 00 XX: 信道值
         - CRC: 对命令体计算
-        
+
         Args:
             channel: 信道号 (0-255)
         """

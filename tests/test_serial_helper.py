@@ -211,3 +211,87 @@ class TestCRCVerification:
         
         assert helper._verify_crc(b'') is False
         assert helper._verify_crc(bytes([0x01])) is False
+
+
+class TestLoraResponseParsing:
+    """测试 LoRa 响应解析
+
+    设备编号（即 Modbus 地址）不固定，响应以设备地址开头，
+    例如编号=0x11 时编号/信道响应分别为:
+    - 编号: 11 03 02 00 11 B9 8B
+    - 信道: 11 03 02 00 01 B8 47
+    """
+
+    @pytest.fixture
+    def helper(self):
+        from src.serial_port.serial_helper import SerialHelper
+        return SerialHelper(port="/dev/null", baudrate=9600)
+
+    def test_parse_lora_id_response_with_device_address(self, helper):
+        """编号=0x11 时编号响应应以设备地址 0x11 开头并正确解析"""
+        buf = bytearray(bytes.fromhex("1103020011B98B"))
+        resp = helper._parse_response(buf)
+        assert resp is not None
+        assert resp.address == 0x11
+        assert resp.function_code == 0x03
+        assert resp.data == b"\x00\x11"
+        assert bytes(buf) == b""  # 帧已完整消费
+
+    def test_parse_lora_channel_response_with_device_address(self, helper):
+        """编号=0x11 时信道响应应以设备地址 0x11 开头并正确解析"""
+        buf = bytearray(bytes.fromhex("1103020001B847"))
+        resp = helper._parse_response(buf)
+        assert resp is not None
+        assert resp.address == 0x11
+        assert resp.data == b"\x00\x01"
+        assert bytes(buf) == b""
+
+    def test_parse_resync_after_garbage_prefix(self, helper):
+        """响应前有残留/噪声字节时应跳过残留找到有效帧
+
+        残留 [55 03 11 AA] 恰好声明了 0x11 的数据长度，旧实现会
+        一直等待不存在的字节导致查询超时（表现为"无响应"）。
+        """
+        garbage = bytes.fromhex("550311AA")
+        frame = bytes.fromhex("1103020011B98B")
+        buf = bytearray(garbage + frame)
+        resp = helper._parse_response(buf)
+        assert resp is not None
+        assert resp.address == 0x11
+        assert resp.data == b"\x00\x11"
+        assert bytes(buf) == b""  # 残留与帧一并消费
+
+    def test_parse_two_back_to_back_frames(self, helper):
+        """连续两帧应按序依次解析"""
+        buf = bytearray(
+            bytes.fromhex("1103020011B98B") + bytes.fromhex("1103020001B847")
+        )
+        r1 = helper._parse_response(buf)
+        r2 = helper._parse_response(buf)
+        assert r1 is not None and r2 is not None
+        assert r1.data == b"\x00\x11"
+        assert r2.data == b"\x00\x01"
+        assert bytes(buf) == b""
+
+    def test_parse_incomplete_frame_waits(self, helper):
+        """帧未到齐时应返回 None 且不破坏缓冲区"""
+        buf = bytearray(bytes.fromhex("1103020011"))
+        assert helper._parse_response(buf) is None
+        assert bytes(buf) == bytes.fromhex("1103020011")
+
+    def test_parse_garbage_only_returns_none(self, helper):
+        """纯噪声数据不应解析出帧"""
+        buf = bytearray(b"\x00\xff\x37\x99\x88\x71")
+        assert helper._parse_response(buf) is None
+
+    def test_parse_write_echo_with_device_address(self, helper):
+        """设置命令的写入回执（功能码06）以设备地址开头"""
+        # 11 06 00 30 00 12 + CRC
+        body = bytes([0x11, 0x06, 0x00, 0x30, 0x00, 0x12])
+        frame = body + append_crc16(body)
+        buf = bytearray(frame)
+        resp = helper._parse_response(buf)
+        assert resp is not None
+        assert resp.address == 0x11
+        assert resp.function_code == 0x06
+        assert resp.data == bytes([0x00, 0x30, 0x00, 0x12])
