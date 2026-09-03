@@ -143,6 +143,12 @@ class SerialManager:
         
         self._poll_interval = 1.0  # 轮询间隔（秒）
         self._cutoff_reset_delay = 10.0
+
+        # 电流查询连续无响应跟踪（按串口索引）
+        # 探测器断电后不再回复电流查询，旧电流值会一直残留，
+        # 连续多次无响应时将电流置零，避免界面和状态机维持旧的动火判断
+        self._current_miss_limit = 3  # 连续无响应多少次后置零
+        self._current_miss_counts: Dict[int, int] = {}  # serial_index -> 连续无响应次数
         
         # 电流值更新回调
         self._on_current_update: Optional[Callable[[str, int, bool], None]] = None
@@ -266,7 +272,12 @@ class SerialManager:
                 # 命令完成
                 if command.future and not command.future.done():
                     command.future.set_result(success)
-                
+
+                # 电流查询无响应检测：连续多次无响应时电流置零
+                if (command.type == CommandType.GET_CURRENT
+                        and not command.response_received):
+                    self._handle_current_miss(command)
+
                 # 短暂延迟，确保设备准备好接收下一个命令
                 await asyncio.sleep(0.05)
                 
@@ -602,6 +613,7 @@ class SerialManager:
                             self._helper.set_lora_device_id(address)
                         self._logger.info(f"LoRa信道: {value}")
                     elif current_cmd.type == CommandType.GET_CURRENT:
+                        current_cmd.response_received = True
                         self._update_current(address, value)
                     elif current_cmd.type == CommandType.GET_TEMPERATURE:
                         # 温度传感器返回4字节IEEE754浮点数
@@ -637,8 +649,11 @@ class SerialManager:
     def _update_current(self, address: int, value: int):
         """更新电流值"""
         serial_index = address
-        
+
         with self._lock:
+            # 收到响应说明探测器在线，清除连续无响应计数
+            self._current_miss_counts.pop(serial_index, None)
+
             for zone_id, info in self._zone_currents.items():
                 if info.serial_index == serial_index:
                     old_fire_on = info.is_fire_on
@@ -655,6 +670,43 @@ class SerialManager:
                             self._on_current_update(zone_id, value, info.is_fire_on)
                         except Exception as e:
                             self._logger.error(f"电流更新回调错误: {e}")
+
+    def _handle_current_miss(self, command: SerialCommand):
+        """
+        处理电流查询无响应 (Called from Loop)
+
+        按串口索引累计连续无响应次数，达到阈值后将对应分区的
+        电流值置零并熄火，防止探测器断电后残留旧电流值。
+        收到任何一次响应都会清零计数（见 _update_current）。
+        """
+        count = self._current_miss_counts.get(command.index, 0) + 1
+        self._current_miss_counts[command.index] = count
+        if count < self._current_miss_limit:
+            return
+
+        with self._lock:
+            for zone_id, info in self._zone_currents.items():
+                if info.serial_index != command.index:
+                    continue
+                if info.current_value == 0:
+                    continue  # 已置零，不重复处理
+
+                old_fire_on = info.is_fire_on
+                info.current_value = 0
+                info.is_fire_on = False
+                info.last_update = time.time()
+
+                state_text = "动火" if old_fire_on else "熄火"
+                self._logger.info(
+                    f"[{zone_id}] 连续{count}次电流查询无响应，电流置零"
+                    f"（探测器可能断电，原状态: {state_text}）"
+                )
+
+                if self._on_current_update:
+                    try:
+                        self._on_current_update(zone_id, 0, False)
+                    except Exception as e:
+                        self._logger.error(f"电流更新回调错误: {e}")
     
     def _update_temperature(self, address: int, temperature: float):
         """更新温度值"""
