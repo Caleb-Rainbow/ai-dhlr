@@ -57,7 +57,7 @@ class ZoneCurrentInfo:
     last_update: float = 0.0        # 最后更新时间
     
     # 切电复位相关
-    cutoff_time: Optional[float] = None  # 切电时间戳
+    cutoff_time: Optional[float] = None  # 切电时间戳（time.monotonic 基准）
     can_check_reset: bool = False        # 是否可以检查电流复位（切电10秒后）
 
 
@@ -473,8 +473,9 @@ class SerialManager:
                     await self._enqueue_command(command)
 
                     # 检查是否可以进行电流复位判断
+                    # cutoff_time 为单调时钟时间戳，不受 chrony 步进影响
                     if zone_info.cutoff_time is not None:
-                        elapsed = time.time() - zone_info.cutoff_time
+                        elapsed = time.monotonic() - zone_info.cutoff_time
                         if elapsed >= self._cutoff_reset_delay:
                             zone_info.can_check_reset = True
                 
@@ -930,7 +931,8 @@ class SerialManager:
             if zone_id not in self._zone_currents:
                 return False
             info = self._zone_currents[zone_id]
-            info.cutoff_time = time.time()
+            # 单调时钟，与 _poll_loop 中的比较保持同一时间基
+            info.cutoff_time = time.monotonic()
             info.can_check_reset = False
             serial_index = info.serial_index
         

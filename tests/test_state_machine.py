@@ -176,8 +176,8 @@ class TestStateTransitions:
         fast_sm.set_callbacks(on_warning=callback)
         
         # 模拟时间流逝到达预警阈值但未到报警阈值
-        # warning_time=1, alarm_time=2, 设置1.5秒
-        fast_sm._no_person_start_time = time.time() - 1.5
+        # warning_time=1, alarm_time=2, 设置1.5秒（计时基为单调时钟）
+        fast_sm._no_person_start_time = time.monotonic() - 1.5
         fast_sm.update(has_person=False, is_fire_on=True)
         
         assert fast_sm.zone.state == ZoneState.WARNING
@@ -191,7 +191,7 @@ class TestStateTransitions:
         fast_sm.set_callbacks(on_alarm=callback)
         
         # 模拟时间流逝到达报警阈值
-        fast_sm._no_person_start_time = time.time() - 2.5
+        fast_sm._no_person_start_time = time.monotonic() - 2.5
         fast_sm.update(has_person=False, is_fire_on=True)
         
         assert fast_sm.zone.state == ZoneState.ALARM
@@ -205,11 +205,96 @@ class TestStateTransitions:
         fast_sm.set_callbacks(on_cutoff=callback)
         
         # 模拟时间流逝到达切电阈值
-        fast_sm._no_person_start_time = time.time() - 4
+        fast_sm._no_person_start_time = time.monotonic() - 4
         fast_sm.update(has_person=False, is_fire_on=True)
         
         assert fast_sm.zone.state == ZoneState.CUTOFF
         callback.assert_called_once()
+
+
+class TestWallClockStep:
+    """回归测试：开机后 chrony/NTP 步进墙上时钟不得跳过三阶段计时
+
+    背景：设备 RTC 无电池，开机时钟错误，chrony makestep 会在网络对时后
+    一次性向前步进系统时钟。状态机计时曾用 time.time()，步进瞬间
+    no_person_duration 直接越过 action_time，跳过预警/报警直接切电。
+    """
+
+    @pytest.fixture
+    def fast_sm_step(self):
+        """快速超时状态机（warning=1 alarm=2 action=3）"""
+        mock_config = MockAppConfig(
+            alarm=MockAlarmConfig(warning_time=1, alarm_time=2, action_time=3)
+        )
+        mock_logger = MagicMock()
+        mock_event_logger = MagicMock()
+        mock_event_logger.save_snapshot = MagicMock(return_value="/mock/snap.jpg")
+
+        with patch('src.zone.state_machine.get_config', return_value=mock_config), \
+             patch('src.zone.state_machine.get_logger', return_value=mock_logger), \
+             patch('src.zone.state_machine.event_logger', mock_event_logger):
+            from src.zone.state_machine import ZoneStateMachine
+
+            config = MockZoneConfig(
+                id="zone_step",
+                name="步进灶台",
+                camera_id="cam_1",
+                roi=[(0, 0), (1, 1)]
+            )
+            yield ZoneStateMachine(config)
+
+    def test_wall_clock_jump_keeps_countdown(self, fast_sm_step):
+        """墙上时钟步进 1 小时后，倒计时不应被快进到切电"""
+        from src.zone.models import ZoneState
+
+        on_warning = MagicMock()
+        on_alarm = MagicMock()
+        on_cutoff = MagicMock()
+        fast_sm_step.set_callbacks(
+            on_warning=on_warning, on_alarm=on_alarm, on_cutoff=on_cutoff
+        )
+
+        fast_sm_step.update(has_person=False, is_fire_on=True)
+        assert fast_sm_step.zone.state == ZoneState.ACTIVE_NO_PERSON
+
+        # 模拟 chrony makestep：墙上时钟一次性向前步进 1 小时
+        with patch('src.zone.state_machine.time.time',
+                   return_value=time.time() + 3600):
+            fast_sm_step.update(has_person=False, is_fire_on=True)
+
+        assert fast_sm_step.zone.state == ZoneState.ACTIVE_NO_PERSON
+        on_warning.assert_not_called()
+        on_alarm.assert_not_called()
+        on_cutoff.assert_not_called()
+
+    def test_stages_progress_in_order_on_real_elapsed(self, fast_sm_step):
+        """真实流逝时间按序走完 预警→报警→切电 三阶段"""
+        from src.zone.models import ZoneState
+
+        on_warning = MagicMock()
+        on_alarm = MagicMock()
+        on_cutoff = MagicMock()
+        fast_sm_step.set_callbacks(
+            on_warning=on_warning, on_alarm=on_alarm, on_cutoff=on_cutoff
+        )
+
+        fast_sm_step.update(has_person=False, is_fire_on=True)
+        assert fast_sm_step.zone.state == ZoneState.ACTIVE_NO_PERSON
+
+        fast_sm_step._no_person_start_time = time.monotonic() - 1.5
+        fast_sm_step.update(has_person=False, is_fire_on=True)
+        assert fast_sm_step.zone.state == ZoneState.WARNING
+        on_warning.assert_called_once()
+
+        fast_sm_step._no_person_start_time = time.monotonic() - 2.5
+        fast_sm_step.update(has_person=False, is_fire_on=True)
+        assert fast_sm_step.zone.state == ZoneState.ALARM
+        on_alarm.assert_called_once()
+
+        fast_sm_step._no_person_start_time = time.monotonic() - 4
+        fast_sm_step.update(has_person=False, is_fire_on=True)
+        assert fast_sm_step.zone.state == ZoneState.CUTOFF
+        on_cutoff.assert_called_once()
 
 
 class TestManualReset:

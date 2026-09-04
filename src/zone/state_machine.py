@@ -54,8 +54,11 @@ class ZoneStateMachine:
         self._on_temp_alarm: Optional[Callable[[Zone, float, np.ndarray], None]] = None  # 温度报警回调（含帧参数）
         
         # 时间追踪
+        # 三阶段计时使用单调时钟：设备 RTC 无电池，开机后 chrony makestep
+        # 会把墙上时钟一次性步进到真实时间，若用 time.time() 计时，
+        # 步进瞬间无人时长会直接越过 action_time，跳过预警/报警直接切电
         self._no_person_start_time: Optional[float] = None
-        self._last_update_time = time.time()
+        self._last_update_time = time.monotonic()
     
     def set_callbacks(self, 
                       on_warning: Optional[Callable[[Zone], None]] = None,
@@ -93,7 +96,7 @@ class ZoneStateMachine:
             action_time = alarm_config.action_time
             temp_threshold = alarm_config.temp_alarm_threshold
             
-            current_time = time.time()
+            current_time = time.monotonic()
             dt = current_time - self._last_update_time
             self._last_update_time = current_time
             
@@ -383,7 +386,7 @@ class ZoneStateMachine:
                 action_time = alarm_config.action_time
                 
                 # 计算实时的无人持续时间
-                current_time = time.time()
+                current_time = time.monotonic()
                 no_person_duration = current_time - self._no_person_start_time
                 
                 # 实时更新倒计时值
