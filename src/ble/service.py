@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # Destructive 二次确认」原则放行）。
 # 系统设置覆盖层（远程连接/LoRA/USB OTG/系统维护）现已纳入：remote 账密、usb_otg、
 # trigger_update（三合一：git reset + pip + 部署蓝牙 + 重启两服务）、install_dependencies（pip）。
+# 设置参数（④配置）经 get_settings/update_settings 透传：alarm（三阶段报警）为既有能力；
+# voice.enabled、inference（模型档位/置信度）、detection（判定帧数）、logging、disk_guard、
+# discovery 为新增类目——update_settings 响应含 restart_required 字段，App 据此提示重启生效。
 # 安全面：依赖 BLE 配对绑定作第一道鉴权；trigger_update/install_dependencies 由 App
 # DestructiveConfirmDialog 二次确认；调试/底层动作（toggle_fire、serial/gpio 直配）仍不放行。
 # 注：zone/camera CRUD 已纳入（区域·摄像头管理覆盖层）——典型规模（ROI 多边形 + 2~10 条列表）

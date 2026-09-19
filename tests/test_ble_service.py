@@ -197,6 +197,28 @@ async def test_rpc_whitelists_system_config(action):
     assert not any(o["event"] == "error" for o in nf.objs)
 
 
+@pytest.mark.parametrize("category,settings", [
+    ("voice", {"enabled": False}),
+    ("inference", {"confidence_threshold": 0.6, "model_path": "yolov11s-sim.rknn"}),
+    ("detection", {"no_person_threshold": 5, "person_present_threshold": 3}),
+    ("logging", {"level": "DEBUG"}),
+    ("disk_guard", {"warn_usage_pct": 80}),
+    ("discovery", {"announce_interval": 30}),
+])
+async def test_rpc_settings_new_categories_passthrough(category, settings):
+    """设置参数新类目（voice/inference/detection/logging/disk_guard/discovery）经
+    update_settings 白名单透传给主应用，restart_required 随 rpc_result 原样回传。"""
+    bridge = FakeBridge(result={"success": True, "data": {"restart_required": True}, "error": None})
+    svc, nf = _svc_with_bridge(bridge)
+    await svc.handle(1, {"id": 71, "cmd": "rpc", "action": "update_settings",
+                         "params": {"category": category, "settings": settings}})
+    assert bridge.calls == [("update_settings", {"category": category, "settings": settings})]
+    r = next(o for o in nf.objs if o["event"] == "rpc_result")
+    assert r["success"] is True
+    assert r["data"] == {"restart_required": True}
+    assert not any(o["event"] == "error" for o in nf.objs)
+
+
 async def test_rpc_lora_query_allows_device_response_window():
     bridge = FakeBridge(result={
         "success": True,
