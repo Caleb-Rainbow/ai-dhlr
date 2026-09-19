@@ -282,19 +282,6 @@ class VoicePlayer:
                     pygame.mixer.music.set_volume(self._volume)
             except Exception as e:
                 self._logger.warning(f"更新音量失败: {e}")
-
-    def set_enabled(self, enabled: bool):
-        """动态开关语音播报（运行时生效，无需重启）
-
-        关闭时立即停止当前播放并清空队列；重新开启后恢复播报。
-        """
-        enabled = bool(enabled)
-        if enabled == self._enabled:
-            return
-        self._enabled = enabled
-        self._logger.info(f"语音播报已{'启用' if enabled else '禁用'}")
-        if not enabled:
-            self.stop_playback()
     
     @property
     def volume(self) -> float:

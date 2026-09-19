@@ -1,7 +1,7 @@
-"""get_settings / update_settings 参数类目协议契约测试。
+"""硬件音量增益（get_audio_gain / set_audio_gain）协议契约测试。
 
-覆盖新增类目：inference / detection / logging / disk_guard / discovery / voice，
-以及边界校验与 restart_required 回传语义。
+RK809 播放链路 = 软件 volume × DAC(0-252) × HP Output Gain(0-3)。
+DAC 上限是内核真实值 252（ALSA 虚报 255，写 253+ EINVAL）。
 """
 import pytest
 
@@ -43,145 +43,102 @@ def env(monkeypatch):
     return WSHandler(), cfg, saved
 
 
-# ------------------------------ get_settings ------------------------------ #
-async def test_get_settings_all_returns_new_categories(env):
-    handler, cfg, _ = env
-    result = await handler._get_settings({"category": "all"})
-
-    assert set(result) == {
-        "alarm", "system", "voice", "inference", "detection",
-        "logging", "disk_guard", "discovery",
-    }
-    assert result["inference"]["confidence_threshold"] == cfg.inference.confidence_threshold
-    assert result["detection"]["no_person_threshold"] == cfg.detection.no_person_threshold
-    assert result["logging"]["level"] == cfg.logging.level
-    assert result["disk_guard"]["warn_usage_pct"] == cfg.disk_guard.warn_usage_pct
-    assert result["discovery"]["announce_interval"] == cfg.discovery.announce_interval
-
-
-async def test_get_settings_single_category(env):
+# ------------------------------ get_audio_gain ------------------------------ #
+async def test_get_audio_gain_reads_both_controls(env, monkeypatch):
     handler, _, _ = env
-    result = await handler._get_settings({"category": "inference"})
-    assert set(result) == {"inference"}
+    reads = {"DAC Playback Volume": 252, "HP Output Gain": 3}
+    monkeypatch.setattr(
+        WSHandler, "_amixer_read",
+        lambda self, name: reads.get(name),
+    )
+    result = await handler._get_audio_gain({})
+    assert result == {
+        "supported": True,
+        "dac": 252, "dac_max": 252,
+        "hp_gain": 3, "hp_gain_max": 3,
+    }
 
 
-# ------------------------------ inference ------------------------------ #
-async def test_update_inference_accepts_valid_and_flags_restart(env):
+async def test_get_audio_gain_unsupported_returns_nulls(env, monkeypatch):
+    """无 amixer（开发机/非 RK809 设备）→ supported=False，字段为 None。"""
+    handler, _, _ = env
+    monkeypatch.setattr(WSHandler, "_amixer_read", lambda self, name: None)
+    result = await handler._get_audio_gain({})
+    assert result["supported"] is False
+    assert result["dac"] is None and result["hp_gain"] is None
+
+
+# ------------------------------ set_audio_gain ------------------------------ #
+async def test_set_audio_gain_writes_and_reads_back(env, monkeypatch):
+    handler, _, _ = env
+    state = {"DAC Playback Volume": 219, "HP Output Gain": 0}
+    writes = []
+    monkeypatch.setattr(
+        WSHandler, "_amixer_read", lambda self, name: state.get(name),
+    )
+    def fake_write(self, name, value):
+        writes.append((name, value))
+        state[name] = value
+        return True
+    monkeypatch.setattr(WSHandler, "_amixer_write", fake_write)
+
+    result = await handler._set_audio_gain({"dac": 252, "hp_gain": 3})
+    assert writes == [("DAC Playback Volume", 252), ("HP Output Gain", 3)]
+    assert result["supported"] is True
+    assert result["dac"] == 252 and result["hp_gain"] == 3
+
+
+async def test_set_audio_gain_partial_update(env, monkeypatch):
+    """只传 hp_gain 时不动 DAC。"""
+    handler, _, _ = env
+    writes = []
+    monkeypatch.setattr(WSHandler, "_amixer_read",
+                        lambda self, name: {"DAC Playback Volume": 252, "HP Output Gain": 0}.get(name))
+    monkeypatch.setattr(WSHandler, "_amixer_write",
+                        lambda self, name, value: writes.append((name, value)) or True)
+
+    result = await handler._set_audio_gain({"hp_gain": 2})
+    assert writes == [("HP Output Gain", 2)]
+    assert result["dac"] == 252  # DAC 未动
+
+
+async def test_set_audio_gain_rejects_dac_over_kernel_max(env, monkeypatch):
+    """内核上限 252：写 253（ALSA 虚报的 255 区间）必须被协议层拒绝。"""
+    handler, _, _ = env
+    monkeypatch.setattr(WSHandler, "_amixer_write", lambda self, name, value: True)
+    with pytest.raises(ValueError, match="dac 越界"):
+        await handler._set_audio_gain({"dac": 253})
+    with pytest.raises(ValueError, match="dac 越界"):
+        await handler._set_audio_gain({"dac": -1})
+
+
+async def test_set_audio_gain_rejects_hp_out_of_range(env, monkeypatch):
+    handler, _, _ = env
+    monkeypatch.setattr(WSHandler, "_amixer_write", lambda self, name, value: True)
+    with pytest.raises(ValueError, match="hp_gain 越界"):
+        await handler._set_audio_gain({"hp_gain": 4})
+
+
+async def test_set_audio_gain_write_failure_raises(env, monkeypatch):
+    handler, _, _ = env
+    monkeypatch.setattr(WSHandler, "_amixer_write", lambda self, name, value: False)
+    with pytest.raises(ValueError, match="DAC 音量写入失败"):
+        await handler._set_audio_gain({"dac": 200})
+
+
+# ------------------------------ 原有 settings 行为回归 ------------------------------ #
+async def test_get_settings_all_only_legacy_categories(env):
+    """收窄后 get_settings(all) 只含 alarm/system/voice。"""
+    handler, _, _ = env
+    result = await handler._get_settings({"category": "all"})
+    assert set(result) == {"alarm", "system", "voice"}
+
+
+async def test_update_alarm_still_works(env):
     handler, cfg, saved = env
-    result = await handler._update_settings({"category": "inference", "settings": {
-        "confidence_threshold": 0.6,
-        "model_path": "yolov11s-sim.rknn",
-        "engine": "rknn",
-    }})
-    assert result["restart_required"] is True
-    assert cfg.inference.confidence_threshold == 0.6
-    assert cfg.inference.model_path == "yolov11s-sim.rknn"
-    assert saved  # 已落盘
-
-
-@pytest.mark.parametrize("settings,match", [
-    ({"confidence_threshold": 0}, "confidence_threshold 越界"),
-    ({"confidence_threshold": 1.5}, "confidence_threshold 越界"),
-    ({"engine": "onnx"}, "engine"),
-    ({"model_path": "../evil.rknn"}, "model_path"),
-    ({"model_path": "sub/dir/model.rknn"}, "model_path"),
-    ({"model_path": "model.txt"}, "model_path"),
-])
-async def test_update_inference_rejects_invalid(env, settings, match):
-    handler, cfg, saved = env
-    with pytest.raises(ValueError, match=match):
-        await handler._update_settings({"category": "inference", "settings": settings})
-    assert not saved  # 校验失败不应落盘
-
-
-# ------------------------------ detection ------------------------------ #
-async def test_update_detection_bounds(env):
-    handler, cfg, _ = env
-    await handler._update_settings({"category": "detection", "settings": {
-        "no_person_threshold": 5, "person_present_threshold": 3,
-    }})
-    assert cfg.detection.no_person_threshold == 5
-    assert cfg.detection.person_present_threshold == 3
-
-    with pytest.raises(ValueError, match="no_person_threshold 越界"):
-        await handler._update_settings({"category": "detection",
-                                        "settings": {"no_person_threshold": 0}})
-    with pytest.raises(ValueError, match="person_present_threshold 必须是整数"):
-        await handler._update_settings({"category": "detection",
-                                        "settings": {"person_present_threshold": "abc"}})
-
-
-# ------------------------------ logging ------------------------------ #
-async def test_update_logging_valid_and_level_check(env):
-    handler, cfg, _ = env
-    await handler._update_settings({"category": "logging", "settings": {
-        "level": "debug",  # 大小写归一
-        "log_retention_days": 30,
-        "snapshot_retention_days": 0,
-    }})
-    assert cfg.logging.level == "DEBUG"
-    assert cfg.logging.log_retention_days == 30
-    assert cfg.logging.snapshot_retention_days == 0
-
-    with pytest.raises(ValueError, match="level"):
-        await handler._update_settings({"category": "logging",
-                                        "settings": {"level": "VERBOSE"}})
-
-
-# ------------------------------ disk_guard ------------------------------ #
-async def test_update_disk_guard_cross_validation(env):
-    handler, cfg, _ = env
-    await handler._update_settings({"category": "disk_guard", "settings": {
-        "warn_usage_pct": 80, "critical_usage_pct": 90,
-    }})
-    assert cfg.disk_guard.warn_usage_pct == 80
-
-    # critical <= warn 应被拒绝
-    with pytest.raises(ValueError, match="critical_usage_pct"):
-        await handler._update_settings({"category": "disk_guard", "settings": {
-            "critical_usage_pct": 80,
-        }})
-
-
-# ------------------------------ discovery ------------------------------ #
-async def test_update_discovery_interval_bounds(env):
-    handler, cfg, _ = env
-    await handler._update_settings({"category": "discovery", "settings": {
-        "enabled": False, "announce_interval": 30,
-    }})
-    assert cfg.discovery.enabled is False
-    assert cfg.discovery.announce_interval == 30
-
-    with pytest.raises(ValueError, match="announce_interval 越界"):
-        await handler._update_settings({"category": "discovery",
-                                        "settings": {"announce_interval": 9999}})
-
-
-# ------------------------------ voice ------------------------------ #
-async def test_update_voice_runtime_toggle(env, monkeypatch):
-    handler, cfg, _ = env
-    from src.output.voice import voice_player
-
-    calls = []
-    monkeypatch.setattr(voice_player, "set_enabled", lambda enabled: calls.append(enabled))
-
-    result = await handler._update_settings({"category": "voice", "settings": {"enabled": False}})
-    assert result["restart_required"] is False  # voice 运行时生效
-    assert cfg.voice.enabled is False
-    assert calls == [False]
-
-
-# ------------------------------ 兼容与加固 ------------------------------ #
-async def test_update_alarm_still_works_without_restart_flag(env):
-    handler, cfg, _ = env
     result = await handler._update_settings({"category": "alarm", "settings": {
         "warning_time": 30,
     }})
-    assert result["restart_required"] is False
+    assert result == {"message": "设置已更新"}
     assert cfg.alarm.warning_time == 30
-
-
-async def test_update_unknown_category_rejected(env):
-    handler, _, _ = env
-    with pytest.raises(ValueError, match="未知的设置类目"):
-        await handler._update_settings({"category": "nope", "settings": {}})
+    assert saved

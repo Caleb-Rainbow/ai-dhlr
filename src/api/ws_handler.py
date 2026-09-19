@@ -6,6 +6,7 @@ import time
 import uuid
 import os
 import asyncio
+import subprocess
 import threading
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass
@@ -95,6 +96,9 @@ class WSHandler:
             # 音量相关
             "get_volume": self._get_volume,
             "set_volume": self._set_volume,
+            # 硬件音量增益（RK809 DAC / HP Output Gain，即时生效）
+            "get_audio_gain": self._get_audio_gain,
+            "set_audio_gain": self._set_audio_gain,
             # 监测模式相关
             "get_zone_mode": self._get_zone_mode,
             "set_zone_mode": self._set_zone_mode,
@@ -1064,65 +1068,14 @@ class WSHandler:
                 "volume": config.voice.volume
             }
 
-        if category in ["all", "inference"]:
-            result["inference"] = {
-                "engine": config.inference.engine,
-                "model_path": config.inference.model_path,
-                "confidence_threshold": config.inference.confidence_threshold,
-                "person_class_id": config.inference.person_class_id,
-            }
-
-        if category in ["all", "detection"]:
-            result["detection"] = {
-                "no_person_threshold": config.detection.no_person_threshold,
-                "person_present_threshold": config.detection.person_present_threshold,
-            }
-
-        if category in ["all", "logging"]:
-            result["logging"] = {
-                "level": config.logging.level,
-                "console_level": config.logging.console_level,
-                "log_retention_days": config.logging.log_retention_days,
-                "snapshot_retention_days": config.logging.snapshot_retention_days,
-            }
-
-        if category in ["all", "disk_guard"]:
-            result["disk_guard"] = {
-                "enabled": config.disk_guard.enabled,
-                "check_interval_seconds": config.disk_guard.check_interval_seconds,
-                "warn_usage_pct": config.disk_guard.warn_usage_pct,
-                "critical_usage_pct": config.disk_guard.critical_usage_pct,
-            }
-
-        if category in ["all", "discovery"]:
-            result["discovery"] = {
-                "enabled": config.discovery.enabled,
-                "announce_interval": config.discovery.announce_interval,
-            }
-
         return result
     
     async def _update_settings(self, params: dict) -> dict:
-        """更新系统设置
-
-        支持的 category 与生效方式：
-        - alarm      三阶段报警参数（立即落盘生效）
-        - voice      语音开关（立即运行时生效）
-        - inference  推理引擎参数（重启后生效）
-        - detection  检测稳定性参数（重启后生效）
-        - logging    日志参数（重启后生效）
-        - disk_guard 磁盘看门狗（重启后生效）
-        - discovery  设备发现广播（重启后生效）
-
-        返回 restart_required=True 表示部分参数需重启主程序后才生效。
-        """
+        """更新系统设置"""
         category = params.get("category")
         settings = params.get("settings", {})
 
         config = config_manager.config
-        # 标记本次更新是否包含需重启才生效的类目，前端据此提示
-        restart_categories = {"inference", "detection", "logging", "disk_guard", "discovery"}
-        restart_required = category in restart_categories
 
         if category == "alarm":
             alarm = config.alarm
@@ -1156,127 +1109,88 @@ class WSHandler:
                 if key in settings:
                     setattr(alarm, key, str(settings[key])[:200])
 
-        elif category == "voice":
-            if "enabled" in settings:
-                config.voice.enabled = bool(settings["enabled"])
-                # 运行时生效：立即开关播放器，无需重启
-                try:
-                    from ..output.voice import voice_player
-                    voice_player.set_enabled(config.voice.enabled)
-                except Exception as e:
-                    logger.warning(f"更新语音开关失败: {e}")
-
-        elif category == "inference":
-            inference = config.inference
-            if "engine" in settings:
-                engine = str(settings["engine"])
-                if engine not in ("rknn", "pytorch"):
-                    raise ValueError("engine 必须是 'rknn' 或 'pytorch'")
-                inference.engine = engine
-            if "model_path" in settings:
-                model_path = str(settings["model_path"])
-                # 只接受裸文件名（禁止路径分隔符，防路径穿越），限定已知后缀；
-                # 不做存在性校验：模型文件只在设备上，开发机无 .rknn
-                basename = os.path.basename(model_path)
-                if model_path != basename or not basename.endswith((".rknn", ".pt")):
-                    raise ValueError("model_path 只接受 .rknn/.pt 裸文件名")
-                inference.model_path = basename
-            if "confidence_threshold" in settings:
-                try:
-                    c = float(settings["confidence_threshold"])
-                except (TypeError, ValueError):
-                    raise ValueError("confidence_threshold 必须是数值")
-                if not (0.01 <= c <= 0.99):
-                    raise ValueError("confidence_threshold 越界，允许 0.01..0.99")
-                inference.confidence_threshold = c
-            if "person_class_id" in settings:
-                try:
-                    cid = int(settings["person_class_id"])
-                except (TypeError, ValueError):
-                    raise ValueError("person_class_id 必须是整数")
-                if not (0 <= cid <= 999):
-                    raise ValueError("person_class_id 越界，允许 0..999")
-                inference.person_class_id = cid
-
-        elif category == "detection":
-            detection = config.detection
-            DETECTION_BOUNDS = {
-                "no_person_threshold": (1, 60),
-                "person_present_threshold": (1, 60),
-            }
-            for key, (lo, hi) in DETECTION_BOUNDS.items():
-                if key in settings:
-                    try:
-                        v = int(settings[key])
-                    except (TypeError, ValueError):
-                        raise ValueError(f"{key} 必须是整数")
-                    if not (lo <= v <= hi):
-                        raise ValueError(f"{key} 越界，允许 {lo}..{hi}")
-                    setattr(detection, key, v)
-
-        elif category == "logging":
-            log_cfg = config.logging
-            LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
-            for key in ("level", "console_level"):
-                if key in settings:
-                    level = str(settings[key]).upper()
-                    if level not in LEVELS:
-                        raise ValueError(f"{key} 必须是 {'/'.join(LEVELS)}")
-                    setattr(log_cfg, key, level)
-            LOG_BOUNDS = {
-                "log_retention_days": (0, 3650),
-                "snapshot_retention_days": (0, 3650),
-            }
-            for key, (lo, hi) in LOG_BOUNDS.items():
-                if key in settings:
-                    try:
-                        v = int(settings[key])
-                    except (TypeError, ValueError):
-                        raise ValueError(f"{key} 必须是整数")
-                    if not (lo <= v <= hi):
-                        raise ValueError(f"{key} 越界，允许 {lo}..{hi}（0=永不清理）")
-                    setattr(log_cfg, key, v)
-
-        elif category == "disk_guard":
-            guard = config.disk_guard
-            if "enabled" in settings:
-                guard.enabled = bool(settings["enabled"])
-            DISK_BOUNDS = {
-                "check_interval_seconds": (60, 86400),
-                "warn_usage_pct": (10, 99),
-                "critical_usage_pct": (10, 100),
-            }
-            for key, (lo, hi) in DISK_BOUNDS.items():
-                if key in settings:
-                    try:
-                        v = int(settings[key])
-                    except (TypeError, ValueError):
-                        raise ValueError(f"{key} 必须是整数")
-                    if not (lo <= v <= hi):
-                        raise ValueError(f"{key} 越界，允许 {lo}..{hi}")
-                    setattr(guard, key, v)
-            # 交叉校验：临界阈值必须高于告警阈值，否则激进清理永不触发
-            if guard.critical_usage_pct <= guard.warn_usage_pct:
-                raise ValueError("critical_usage_pct 必须大于 warn_usage_pct")
-
-        elif category == "discovery":
-            discovery = config.discovery
-            if "enabled" in settings:
-                discovery.enabled = bool(settings["enabled"])
-            if "announce_interval" in settings:
-                try:
-                    v = int(settings["announce_interval"])
-                except (TypeError, ValueError):
-                    raise ValueError("announce_interval 必须是整数")
-                if not (0 <= v <= 3600):
-                    raise ValueError("announce_interval 越界，允许 0..3600（0=仅被动应答）")
-                discovery.announce_interval = v
-
-        else:
-            raise ValueError(f"未知的设置类目: {category}")
-
         config_manager.save()
-        return {"message": "设置已更新", "restart_required": restart_required}
+        return {"message": "设置已更新"}
+
+    # ---------------- 硬件音量增益 ----------------
+    # RK809 codec 两级硬件增益（播放链路 = 软件 volume × DAC × HP Output Gain）：
+    # - DAC Playback Volume：内核实际范围 [0,252]（ALSA 虚报 255，写 253+ 直接 EINVAL）
+    # - HP Output Gain：耳机功放增益 [0,3]，出厂默认 0
+    # 均经 amixer 读写，运行时即时生效，无需重启。
+
+    _DAC_MAX = 252   # 内核真实上限，勿改成 255
+    _HP_GAIN_MAX = 3
+
+    def _amixer_read(self, name: str) -> int | None:
+        """读 ALSA 控件当前值（取第一个声道）。无 amixer / 控件不存在返回 None。"""
+        import shutil
+        if not shutil.which("amixer"):
+            return None
+        try:
+            out = subprocess.run(
+                ["amixer", "-c", "0", "cget", f"name={name}"],
+                capture_output=True, text=True, timeout=3,
+            ).stdout
+            for line in out.splitlines():
+                if ": values=" in line:
+                    return int(line.split(": values=")[1].split(",")[0].strip())
+        except Exception:
+            pass
+        return None
+
+    def _amixer_write(self, name: str, value: int) -> bool:
+        """写 ALSA 控件（双声道控件写两份）。失败返回 False。"""
+        import shutil
+        if not shutil.which("amixer"):
+            return False
+        try:
+            args = ["amixer", "-c", "0", "cset", f"name={name}", str(value)]
+            if name == "DAC Playback Volume":
+                args[4] = f"{value},{value}"
+            r = subprocess.run(args, capture_output=True, text=True, timeout=3)
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    async def _get_audio_gain(self, params: dict) -> dict:
+        """读取硬件音量增益（RK809 DAC + HP Output Gain）"""
+        dac = self._amixer_read("DAC Playback Volume")
+        hp_gain = self._amixer_read("HP Output Gain")
+        supported = dac is not None or hp_gain is not None
+        return {
+            "supported": supported,
+            "dac": dac,
+            "dac_max": self._DAC_MAX if dac is not None else None,
+            "hp_gain": hp_gain,
+            "hp_gain_max": self._HP_GAIN_MAX if hp_gain is not None else None,
+        }
+
+    async def _set_audio_gain(self, params: dict) -> dict:
+        """设置硬件音量增益，运行时即时生效
+
+        params: {"dac": 0-252, "hp_gain": 0-3}（可只传其一）
+        """
+        if "dac" in params:
+            try:
+                dac = int(params["dac"])
+            except (TypeError, ValueError):
+                raise ValueError("dac 必须是整数")
+            if not (0 <= dac <= self._DAC_MAX):
+                raise ValueError(f"dac 越界，允许 0..{self._DAC_MAX}（内核上限，非 ALSA 虚报的 255）")
+            if not self._amixer_write("DAC Playback Volume", dac):
+                raise ValueError("DAC 音量写入失败（设备无 amixer 或控件不可用）")
+
+        if "hp_gain" in params:
+            try:
+                hp = int(params["hp_gain"])
+            except (TypeError, ValueError):
+                raise ValueError("hp_gain 必须是整数")
+            if not (0 <= hp <= self._HP_GAIN_MAX):
+                raise ValueError(f"hp_gain 越界，允许 0..{self._HP_GAIN_MAX}")
+            if not self._amixer_write("HP Output Gain", hp):
+                raise ValueError("HP 增益写入失败（设备无 amixer 或控件不可用）")
+
+        return await self._get_audio_gain(params)
     
     async def _set_device_id(self, params: dict) -> dict:
         """设置设备ID"""

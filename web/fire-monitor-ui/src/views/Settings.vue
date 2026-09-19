@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { ws } from '../api/ws';
-import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig, GpioConfig, InferenceSettings, DetectionSettings, LoggingSettings, DiskGuardSettings, DiscoverySettings } from '../types';
+import type { DeviceInfo, AlarmSettings, NetworkStatus, RemoteServerConfig, SerialConfig, LoraConfig, GpioConfig } from '../types';
 import { Save, Info, Volume2, VolumeX, ShieldAlert, Sun, Moon, Palette, Loader, Wifi, Globe, Server, CheckCircle, XCircle, RefreshCw, Eye, EyeOff, Edit3, Check, Download, Lightbulb, Package, Usb } from 'lucide-vue-next';
 import { useTheme } from '../composables/useTheme';
 import { useRoute, useRouter } from 'vue-router';
@@ -72,51 +72,12 @@ const gpioConfig = ref<GpioConfig>({
   pin_alarm: 'gpio2'
 });
 
-// 推理/检测参数（重启后生效）
-const inferenceSettings = ref<InferenceSettings>({
-  engine: 'rknn',
-  model_path: 'yolov11m-sim.rknn',
-  confidence_threshold: 0.5,
-  person_class_id: 0
-});
-const detectionSettings = ref<DetectionSettings>({
-  no_person_threshold: 3,
-  person_present_threshold: 2
-});
-// 模型档位选项（仓库自带 yolov11 n/s/m 三档 RKNN 模型）
-const modelOptions = [
-  { value: 'yolov11n-sim.rknn', label: '轻量 (yolov11n)' },
-  { value: 'yolov11s-sim.rknn', label: '均衡 (yolov11s)' },
-  { value: 'yolov11m-sim.rknn', label: '精准 (yolov11m)' }
-];
-
-// 日志参数（重启后生效）
-const loggingSettings = ref<LoggingSettings>({
-  level: 'INFO',
-  console_level: 'WARNING',
-  log_retention_days: 7,
-  snapshot_retention_days: 3
-});
-const logLevelOptions = ['DEBUG', 'INFO', 'WARNING', 'ERROR'];
-
-// 磁盘看门狗（重启后生效）
-const diskGuardSettings = ref<DiskGuardSettings>({
-  enabled: true,
-  check_interval_seconds: 3600,
-  warn_usage_pct: 85,
-  critical_usage_pct: 92
-});
-
-// 设备发现（重启后生效）
-const discoverySettings = ref<DiscoverySettings>({
-  enabled: true,
-  announce_interval: 15
-});
-
-// 语音播报开关
-const voiceEnabled = ref(true);
-// 本次保存是否有需重启生效的参数
-const restartHint = ref(false);
+// 硬件音量增益（RK809：DAC 0-252 + HP Output Gain 0-3，即时生效）
+const gainSupported = ref(false);
+const hwDac = ref(252);      // 内核真实上限 252（ALSA 虚报 255，写 253+ 驱动拒绝）
+const hwDacMax = ref(252);
+const hwHpGain = ref(3);
+const hwHpGainMax = ref(3);
 
 // 可用GPIO引脚列表
 const gpioPins = ref<string[]>([]);
@@ -203,16 +164,7 @@ const loadData = async () => {
   try {
     const [dev, settings, network, remote] = await Promise.all([
       ws.request<DeviceInfo>('get_device'),
-      ws.request<{
-        alarm?: AlarmSettings;
-        system?: DeviceInfo;
-        voice?: { enabled: boolean; volume: number };
-        inference?: InferenceSettings;
-        detection?: DetectionSettings;
-        logging?: LoggingSettings;
-        disk_guard?: DiskGuardSettings;
-        discovery?: DiscoverySettings;
-      }>('get_settings', { category: 'all' }),
+      ws.request<{ alarm?: AlarmSettings; system?: DeviceInfo }>('get_settings', { category: 'all' }),
       ws.request<NetworkStatus>('get_network').catch(() => networkStatus.value),
       ws.request<RemoteServerConfig>('get_remote_config').catch(() => remoteConfig.value)
     ]);
@@ -220,23 +172,16 @@ const loadData = async () => {
     if (settings.alarm) {
       alarmSettings.value = settings.alarm;
     }
-    if (settings.voice) {
-      voiceEnabled.value = settings.voice.enabled !== false;
-    }
-    if (settings.inference) {
-      inferenceSettings.value = { ...inferenceSettings.value, ...settings.inference };
-    }
-    if (settings.detection) {
-      detectionSettings.value = { ...detectionSettings.value, ...settings.detection };
-    }
-    if (settings.logging) {
-      loggingSettings.value = { ...loggingSettings.value, ...settings.logging };
-    }
-    if (settings.disk_guard) {
-      diskGuardSettings.value = { ...diskGuardSettings.value, ...settings.disk_guard };
-    }
-    if (settings.discovery) {
-      discoverySettings.value = { ...discoverySettings.value, ...settings.discovery };
+    // 硬件音量增益（不支持时保持默认并隐藏控件）
+    try {
+      const gain = await ws.request<{ supported: boolean; dac: number | null; dac_max: number | null; hp_gain: number | null; hp_gain_max: number | null }>('get_audio_gain');
+      gainSupported.value = gain.supported !== false;
+      if (gain.dac != null) hwDac.value = gain.dac;
+      if (gain.dac_max != null) hwDacMax.value = gain.dac_max;
+      if (gain.hp_gain != null) hwHpGain.value = gain.hp_gain;
+      if (gain.hp_gain_max != null) hwHpGainMax.value = gain.hp_gain_max;
+    } catch {
+      gainSupported.value = false;
     }
     networkStatus.value = network;
     remoteConfig.value = remote;
@@ -440,22 +385,11 @@ const saveSettings = async () => {
   saving.value = true;
   saveSuccess.value = false;
   saveError.value = '';
-  restartHint.value = false;
   try {
     await ws.request('update_settings', { category: 'alarm', settings: alarmSettings.value });
-    // 语音开关（运行时生效）
-    await ws.request('update_settings', { category: 'voice', settings: { enabled: voiceEnabled.value } });
-    // 检测/日志/磁盘/发现：逐类目保存，任何一类返回 restart_required 则提示重启
-    const restartCategories: Array<[string, Record<string, unknown>]> = [
-      ['inference', { ...inferenceSettings.value }],
-      ['detection', { ...detectionSettings.value }],
-      ['logging', { ...loggingSettings.value }],
-      ['disk_guard', { ...diskGuardSettings.value }],
-      ['discovery', { ...discoverySettings.value }]
-    ];
-    for (const [category, settings] of restartCategories) {
-      const res = await ws.request<{ restart_required?: boolean }>('update_settings', { category, settings });
-      if (res?.restart_required) restartHint.value = true;
+    // 硬件音量增益：即时生效（amixer 直写，无需重启）
+    if (gainSupported.value) {
+      await ws.request('set_audio_gain', { dac: hwDac.value, hp_gain: hwHpGain.value });
     }
     // 串口配置先于远程配置保存：update_remote_config 会触发设备重启远程连接，
     // 放在后面会撞上重连窗口（连接短暂断开），白等 30s 超时
@@ -1528,23 +1462,6 @@ onUnmounted(() => {
         </h3>
 
         <div class="space-y-4">
-          <!-- 启用开关 -->
-          <div class="flex items-center justify-between p-3 rounded-2xl"
-            style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
-            <div class="flex items-center gap-2">
-              <Volume2 v-if="voiceEnabled" class="w-5 h-5 text-primary" />
-              <VolumeX v-else class="w-5 h-5 text-text-muted" />
-              <span class="text-sm text-text-primary">启用语音播报</span>
-            </div>
-            <button type="button" @click="voiceEnabled = !voiceEnabled"
-              class="relative w-12 h-6 rounded-full transition-colors duration-200"
-              :style="{ background: voiceEnabled ? 'var(--color-primary)' : 'var(--theme-border-input)' }"
-              :aria-pressed="voiceEnabled">
-              <span class="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all duration-200"
-                :style="{ left: voiceEnabled ? '1.5rem' : '0.125rem' }"></span>
-            </button>
-          </div>
-
           <!-- 音量调整 -->
           <div class="space-y-2">
             <div class="flex items-center justify-between">
@@ -1559,6 +1476,33 @@ onUnmounted(() => {
                 class="volume-slider flex-1 h-2 rounded-full appearance-none cursor-pointer"
                 :style="{ background: `linear-gradient(to right, var(--color-primary) ${voiceVolume}%, var(--theme-border-input) ${voiceVolume}%)` }" />
             </div>
+          </div>
+
+          <!-- 硬件音量增益（RK809：DAC + 耳机功放，即时生效；不支持时隐藏） -->
+          <div v-if="gainSupported" class="space-y-3 p-3 rounded-2xl"
+            style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
+            <div class="flex items-center justify-between">
+              <label class="text-xs text-text-muted">硬件音量（DAC）</label>
+              <span class="text-sm font-mono text-primary font-medium">{{ hwDac }} / {{ hwDacMax }}</span>
+            </div>
+            <input type="range" v-model.number="hwDac" :min="0" :max="hwDacMax" step="1"
+              class="volume-slider w-full h-2 rounded-full appearance-none cursor-pointer"
+              :style="{ background: `linear-gradient(to right, var(--color-primary) ${(hwDac / hwDacMax * 100).toFixed(1)}%, var(--theme-border-input) ${(hwDac / hwDacMax * 100).toFixed(1)}%)` }" />
+
+            <div class="flex items-center justify-between">
+              <label class="text-xs text-text-muted">耳机增益（HP Output Gain）</label>
+              <div class="flex gap-1">
+                <button v-for="g in hwHpGainMax + 1" :key="g" type="button"
+                  @click="hwHpGain = g - 1"
+                  class="px-3 py-1 rounded-lg text-xs font-bold transition-all"
+                  :style="hwHpGain === g - 1
+                    ? { background: 'var(--color-primary)', color: 'white' }
+                    : { background: 'var(--theme-border-input)', color: 'var(--text-muted)' }">
+                  {{ ['低', '中', '高', '最大'][g - 1] || g - 1 }}
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-text-muted">两级硬件增益即时生效，与上方播报音量（软件）相乘决定最终响度</p>
           </div>
 
           <div class="space-y-1">
@@ -1593,180 +1537,6 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- Detection Settings -->
-    <Transition name="fade" mode="out-in">
-      <div v-if="!loading"
-        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
-        <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
-          <Package class="w-4 h-4" /> 检测参数
-        </h3>
-
-        <div class="space-y-4">
-          <!-- 模型档位 -->
-          <div class="space-y-1">
-            <label class="text-xs text-text-muted ml-1">模型档位（n=轻量 / s=均衡 / m=精准）</label>
-            <select v-model="inferenceSettings.model_path"
-              class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              <option v-for="opt in modelOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-            </select>
-          </div>
-
-          <!-- 置信度阈值 -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-xs text-text-muted ml-1">检测置信度阈值</label>
-              <span class="text-sm font-mono text-primary font-medium">{{ inferenceSettings.confidence_threshold.toFixed(2) }}</span>
-            </div>
-            <div class="flex items-center gap-3 p-3 rounded-2xl"
-              style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
-              <input type="range" v-model.number="inferenceSettings.confidence_threshold" min="0.05" max="0.95" step="0.05"
-                class="volume-slider flex-1 h-2 rounded-full appearance-none cursor-pointer"
-                :style="{ background: `linear-gradient(to right, var(--color-primary) ${((inferenceSettings.confidence_threshold - 0.05) / 0.9 * 100).toFixed(0)}%, var(--theme-border-input) ${((inferenceSettings.confidence_threshold - 0.05) / 0.9 * 100).toFixed(0)}%)` }" />
-            </div>
-            <p class="text-xs text-text-muted">阈值越低检出越多（易误报），越高越严格（易漏报）</p>
-          </div>
-
-          <!-- 稳定性帧数 -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-1">
-              <label class="text-xs text-text-muted ml-1">无人判定帧数</label>
-              <input v-model.number="detectionSettings.no_person_threshold" type="number" min="1" max="60"
-                class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            </div>
-            <div class="space-y-1">
-              <label class="text-xs text-text-muted ml-1">有人判定帧数</label>
-              <input v-model.number="detectionSettings.person_present_threshold" type="number" min="1" max="60"
-                class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            </div>
-          </div>
-
-          <p class="text-xs text-amber-400">检测参数保存后需重启主程序生效</p>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- Logging & Disk Guard Settings -->
-    <Transition name="fade" mode="out-in">
-      <div v-if="!loading"
-        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
-        <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
-          <Info class="w-4 h-4" /> 日志与维护
-        </h3>
-
-        <div class="space-y-4">
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-1">
-              <label class="text-xs text-text-muted ml-1">日志级别</label>
-              <select v-model="loggingSettings.level"
-                class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-                <option v-for="lv in logLevelOptions" :key="lv" :value="lv">{{ lv }}</option>
-              </select>
-            </div>
-            <div class="space-y-1">
-              <label class="text-xs text-text-muted ml-1">系统日志级别</label>
-              <select v-model="loggingSettings.console_level"
-                class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-                <option v-for="lv in logLevelOptions" :key="lv" :value="lv">{{ lv }}</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-1">
-              <label class="text-xs text-text-muted ml-1">日志保留天数</label>
-              <input v-model.number="loggingSettings.log_retention_days" type="number" min="0" max="3650"
-                class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            </div>
-            <div class="space-y-1">
-              <label class="text-xs text-text-muted ml-1">快照保留天数</label>
-              <input v-model.number="loggingSettings.snapshot_retention_days" type="number" min="0" max="3650"
-                class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-                style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-            </div>
-          </div>
-
-          <!-- 磁盘看门狗 -->
-          <div class="space-y-3 p-3 rounded-2xl"
-            style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-text-primary">磁盘空间看门狗</span>
-              <button type="button" @click="diskGuardSettings.enabled = !diskGuardSettings.enabled"
-                class="relative w-12 h-6 rounded-full transition-colors duration-200"
-                :style="{ background: diskGuardSettings.enabled ? 'var(--color-primary)' : 'var(--theme-border-input)' }"
-                :aria-pressed="diskGuardSettings.enabled">
-                <span class="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all duration-200"
-                  :style="{ left: diskGuardSettings.enabled ? '1.5rem' : '0.125rem' }"></span>
-              </button>
-            </div>
-            <div v-if="diskGuardSettings.enabled" class="grid grid-cols-3 gap-3">
-              <div class="space-y-1">
-                <label class="text-xs text-text-muted">巡检周期(秒)</label>
-                <input v-model.number="diskGuardSettings.check_interval_seconds" type="number" min="60" max="86400"
-                  class="w-full rounded-xl px-3 py-2 border outline-none focus:border-primary/50 transition-all text-text-primary text-sm"
-                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              </div>
-              <div class="space-y-1">
-                <label class="text-xs text-text-muted">告警(%)</label>
-                <input v-model.number="diskGuardSettings.warn_usage_pct" type="number" min="10" max="99"
-                  class="w-full rounded-xl px-3 py-2 border outline-none focus:border-primary/50 transition-all text-text-primary text-sm"
-                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              </div>
-              <div class="space-y-1">
-                <label class="text-xs text-text-muted">激进清理(%)</label>
-                <input v-model.number="diskGuardSettings.critical_usage_pct" type="number" min="10" max="100"
-                  class="w-full rounded-xl px-3 py-2 border outline-none focus:border-primary/50 transition-all text-text-primary text-sm"
-                  style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-              </div>
-            </div>
-          </div>
-
-          <p class="text-xs text-amber-400">日志与磁盘参数保存后需重启主程序生效</p>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- Discovery Settings -->
-    <Transition name="fade" mode="out-in">
-      <div v-if="!loading"
-        class="backdrop-blur-sm bg-[var(--theme-glass-bg)] border border-[var(--theme-glass-border)] shadow-[0_8px_32px_var(--theme-shadow)] transition-all p-5 rounded-3xl space-y-4">
-        <h3 class="flex items-center gap-2 text-sm font-bold text-text-muted uppercase tracking-wider">
-          <Wifi class="w-4 h-4" /> 设备发现
-        </h3>
-
-        <div class="space-y-4">
-          <div class="flex items-center justify-between p-3 rounded-2xl"
-            style="background: var(--theme-bg-input); border: 1px solid var(--theme-border-input);">
-            <div>
-              <div class="text-sm text-text-primary">局域网设备发现（UDP 广播）</div>
-              <div class="text-xs text-text-muted mt-0.5">供 APP / PC 像搜索摄像头一样发现本设备</div>
-            </div>
-            <button type="button" @click="discoverySettings.enabled = !discoverySettings.enabled"
-              class="relative w-12 h-6 rounded-full transition-colors duration-200 flex-shrink-0"
-              :style="{ background: discoverySettings.enabled ? 'var(--color-primary)' : 'var(--theme-border-input)' }"
-              :aria-pressed="discoverySettings.enabled">
-              <span class="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all duration-200"
-                :style="{ left: discoverySettings.enabled ? '1.5rem' : '0.125rem' }"></span>
-            </button>
-          </div>
-
-          <div v-if="discoverySettings.enabled" class="space-y-1">
-            <label class="text-xs text-text-muted ml-1">主动广播周期 (秒，0=仅被动应答)</label>
-            <input v-model.number="discoverySettings.announce_interval" type="number" min="0" max="3600"
-              class="w-full rounded-xl px-4 py-3 border outline-none focus:border-primary/50 transition-all text-text-primary"
-              style="background: var(--theme-bg-input); border-color: var(--theme-border-input);">
-          </div>
-
-          <p class="text-xs text-amber-400">设备发现参数保存后需重启主程序生效</p>
-        </div>
-      </div>
-    </Transition>
-
     <!-- 悬浮保存按钮容器 - 限制在内容区域内 -->
     <div class="settings-floating fixed inset-0 lg:left-64 pointer-events-none z-50">
       <!-- 悬浮保存按钮 -->
@@ -1783,11 +1553,9 @@ onUnmounted(() => {
       <!-- 保存成功提示 Toast -->
       <Transition name="toast">
         <div v-if="saveSuccess"
-          class="pointer-events-auto absolute bottom-36 lg:bottom-24 right-4 lg:right-8 px-5 py-3 rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl"
-          :class="restartHint ? 'bg-amber-500 shadow-amber-500/30' : 'bg-success shadow-success/30'"
-          style="color: white;">
+          class="pointer-events-auto absolute bottom-36 lg:bottom-24 right-4 lg:right-8 px-5 py-3 bg-success text-white rounded-2xl text-sm font-bold flex items-center gap-2 shadow-xl shadow-success/30">
           <CheckCircle class="w-5 h-5" />
-          <span>{{ restartHint ? '已保存，部分参数重启后生效' : '保存成功' }}</span>
+          <span>保存成功</span>
         </div>
       </Transition>
 

@@ -76,40 +76,13 @@ export interface AlarmSettings {
     temp_alarm_message: string;     // 温度报警消息
 }
 
-// 推理引擎参数（修改后需重启主程序生效）
-export interface InferenceSettings {
-    engine: 'rknn' | 'pytorch';
-    model_path: string;
-    confidence_threshold: number;   // 检测置信度阈值 0.01-0.99
-    person_class_id: number;
-}
-
-// 检测稳定性参数（修改后需重启主程序生效）
-export interface DetectionSettings {
-    no_person_threshold: number;       // 连续N帧无人才视为离开
-    person_present_threshold: number;  // 连续N帧有人才视为在场
-}
-
-// 日志参数（修改后需重启主程序生效）
-export interface LoggingSettings {
-    level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
-    console_level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
-    log_retention_days: number;
-    snapshot_retention_days: number;
-}
-
-// 磁盘看门狗参数（修改后需重启主程序生效）
-export interface DiskGuardSettings {
-    enabled: boolean;
-    check_interval_seconds: number;
-    warn_usage_pct: number;
-    critical_usage_pct: number;
-}
-
-// 局域网设备发现参数（修改后需重启主程序生效）
-export interface DiscoverySettings {
-    enabled: boolean;
-    announce_interval: number;  // 0=仅被动应答
+// 硬件音量增益（RK809，get_audio_gain / set_audio_gain，即时生效）
+export interface AudioGainState {
+    supported: boolean;
+    dac: number | null;          // DAC Playback Volume，内核上限 252
+    dac_max: number | null;
+    hp_gain: number | null;      // HP Output Gain 0-3
+    hp_gain_max: number | null;
 }
 
 export interface NetworkStatus {
