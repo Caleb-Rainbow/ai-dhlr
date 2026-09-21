@@ -6,12 +6,12 @@ import time
 import uuid
 import os
 import asyncio
-import subprocess
 import threading
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass
 
 from ..utils.logger import get_logger
+from ..utils import audio_gain
 from ..utils.config import (
     config_manager,
     ZoneConfig,
@@ -1114,83 +1114,29 @@ class WSHandler:
 
     # ---------------- 硬件音量增益 ----------------
     # RK809 codec 两级硬件增益（播放链路 = 软件 volume × DAC × HP Output Gain）：
-    # - DAC Playback Volume：内核实际范围 [0,252]（ALSA 虚报 255，写 253+ 直接 EINVAL）
-    # - HP Output Gain：耳机功放增益 [0,3]，出厂默认 0
-    # 均经 amixer 读写，运行时即时生效，无需重启。
-
-    _DAC_MAX = 252   # 内核真实上限，勿改成 255
-    _HP_GAIN_MAX = 3
-
-    def _amixer_read(self, name: str) -> int | None:
-        """读 ALSA 控件当前值（取第一个声道）。无 amixer / 控件不存在返回 None。"""
-        import shutil
-        if not shutil.which("amixer"):
-            return None
-        try:
-            out = subprocess.run(
-                ["amixer", "-c", "0", "cget", f"name={name}"],
-                capture_output=True, text=True, timeout=3,
-            ).stdout
-            for line in out.splitlines():
-                if ": values=" in line:
-                    return int(line.split(": values=")[1].split(",")[0].strip())
-        except Exception:
-            pass
-        return None
-
-    def _amixer_write(self, name: str, value: int) -> bool:
-        """写 ALSA 控件（双声道控件写两份）。失败返回 False。"""
-        import shutil
-        if not shutil.which("amixer"):
-            return False
-        try:
-            args = ["amixer", "-c", "0", "cset", f"name={name}", str(value)]
-            if name == "DAC Playback Volume":
-                args[4] = f"{value},{value}"
-            r = subprocess.run(args, capture_output=True, text=True, timeout=3)
-            return r.returncode == 0
-        except Exception:
-            return False
+    # 实现在 utils/audio_gain.py（含开机恢复）；此处仅协议封装 + 用户设置持久化。
+    # 设置成功即写入 config.voice.hw_dac/hw_hp_gain，开机由应用重放——
+    # 否则 WirePlumber 启动会把 DAC 拉回 ~86%，用户设置重启即丢。
 
     async def _get_audio_gain(self, params: dict) -> dict:
         """读取硬件音量增益（RK809 DAC + HP Output Gain）"""
-        dac = self._amixer_read("DAC Playback Volume")
-        hp_gain = self._amixer_read("HP Output Gain")
-        supported = dac is not None or hp_gain is not None
-        return {
-            "supported": supported,
-            "dac": dac,
-            "dac_max": self._DAC_MAX if dac is not None else None,
-            "hp_gain": hp_gain,
-            "hp_gain_max": self._HP_GAIN_MAX if hp_gain is not None else None,
-        }
+        return audio_gain.read_gain()
 
     async def _set_audio_gain(self, params: dict) -> dict:
-        """设置硬件音量增益，运行时即时生效
+        """设置硬件音量增益，运行时即时生效并持久化（重启后自动恢复）
 
         params: {"dac": 0-252, "hp_gain": 0-3}（可只传其一）
         """
+        result = audio_gain.write_gain(params.get("dac"), params.get("hp_gain"))
+
+        # 持久化用户设置供开机恢复（只记实际写入的项）
+        config = config_manager.config
         if "dac" in params:
-            try:
-                dac = int(params["dac"])
-            except (TypeError, ValueError):
-                raise ValueError("dac 必须是整数")
-            if not (0 <= dac <= self._DAC_MAX):
-                raise ValueError(f"dac 越界，允许 0..{self._DAC_MAX}（内核上限，非 ALSA 虚报的 255）")
-            if not self._amixer_write("DAC Playback Volume", dac):
-                raise ValueError("DAC 音量写入失败（设备无 amixer 或控件不可用）")
-
+            config.voice.hw_dac = int(params["dac"])
         if "hp_gain" in params:
-            try:
-                hp = int(params["hp_gain"])
-            except (TypeError, ValueError):
-                raise ValueError("hp_gain 必须是整数")
-            if not (0 <= hp <= self._HP_GAIN_MAX):
-                raise ValueError(f"hp_gain 越界，允许 0..{self._HP_GAIN_MAX}")
-            if not self._amixer_write("HP Output Gain", hp):
-                raise ValueError("HP 增益写入失败（设备无 amixer 或控件不可用）")
-
-        return await self._get_audio_gain(params)
+            config.voice.hw_hp_gain = int(params["hp_gain"])
+        config_manager.save()
+        return result
     
     async def _set_device_id(self, params: dict) -> dict:
         """设置设备ID"""

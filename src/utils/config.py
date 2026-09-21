@@ -123,6 +123,11 @@ class VoiceConfig:
     engine: str = "pyttsx3"
     rate: int = 150
     volume: float = 1.0
+    # 硬件音量增益持久化（RK809）：用户经 UI/BLE set_audio_gain 设置后记录在此，
+    # 开机由应用重放（utils/audio_gain.restore_configured）——WirePlumber 启动会把
+    # DAC 拉回 ~86%（sink 1.0 映射），不存则用户设置在重启后丢失。None=未设置不干预。
+    hw_dac: Optional[int] = None
+    hw_hp_gain: Optional[int] = None
 
 
 @dataclass
@@ -389,7 +394,9 @@ class ConfigManager:
             enabled=voice_raw.get('enabled', True),
             engine=voice_raw.get('engine', 'pyttsx3'),
             rate=voice_raw.get('rate', 150),
-            volume=voice_raw.get('volume', 1.0)
+            volume=voice_raw.get('volume', 1.0),
+            hw_dac=voice_raw.get('hw_dac'),
+            hw_hp_gain=voice_raw.get('hw_hp_gain')
         )
         
         # 解析日志配置
@@ -609,7 +616,9 @@ class ConfigManager:
                 'enabled': config.voice.enabled,
                 'engine': config.voice.engine,
                 'rate': config.voice.rate,
-                'volume': config.voice.volume
+                'volume': config.voice.volume,
+                'hw_dac': config.voice.hw_dac,
+                'hw_hp_gain': config.voice.hw_hp_gain
             },
             'logging': {
                 'level': config.logging.level,

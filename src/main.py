@@ -111,6 +111,12 @@ class FireSafetySystem:
                 enabled=config.voice.enabled,
                 volume=config.voice.volume
             )
+
+            # 恢复用户设置的硬件音量增益（后台线程，带重试）：
+            # WirePlumber 启动会把 DAC 拉回 ~86%（sink 1.0 映射）覆盖上次设置，
+            # 应用侧重放 config.voice.hw_dac/hw_hp_gain；未设置过则不干预
+            from src.utils.audio_gain import start_restore_thread
+            start_restore_thread()
             
             # 生成或获取设备ID
             try:
