@@ -54,12 +54,18 @@ def write_control(name: str, value: int) -> bool:
     if not _has_amixer():
         return False
     try:
-        args = ["amixer", "-c", _CARD, "cset", f"name={name}", str(value)]
-        if name == _DAC_CONTROL:
-            args[4] = f"{value},{value}"
-        r = subprocess.run(args, capture_output=True, text=True, timeout=3)
-        return r.returncode == 0
-    except Exception:
+        # 双声道控件（DAC）需同时写两份值；HP 增益为 volume-joined 单值
+        value_arg = f"{value},{value}" if name == _DAC_CONTROL else str(value)
+        r = subprocess.run(
+            ["amixer", "-c", _CARD, "cset", f"name={name}", value_arg],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            logger.warning(f"amixer cset 失败: {name}={value_arg} rc={r.returncode} stderr={r.stderr.strip()[:120]}")
+            return False
+        return True
+    except Exception as e:
+        logger.warning(f"amixer cset 异常: {name}={value}: {e}")
         return False
 
 

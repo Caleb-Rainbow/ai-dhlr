@@ -117,6 +117,42 @@ async def test_set_audio_gain_rejects_dac_over_kernel_max(env, monkeypatch):
 
 
 # ------------------------------ write_gain 底层校验 ------------------------------ #
+def test_write_control_builds_correct_args(monkeypatch):
+    """回归：amixer 参数构造——DAC 双声道写两份值，控件标识位不能被值覆盖。
+
+    此前 bug：`args[4]=f"{value},{value}"` 把 name= 控件标识替换成了值，
+    命令变成 `cset 252,252 252`，DAC 恒写失败而 HP（单值分支）正常。
+    """
+    captured = []
+
+    def fake_run(args, **kwargs):
+        captured.append(args)
+        import types
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(audio_gain.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio_gain, "_has_amixer", lambda: True)
+
+    assert audio_gain.write_control("DAC Playback Volume", 252) is True
+    assert captured[-1] == ["amixer", "-c", "0", "cset",
+                            "name=DAC Playback Volume", "252,252"]
+
+    assert audio_gain.write_control("HP Output Gain", 3) is True
+    assert captured[-1] == ["amixer", "-c", "0", "cset",
+                            "name=HP Output Gain", "3"]
+
+
+def test_write_control_logs_and_returns_false_on_error(monkeypatch):
+    import types
+
+    def fake_run(args, **kwargs):
+        return types.SimpleNamespace(returncode=1, stdout="", stderr="some alsa error")
+
+    monkeypatch.setattr(audio_gain.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio_gain, "_has_amixer", lambda: True)
+    assert audio_gain.write_control("DAC Playback Volume", 252) is False
+
+
 def test_write_gain_validates_bounds(monkeypatch):
     monkeypatch.setattr(audio_gain, "write_control", lambda name, value: True)
     monkeypatch.setattr(audio_gain, "read_gain",
