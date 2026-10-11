@@ -182,3 +182,79 @@ def test_device_info_uses_compact_json_for_single_read():
         "network": network,
     }
     assert b'": "' not in raw
+
+
+def test_ios_notifications_use_observed_185_mtu_and_roundtrip_without_truncation(monkeypatch):
+    gatt = _new_gatt()
+    gatt._observe_gatt_options({"device": SimpleNamespace(value="/org/bluez/hci0/dev_IPHONE"), "mtu": SimpleNamespace(value=185)})
+    characteristic = SimpleNamespace(value=bytearray())
+    delivered = []
+
+    class FakeServer:
+        def get_characteristic(self, _uuid):
+            return characteristic
+
+        def update_value(self, _service_uuid, _characteristic_uuid):
+            delivered.append(bytes(characteristic.value)[:182])  # BlueZ 的真实截断边界。
+
+    gatt._server = FakeServer()
+    monkeypatch.setattr(G, "NOTIFY_CHUNK_INTERVAL_SEC", 0)
+    event = {"event": "current_config", "id": 1, "config": {"remote": {"server_url": "https://example.test/" + "x" * 400}}}
+    asyncio.run(gatt.notify(event))
+    assert max(map(len, delivered)) == 182
+    assert P.MessageDecoder().feed(b"".join(delivered)) == [(1, event)]
+    old = [chunk[:182] for chunk in P.encode_message(1, event, mtu=247)]
+    assert P.MessageDecoder().feed(b"".join(old)) == []
+
+
+def test_notification_mtu_fallback_and_android_large_mtu():
+    gatt = _new_gatt()
+    assert gatt._notification_mtu() == 23
+    for invalid in (None, 0, 22, 999, True, "185"):
+        gatt._observe_gatt_options({"device": "phone", "mtu": invalid})
+        assert gatt._notification_mtu() == 23
+    gatt._observe_gatt_options({"device": "android", "mtu": 247})
+    assert gatt._notification_mtu() == 247
+    gatt._observe_gatt_options({"device": "iphone", "mtu": 185})
+    assert gatt._notification_mtu() == 185
+    gatt._active_peers.add("not-yet-observed")
+    assert gatt._notification_mtu() == 23
+
+
+def test_disconnected_peer_mtu_and_partial_request_are_cleared():
+    gatt = _new_gatt()
+    gatt._observe_gatt_options({"device": "/org/bluez/hci0/dev_OLD", "mtu": 185})
+    gatt._decoder.feed(b"\xa5\x00\x01\x00\x30partial")
+    characteristic = SimpleNamespace(gatt=SimpleNamespace(_dhlr_read_snapshots={"/org/bluez/hci0/dev_OLD": (0, b"old")}))
+    gatt._server = SimpleNamespace(get_characteristic=lambda _: characteristic)
+
+    class WatchdogBus:
+        connected = True
+
+        async def call(self, _message):
+            return SimpleNamespace(message_type=G.MessageType.METHOD_RETURN, body=[{}])
+
+    gatt._watchdog_bus = WatchdogBus()
+    assert asyncio.run(gatt._any_central_connected()) is False
+    assert gatt._notification_mtu() == 23
+    assert characteristic.gatt._dhlr_read_snapshots == {}
+    assert gatt._decoder.feed(b"".join(P.encode_message(2, {"cmd": "get_config"}))) == [(2, {"cmd": "get_config"})]
+
+
+def test_stale_connection_query_does_not_clear_new_handshake_mtu_or_partial_frame():
+    gatt = _new_gatt()
+    frame = b"".join(P.encode_message(7, {"cmd": "get_config"}))
+
+    class WatchdogBus:
+        connected = True
+
+        async def call(self, _message):
+            await asyncio.sleep(0)
+            gatt._observe_gatt_options({"device": "/org/bluez/hci0/dev_NEW", "mtu": 185})
+            gatt._decoder.feed(frame[:20])
+            return SimpleNamespace(message_type=G.MessageType.METHOD_RETURN, body=[{}])
+
+    gatt._watchdog_bus = WatchdogBus()
+    assert asyncio.run(gatt._any_central_connected()) is True
+    assert gatt._notification_mtu() == 185
+    assert gatt._decoder.feed(frame[20:]) == [(7, {"cmd": "get_config"})]

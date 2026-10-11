@@ -39,6 +39,12 @@ config/config.yaml
 # ZCode 会话本地配置（勿入库）
 .zcode/
 
+# Windows 前端拉取脚本（本地工具, 不随仓库分发; 放 deploy/ 或仓库根均可）
+pull-frontend.bat
+ai-dhlr-repo/
+frontend-dist/
+pull-frontend.err.log
+
 # 文档（二进制协议 pdf 等不纳入版本控制）
 docs/
 

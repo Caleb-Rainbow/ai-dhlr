@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
 from bless import (
@@ -25,6 +26,7 @@ from dbus_next.message import Message
 
 from . import protocol as P
 from .network_applier import current_network_status
+from .bless_compat import install_bluez_compat, option_value
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,10 @@ class GattServer:
         self._identity = identity
         self._name = name
         self._mtu = mtu
+        # 配置 MTU 只是上限，BlueZ 未报告真实连接 MTU 前必须使用 23/20B。
+        self._peer_mtus: dict[str, int] = {}
+        self._peer_seen: dict[str, float] = {}
+        self._active_peers: set[str] = set()
         self._decoder = P.MessageDecoder()
         self._seq = 0
         self._server: Optional[BlessServer] = None
@@ -78,6 +84,20 @@ class GattServer:
 
     def bind_service(self, service) -> None:
         self._service = service
+
+    def _observe_gatt_options(self, options: dict) -> None:
+        peer = str(option_value(options, "device", "unknown"))
+        mtu = option_value(options, "mtu")
+        if type(mtu) is int and 23 <= mtu <= 517:
+            effective = min(mtu, max(23, self._mtu))
+            if self._peer_mtus.get(peer) != effective:
+                logger.info("[mtu] peer=%s negotiated=%d notify_chunk=%d", peer, mtu, effective - P.ATT_OVERHEAD)
+            self._peer_mtus[peer] = effective
+            self._peer_seen[peer] = time.monotonic()
+
+    def _notification_mtu(self) -> int:
+        peers = self._active_peers | self._peer_mtus.keys()
+        return min((self._peer_mtus.get(peer, 23) for peer in peers), default=23)
 
     # ---------------------------- bless 回调 ---------------------------- #
     def _read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
@@ -122,8 +142,9 @@ class GattServer:
                     logger.warning("[notify] STATUS 特征值未找到，无法通知")
                     return
                 self._seq = (self._seq + 1) & 0xFFFF
-                chunks = P.encode_message(self._seq, obj, self._mtu)
-                logger.info(f"[notify] seq={self._seq} event={obj.get('event')} 分 {len(chunks)} 块")
+                mtu = self._notification_mtu()
+                chunks = P.encode_message(self._seq, obj, mtu)
+                logger.info("[notify] seq=%d event=%s mtu=%d chunk=%d 分 %d 块", self._seq, obj.get('event'), mtu, mtu - P.ATT_OVERHEAD, len(chunks))
                 for index, chunk in enumerate(chunks):
                     char.value = bytearray(chunk)
                     self._server.update_value(P.SERVICE_UUID, P.STATUS_UUID)
@@ -134,6 +155,7 @@ class GattServer:
 
     # ---------------------------- 生命周期 ---------------------------- #
     async def start(self) -> None:
+        install_bluez_compat()
         server = BlessServer(name=self._name)
         self._server = server
         server.read_request_func = self._read
@@ -163,6 +185,12 @@ class GattServer:
             GATTAttributePermissions.readable,
         )
 
+        # 绑定 D-Bus 特征的 options 观察器，须在 server.start/注册 GATT 前完成。
+        for uuid in (P.DEVICE_INFO_UUID, P.REQUEST_UUID, P.STATUS_UUID):
+            characteristic = server.get_characteristic(uuid)
+            backend = getattr(characteristic, "gatt", None)
+            if backend is not None:
+                backend._dhlr_options_observer = self._observe_gatt_options
         await server.start()
         logger.info("BLE 配网服务已广播: name=%s advertising=%s", self._name, await server.is_advertising())
         # 看门狗：bless 广告停滞(停广播且无连接)时主动 stop()+start() 重广播
@@ -275,6 +303,7 @@ class GattServer:
 
         返回 None 表示查询失败（调用方跳过本跳）。
         """
+        query_started = time.monotonic()
         try:
             bus = await self._get_watchdog_bus()
             reply = await asyncio.wait_for(
@@ -294,14 +323,29 @@ class GattServer:
             raise
         if reply.message_type != MessageType.METHOD_RETURN:
             return None
+        active = set()
         for path, interfaces in reply.body[0].items():
             if "/dev_" not in str(path):
                 continue  # 只要远端设备对象（/org/bluez/hciX/dev_XX_…）
             dev = interfaces.get("org.bluez.Device1") or {}
             connected = dev.get("Connected")
             if connected is not None and connected.value:
-                return True
-        return False
+                active.add(str(path))
+        # 查询在 await 期间可能遇到新建连，不能用旧快照清掉刚到达的 MTU/半帧。
+        active.update(peer for peer, seen in self._peer_seen.items() if seen > query_started)
+        self._active_peers = active
+        removed = self._peer_mtus.keys() - active
+        for peer in removed:
+            del self._peer_mtus[peer]
+            self._peer_seen.pop(peer, None)
+            for uuid in (P.DEVICE_INFO_UUID, P.REQUEST_UUID, P.STATUS_UUID):
+                characteristic = self._server.get_characteristic(uuid)
+                backend = getattr(characteristic, "gatt", None)
+                snapshots = getattr(backend, "_dhlr_read_snapshots", {})
+                snapshots.pop(peer, None)
+        if not active:
+            self._decoder = P.MessageDecoder()  # 断连遗留的半帧不能污染下次连接。
+        return bool(active)
 
     async def _get_watchdog_bus(self) -> MessageBus:
         bus = self._watchdog_bus

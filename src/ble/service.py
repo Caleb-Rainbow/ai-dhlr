@@ -14,6 +14,7 @@ from typing import Awaitable, Callable, List, Optional
 
 from .dhlr_client import DhlrClient
 from .network_applier import NetworkApplier
+from .ipv4_config import validate_network_config
 from .protocol import MAX_FRAME_PAYLOAD
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,9 @@ class ProvisioningService:
             except Exception as e:  # noqa: BLE001
                 logger.exception("命令处理异常 cmd=%s", cmd)
                 await self._error(cid, "internal", str(e))
+                if cmd == "apply":
+                    # 包括回退命令本身异常的情况，不能遗留 CONNECTING/APPLYING。
+                    await self._state_update(cid, IDLE)
 
     async def _do_scan(self, cid: int) -> None:
         # 扫描 WiFi 是只读操作(nmcli scan)，不干扰现有连接；仅在正在切网(APPLYING/CONNECTING)时拒绝。
@@ -173,8 +177,15 @@ class ProvisioningService:
         await self._state_update(cid, IDLE)
 
     async def _do_set_config(self, cid: int, config: dict) -> None:
+        self._pending_config = None
         if not isinstance(config, dict):
             await self._error(cid, "bad_request", "config must be object")
+            return
+        # 无效配置不能覆盖上次有效载荷；清空防止后续 apply 意外使用旧值。
+        try:
+            validate_network_config(config)
+        except ValueError as exc:
+            await self._error(cid, "bad_request", str(exc))
             return
         self._pending_config = config
         await self._state_update(cid, IDLE, config_ack=True)
@@ -202,12 +213,23 @@ class ProvisioningService:
         ssid = wifi.get("ssid")
         if ssid:
             await self._state_update(cid, CONNECTING)
-            r = await asyncio.to_thread(self._network.connect, ssid, wifi.get("password", ""))
+            args = (ssid, wifi.get("password", ""))
+            if "ipv4" in wifi:
+                args += (wifi["ipv4"],)
+            r = await asyncio.to_thread(self._network.connect, *args)
             if not r.get("ok"):
                 await self._error(cid, "wifi_connect_failed", r.get("error", "connect failed"))
                 await self._state_update(cid, IDLE)
                 return
             await self._state_update(cid, CONNECTED, ip=r.get("ip"), ssid=ssid)
+        elif cfg.get("ethernet") is not None:
+            await self._state_update(cid, CONNECTING)
+            r = await asyncio.to_thread(self._network.connect_ethernet, cfg["ethernet"]["ipv4"])
+            if not r.get("ok"):
+                await self._error(cid, "ethernet_connect_failed", r.get("error", "connect failed"))
+                await self._state_update(cid, IDLE)
+                return
+            await self._state_update(cid, CONNECTED, ip=r.get("ip"))
         else:
             await self._state_update(cid, CONNECTED)
 
@@ -350,4 +372,10 @@ class ProvisioningService:
             }
         except Exception as e:
             logger.warning(f"读取当前配置失败: {e}")
-        await self._notify({"event": "current_config", "id": cid, "config": config})
+        try:
+            config.update(await asyncio.to_thread(self._network.current_config))
+        except Exception as e:
+            logger.warning("读取网络配置失败: %s", e)
+        # 经分帧通知发布能力：iOS 不依赖 DEVICE_INFO 长特征读取。
+        await self._notify({"event": "current_config", "id": cid, "config": config,
+                            "network_config_version": 1})

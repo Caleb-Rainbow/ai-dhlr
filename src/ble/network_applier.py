@@ -10,11 +10,17 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
+from ipaddress import IPv4Interface
 from typing import Callable, List, Optional, Tuple
+
+from .ipv4_config import nmcli_ipv4_args, validate_ipv4
 
 logger = logging.getLogger(__name__)
 
 PROVISIONED_CONN = "provisioned-wifi"
+ETHERNET_CONN = "provisioned-ethernet"
+ETHERNET_IFACE = "eth0"
 DEFAULT_IFACE = "wlan0"
 
 # nmcli 子进程执行器：(cmd) -> (returncode, combined_output)
@@ -24,7 +30,12 @@ Runner = Callable[[List[str]], Tuple[int, str]]
 def _default_runner(cmd: List[str]) -> Tuple[int, str]:
     import subprocess
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        # nmcli 激活默认等 90 秒，外层先超时也必须走正常失败/回退分支。
+        # 不回显完整命令，connection add 的参数可能包含 WiFi 密码。
+        return 124, f"{cmd[0]} timed out after 30 seconds"
     return proc.returncode, (proc.stdout + proc.stderr)
 
 
@@ -217,10 +228,19 @@ class NetworkApplier:
                 return map_security(parts[1] if len(parts) > 1 else "")
         return "unknown"
 
-    def connect(self, ssid: str, password: str) -> dict:
+    def connect(self, ssid: str, password: str, ipv4: Optional[dict] = None) -> dict:
         """切 wlan0 到指定 WiFi（STA）。成功 {ok, ip}；失败回退热点 {ok:false, error}。。"""
+        try:
+            settings = validate_ipv4(ipv4)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         hotspot = self.active_hotspot_connection()
-        result = self._activate_sta(ssid, password, hotspot)
+        try:
+            result = self._activate_sta(ssid, password, hotspot, settings)
+        except Exception:
+            if hotspot:
+                self._run(["nmcli", "connection", "up", hotspot])
+            raise
         if result["ok"]:
             return result
         # 回退到原热点，保证设备仍可被访问/重新配网
@@ -229,7 +249,7 @@ class NetworkApplier:
             self._run(["nmcli", "connection", "up", hotspot])
         return result
 
-    def _activate_sta(self, ssid: str, password: str, hotspot: Optional[str]) -> dict:
+    def _activate_sta(self, ssid: str, password: str, hotspot: Optional[str], ipv4: dict) -> dict:
         # 0) 加密网络空密码直接失败：App 端空密码不上送 password 字段（开放网络语义），
         #    设备端若照建 profile 会得到 key-mgmt=wpa-psk 但无 psk 的坏件，up 报
         #    「需要密钥，但未提供」。按扫描到的加密类型区分：开放网络不写 wifi-sec。
@@ -248,12 +268,14 @@ class NetworkApplier:
         ]
         if secured:
             add_cmd += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
+        add_cmd += nmcli_ipv4_args(ipv4)
         rc, out = self._run(add_cmd)
         if rc != 0:
             # 已存在同名连接则改用 modify（正常不会发生：上面已清光同名）；两段错误都带回
             rc2, out2 = self._run([
                 "nmcli", "connection", "modify", PROVISIONED_CONN,
-                "ssid", ssid, "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password,
+                "ssid", ssid, "wifi-sec.key-mgmt", "wpa-psk" if secured else "none",
+                "wifi-sec.psk", password if secured else "", *nmcli_ipv4_args(ipv4),
             ])
             if rc2 != 0:
                 detail = f"add: {out.strip()[:120]} | modify: {out2.strip()[:120]}"
@@ -263,17 +285,86 @@ class NetworkApplier:
         if rc != 0:
             return {"ok": False, "error": f"connect failed: {out.strip()[:200]}"}
         # 4) 等 IP
-        ip = self._wait_for_ip(timeout=20)
+        ip = self._wait_for_ip(timeout=20, expected=ipv4.get("address"))
         if not ip:
-            return {"ok": False, "error": "dhcp timeout"}
+            return {"ok": False, "error": "static IP not applied" if ipv4["mode"] == "static" else "dhcp timeout"}
         return {"ok": True, "ip": ip, "ssid": ssid}
 
-    def _wait_for_ip(self, timeout: int = 20) -> Optional[str]:
+    def _wait_for_ip(self, timeout: int = 20, iface: Optional[str] = None, expected: Optional[str] = None) -> Optional[str]:
         deadline = time.time() + timeout
         while time.time() < deadline:
-            rc, out = self._run(["nmcli", "-g", "IP4.ADDRESS", "device", "show", self.iface])
-            ip = _extract_ip4_addr(out)
-            if ip:
+            rc, out = self._run(["nmcli", "-g", "IP4.ADDRESS", "device", "show", iface or self.iface])
+            ip = _extract_ip4_addr(out) if rc == 0 else None
+            if ip and (not expected or ip == expected):
                 return ip
             time.sleep(1)
         return None
+
+    def connect_ethernet(self, ipv4: dict) -> dict:
+        """保存并激活 eth0 profile；失败删除候选并恢复原活动连接，不触碰 WiFi/热点。"""
+        try:
+            settings = validate_ipv4(ipv4)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        rc, previous = self._run(["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", ETHERNET_IFACE])
+        previous = previous.strip() if rc == 0 and previous.strip() != "--" else ""
+        candidate = str(uuid.uuid4())
+        added = False
+        success = False
+        try:
+            rc, out = self._run([
+                "nmcli", "connection", "add", "type", "ethernet", "ifname", ETHERNET_IFACE,
+                "con-name", ETHERNET_CONN, "connection.uuid", candidate,
+                "connection.autoconnect", "yes", "connection.autoconnect-priority", "999",
+                *nmcli_ipv4_args(settings),
+            ])
+            if rc != 0:
+                return {"ok": False, "error": f"ethernet setup failed: {out.strip()[:200]}"}
+            added = True
+            rc, out = self._run(["nmcli", "connection", "up", "uuid", candidate])
+            if rc != 0:
+                return {"ok": False, "error": f"ethernet connect failed: {out.strip()[:200]}"}
+            ip = self._wait_for_ip(iface=ETHERNET_IFACE, expected=settings.get("address"))
+            if not ip:
+                return {"ok": False, "error": "static IP not applied" if settings["mode"] == "static" else "dhcp timeout"}
+            success = True
+            # 只清理本功能创建的旧连接，保留系统预置和用户自定义的 profile。
+            rc, out = self._run(["nmcli", "-t", "-f", "NAME,UUID", "connection", "show"])
+            if rc == 0:
+                for line in out.splitlines():
+                    name, _, old_uuid = line.partition(":")
+                    if name == ETHERNET_CONN and old_uuid and old_uuid != candidate:
+                        self._run(["nmcli", "connection", "delete", "uuid", old_uuid])
+            return {"ok": True, "ip": ip}
+        finally:
+            if added and not success:
+                self._run(["nmcli", "connection", "delete", "uuid", candidate])
+                if previous:
+                    self._run(["nmcli", "connection", "up", "uuid", previous])
+
+    def current_config(self) -> dict:
+        """读取持久化 profile（无 DHCP 地址时也可回填），不返回 WiFi 密码。"""
+        config = {}
+        for kind, name in (("wifi", PROVISIONED_CONN), ("ethernet", ETHERNET_CONN)):
+            rc, mode = self._run(["nmcli", "-g", "ipv4.method", "connection", "show", name])
+            if rc != 0 or mode.strip() not in ("auto", "manual"):
+                continue
+            ipv4 = {"mode": "dhcp"}
+            if mode.strip() == "manual":
+                rc, raw = self._run(["nmcli", "-g", "ipv4.addresses", "connection", "show", name])
+                try:
+                    address = IPv4Interface(raw.strip().split(",")[0])
+                except ValueError:
+                    continue
+                _, gateway = self._run(["nmcli", "-g", "ipv4.gateway", "connection", "show", name])
+                _, dns = self._run(["nmcli", "-g", "ipv4.dns", "connection", "show", name])
+                ipv4 = {"mode": "static", "address": str(address.ip), "netmask": str(address.netmask),
+                        "gateway": gateway.strip() if gateway.strip() != "--" else "",
+                        "dns": [x for x in dns.replace(",", " ").split() if x != "--"]}
+            if kind == "wifi":
+                ssid = _wifi_ssid(self._run, name)
+                if ssid:
+                    config[kind] = {"ssid": ssid, "ipv4": ipv4}
+            else:
+                config[kind] = {"ipv4": ipv4}
+        return config
