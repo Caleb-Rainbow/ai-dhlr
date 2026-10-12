@@ -1,14 +1,25 @@
 """静态 IP 协议、参数校验、真实 nmcli 命令形状与失败恢复。"""
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from src.ble.ipv4_config import validate_ipv4, nmcli_ipv4_args
-from src.ble.network_applier import NetworkApplier, ETHERNET_CONN, PROVISIONED_CONN, _default_runner
+from src.ble import network_applier
+from src.ble.network_applier import NetworkApplier, ETHERNET_CONN, PROVISIONED_CONN, _default_runner, _extract_ip4_addr
 from src.ble.service import ProvisioningService
 
 STATIC = {"mode": "static", "address": "192.168.2.158", "netmask": "255.255.255.0",
           "gateway": "192.168.2.1", "dns": ["192.168.2.1", "8.8.8.8"]}
+
+
+@pytest.fixture
+def fast_network_clock(monkeypatch):
+    elapsed = 0
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+    monkeypatch.setattr(network_applier, 'time', SimpleNamespace(monotonic=lambda: elapsed, sleep=sleep))
 
 
 @pytest.mark.parametrize("key,value", [
@@ -34,8 +45,14 @@ def test_lan_only_and_dhcp_clear_static():
 
 def test_wifi_static_activates_manual_profile():
     calls = []
+    candidate = None
     def runner(cmd):
+        nonlocal candidate
         calls.append(cmd)
+        if 'add' in cmd:
+            candidate = cmd[cmd.index('connection.uuid') + 1]
+        if 'GENERAL.CON-UUID' in cmd:
+            return 0, candidate
         if "wifi" in cmd and "list" in cmd:
             return 0, "Office:WPA2"
         if "IP4.ADDRESS" in cmd:
@@ -47,7 +64,7 @@ def test_wifi_static_activates_manual_profile():
     assert add[add.index("ipv4.method") + 1] == "manual"
     assert add[add.index("ipv4.addresses") + 1] == "192.168.2.158/24"
     assert add[add.index("ipv4.dns") + 1] == "192.168.2.1,8.8.8.8"
-    assert ["nmcli", "connection", "up", PROVISIONED_CONN] in calls
+    assert ["nmcli", "--wait", "0", "connection", "up", "uuid", candidate] in calls
 
 
 @pytest.mark.parametrize("kind", ["wifi", "ethernet"])
@@ -64,10 +81,14 @@ def test_ethernet_uses_uuid_keeps_other_profiles_and_recovers(fail):
     calls = []
     old_uuid = "00000000-0000-0000-0000-000000000001"
     stale_uuid = "00000000-0000-0000-0000-000000000002"
+    candidate = None
     def runner(cmd):
+        nonlocal candidate
         calls.append(cmd)
+        if 'add' in cmd:
+            candidate = cmd[cmd.index('connection.uuid') + 1]
         if "GENERAL.CON-UUID" in cmd:
-            return 0, old_uuid
+            return 0, candidate or old_uuid
         if "up" in cmd and cmd[-1] != old_uuid:
             if fail == "exception":
                 raise TimeoutError("nmcli timeout")
@@ -155,6 +176,7 @@ async def test_get_config_advertises_capability_in_framed_event():
     svc = ProvisioningService(FakeNetwork(), FakeDhlr(), notify)
     await svc.handle(1, {"cmd": "get_config"})
     assert events[-1]["network_config_version"] == 1
+    assert events[-1]["provisioning_state_version"] == 1
     assert events[-1]["config"]["ethernet"]["ipv4"] == STATIC
 
 
@@ -168,15 +190,19 @@ def test_default_runner_timeout_returns_failure_without_exposing_password(monkey
     assert "secret-password" not in error
 
 
-async def test_ethernet_subprocess_timeout_restores_connection_and_allows_retry(monkeypatch):
+async def test_ethernet_subprocess_timeout_restores_connection_and_allows_retry(monkeypatch, fast_network_clock):
     events, calls = [], []
     previous = "00000000-0000-0000-0000-000000000001"
     fail_activation = True
+    candidate = None
     def run(cmd, **kwargs):
+        nonlocal candidate
         calls.append(cmd)
         out = ""
+        if 'add' in cmd:
+            candidate = cmd[cmd.index('connection.uuid') + 1]
         if "GENERAL.CON-UUID" in cmd:
-            out = previous
+            out = previous if fail_activation else candidate
         elif "up" in cmd and cmd[-1] != previous and fail_activation:
             raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
         elif "IP4.ADDRESS" in cmd:
@@ -199,6 +225,113 @@ async def test_ethernet_subprocess_timeout_restores_connection_and_allows_retry(
     fail_activation = False
     await svc.handle(4, {"cmd": "apply"})
     assert svc.state == "CONNECTED" and events[-1]["ip"] == STATIC["address"]
+
+
+def test_matching_static_address_checks_all_addresses_and_exact_mask():
+    values = '169.254.1.8/16\n192.168.2.158/24\n'
+    assert _extract_ip4_addr(values, '192.168.2.158/24') == STATIC['address']
+    assert _extract_ip4_addr(values, '192.168.2.158/25') is None
+    assert _extract_ip4_addr('nmcli error: unavailable') is None
+
+
+@pytest.mark.parametrize('kind', ['wifi', 'ethernet'])
+@pytest.mark.parametrize('up_rc', [0, 3, 124])
+async def test_static_lan_returns_connected_from_kernel_without_external_checks(kind, up_rc):
+    calls, events = [], []
+    candidate = None
+    def runner(cmd):
+        nonlocal candidate
+        calls.append(cmd)
+        if 'add' in cmd:
+            candidate = cmd[cmd.index('connection.uuid') + 1]
+        if 'GENERAL.CON-UUID' in cmd:
+            return 0, candidate or 'original-uuid'
+        if 'wifi' in cmd and 'list' in cmd:
+            return 0, 'Office:WPA2'
+        if 'up' in cmd:
+            assert '--wait' in cmd and cmd[cmd.index('--wait') + 1] == '0'
+            return up_rc, 'activation still pending'
+        if 'IP4.ADDRESS' in cmd:
+            return 0, '--'  # NetworkManager 地址快照尚未刷新。
+        if cmd[0] == 'ip':
+            return 0, '3: eth0 inet 169.254.1.8/16 scope link\n3: eth0 inet 192.168.2.158/24 scope global'
+        return 0, ''
+    async def notify(event):
+        events.append(event)
+    network = NetworkApplier(runner)
+    svc = ProvisioningService(network, FakeDhlr(), notify)
+    lan = {**STATIC, 'gateway': '', 'dns': []}
+    part = {'ipv4': lan, **({'ssid': 'Office', 'password': 'password'} if kind == 'wifi' else {})}
+    await svc.handle(1, {'cmd': 'set_config', 'config': {kind: part}})
+    await svc.handle(2, {'cmd': 'apply'})
+    assert events[-1]['state'] == 'CONNECTED' and events[-1]['ip'] == STATIC['address']
+    assert all(cmd[0] in ('nmcli', 'ip') for cmd in calls)
+    assert not any('delete' in cmd and candidate in cmd for cmd in calls)
+
+
+@pytest.mark.parametrize('wrong', ['profile', 'mask', 'missing'])
+def test_static_activation_ack_or_saved_profile_alone_never_means_connected(wrong, fast_network_clock):
+    calls = []
+    candidate = None
+    def runner(cmd):
+        nonlocal candidate
+        calls.append(cmd)
+        if 'add' in cmd:
+            candidate = cmd[cmd.index('connection.uuid') + 1]
+        if 'GENERAL.CON-UUID' in cmd:
+            return 0, 'original-uuid' if not candidate or wrong == 'profile' else candidate
+        if 'IP4.ADDRESS' in cmd:
+            return 0, '' if wrong == 'missing' else f"{STATIC['address']}/{'25' if wrong == 'mask' else '24'}"
+        return 0, ''
+    result = NetworkApplier(runner).connect_ethernet(STATIC)
+    assert not result['ok']
+    assert ['nmcli', 'connection', 'delete', 'uuid', candidate] in calls
+    assert ['nmcli', 'connection', 'up', 'uuid', 'original-uuid'] in calls
+
+
+def test_dhcp_activation_retains_normal_wait_and_no_kernel_static_fallback():
+    calls = []
+    def runner(cmd):
+        calls.append(cmd)
+        return (0, '10.0.0.2/24') if 'IP4.ADDRESS' in cmd else (0, '')
+    result = NetworkApplier(runner).connect_ethernet({'mode': 'dhcp'})
+    assert result['ok'] and result['ip'] == '10.0.0.2'
+    assert not any('--wait' in cmd or cmd[0] == 'ip' for cmd in calls)
+
+
+async def test_state_query_recovers_lost_terminal_notification_without_reapplying_network():
+    events, network = [], FakeNetwork()
+    async def notify(event):
+        if event.get('state') != 'CONNECTED' or events and events[-1].get('state') == 'UNKNOWN':
+            events.append(event)
+    svc = ProvisioningService(network, FakeDhlr(), notify)
+    await svc.handle(1, {'cmd': 'set_config', 'config': {'ethernet': {'ipv4': STATIC}}})
+    await svc.handle(2, {'cmd': 'apply', 'request_token': 'current-request'})
+    assert svc.state == 'CONNECTED' and events[-1]['state'] == 'CONNECTING'
+    # 新会话复用相同 apply id 也不能误取旧请求成功结果。
+    await svc.handle(3, {'cmd': 'get_provisioning_state', 'apply_id': 2, 'request_token': 'other-request'})
+    assert events[-1]['state'] == 'UNKNOWN'
+    await svc.handle(4, {'cmd': 'get_provisioning_state', 'apply_id': 2, 'request_token': 'current-request'})
+    assert events[-1]['state'] == 'CONNECTED' and events[-1]['ip'] == STATIC['address']
+    assert len(network.calls) == 1
+
+
+async def test_state_query_does_not_wait_on_apply_lock_and_preserves_failure():
+    import asyncio
+    events = []
+    async def notify(event):
+        events.append(event)
+    svc = ProvisioningService(FakeNetwork(), FakeDhlr(), notify)
+    svc._apply_id, svc._apply_token = 2, 'current-request'
+    await svc._state_update(2, 'CONNECTING')
+    async with svc._lock:
+        await asyncio.wait_for(svc.handle(3, {'cmd': 'get_provisioning_state', 'apply_id': 2,
+                                             'request_token': 'current-request'}), timeout=.2)
+    assert events[-1]['state'] == 'CONNECTING'
+    await svc._error(2, 'ethernet_connect_failed', 'link down')
+    await svc._state_update(2, 'IDLE')
+    await svc.handle(4, {'cmd': 'get_provisioning_state', 'apply_id': 2, 'request_token': 'current-request'})
+    assert events[-1]['code'] == 'ethernet_connect_failed'
 
 
 @pytest.mark.parametrize("kind", ["wifi", "ethernet"])

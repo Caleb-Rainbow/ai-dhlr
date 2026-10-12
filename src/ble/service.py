@@ -93,6 +93,9 @@ class ProvisioningService:
         self._device_info_provider = device_info_provider
         self._state = IDLE
         self._pending_config: Optional[dict] = None
+        self._apply_id: Optional[int] = None
+        self._apply_token: Optional[str] = None
+        self._apply_status: Optional[dict] = None
         self._lock = asyncio.Lock()
 
     @property
@@ -104,18 +107,34 @@ class ProvisioningService:
         obj = {"event": "state_update", "id": cid, "state": state}
         obj.update(extra)
         self._state = state
+        if cid == self._apply_id and state in (APPLYING, CONNECTING, CONNECTED):
+            self._apply_status = dict(obj)
         await self._notify(obj)
 
     async def _scan_results(self, cid: int, networks: List[dict]) -> None:
         await self._notify({"event": "scan_results", "id": cid, "networks": networks})
 
     async def _error(self, cid: int, code: str, message: str = "") -> None:
-        await self._notify({"event": "error", "id": cid, "code": code, "message": message})
+        obj = {"event": "error", "id": cid, "code": code, "message": message}
+        if cid == self._apply_id:
+            self._apply_status = dict(obj)
+        await self._notify(obj)
 
     # ---------------------------- 命令分派 ---------------------------- #
     async def handle(self, seq: int, command: dict) -> None:
         cid = command.get("id", seq)
         cmd = command.get("cmd")
+        # 不等待配网锁：本地 IPv4 激活期间也能回查进度；仅返回本次请求的快照。
+        if cmd == "get_provisioning_state":
+            apply_id = command.get("apply_id")
+            token = command.get("request_token")
+            matched = (isinstance(apply_id, int) and not isinstance(apply_id, bool)
+                       and isinstance(token, str) and bool(token)
+                       and apply_id == self._apply_id and token == self._apply_token)
+            await self._notify(dict(self._apply_status) if matched and self._apply_status else
+                               {"event": "state_update", "id": apply_id if isinstance(apply_id, int) else cid,
+                                "state": "UNKNOWN"})
+            return
         # rpc 不进配网状态机锁：查询可与扫网/切网并行，且桥超时不阻塞配网命令
         if cmd == "rpc":
             logger.info(f"[cmd] seq={seq} cid={cid} cmd=rpc action={command.get('action')}")
@@ -151,6 +170,9 @@ class ProvisioningService:
                 elif cmd == "set_config":
                     await self._do_set_config(cid, command.get("config", {}))
                 elif cmd == "apply":
+                    self._apply_id = cid
+                    self._apply_token = command.get("request_token")
+                    self._apply_status = None
                     await self._do_apply(cid)
                 elif cmd == "cancel":
                     await self._do_cancel(cid)
@@ -380,7 +402,7 @@ class ProvisioningService:
             logger.warning("读取网络配置失败: %s", e)
         # 经分帧通知发布能力：iOS 不依赖 DEVICE_INFO 长特征读取。
         response = {"event": "current_config", "id": cid, "config": config,
-                    "network_config_version": 1}
+                    "network_config_version": 1, "provisioning_state_version": 1}
         if self._device_info_provider is not None:
             try:
                 info = self._device_info_provider()

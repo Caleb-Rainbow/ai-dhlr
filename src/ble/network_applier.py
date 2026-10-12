@@ -91,12 +91,16 @@ def _signal_to_dbm(strength: int) -> int:
     return -100 + int(strength * 0.6)
 
 
-def _extract_ip4_addr(text: str) -> Optional[str]:
+def _extract_ip4_addr(text: str, expected: Optional[str] = None) -> Optional[str]:
     """从 `nmcli -g IP4.ADDRESS dev <iface>` 输出取首个 IPv4（去 CIDR 前缀）。"""
-    for token in text.strip().split():
-        addr = token.split("/")[0].strip()
-        if addr and addr != "--":
-            return addr
+    target = IPv4Interface(expected) if expected else None
+    for token in text.replace(",", " ").split():
+        try:
+            address = IPv4Interface(token)
+        except ValueError:
+            continue
+        if target is None or (address.ip == target.ip and address.network.prefixlen == target.network.prefixlen):
+            return str(address.ip)
     return None
 
 
@@ -269,6 +273,9 @@ class NetworkApplier:
         if secured:
             add_cmd += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
         add_cmd += nmcli_ipv4_args(ipv4)
+        candidate = str(uuid.uuid4()) if ipv4["mode"] == "static" else None
+        if candidate:
+            add_cmd += ["connection.uuid", candidate]
         rc, out = self._run(add_cmd)
         if rc != 0:
             # 已存在同名连接则改用 modify（正常不会发生：上面已清光同名）；两段错误都带回
@@ -276,27 +283,51 @@ class NetworkApplier:
                 "nmcli", "connection", "modify", PROVISIONED_CONN,
                 "ssid", ssid, "wifi-sec.key-mgmt", "wpa-psk" if secured else "none",
                 "wifi-sec.psk", password if secured else "", *nmcli_ipv4_args(ipv4),
+                *(["connection.uuid", candidate] if candidate else []),
             ])
             if rc2 != 0:
                 detail = f"add: {out.strip()[:120]} | modify: {out2.strip()[:120]}"
                 return {"ok": False, "error": f"connection setup failed: {detail}"}
         # 3) 激活
-        rc, out = self._run(["nmcli", "connection", "up", PROVISIONED_CONN])
-        if rc != 0:
-            return {"ok": False, "error": f"connect failed: {out.strip()[:200]}"}
-        # 4) 等 IP
-        ip = self._wait_for_ip(timeout=20, expected=ipv4.get("address"))
-        if not ip:
-            return {"ok": False, "error": "static IP not applied" if ipv4["mode"] == "static" else "dhcp timeout"}
-        return {"ok": True, "ip": ip, "ssid": ssid}
+        result = self._activate_ipv4(["uuid", candidate] if candidate else [PROVISIONED_CONN], ipv4, self.iface)
+        return {**result, "ssid": ssid} if result["ok"] else result
 
-    def _wait_for_ip(self, timeout: int = 20, iface: Optional[str] = None, expected: Optional[str] = None) -> Optional[str]:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            rc, out = self._run(["nmcli", "-g", "IP4.ADDRESS", "device", "show", iface or self.iface])
-            ip = _extract_ip4_addr(out) if rc == 0 else None
-            if ip and (not expected or ip == expected):
+    def _activate_ipv4(self, connection: List[str], settings: dict, iface: str) -> dict:
+        static = settings["mode"] == "static"
+        # 静态 IPv4 不等整条连接的 IPv6/联网检查；--wait 0 仅表示已发起激活，
+        # 必须继续核对本次 UUID 和接口实际地址，不能把保存 profile 当作联网成功。
+        rc, out = self._run(["nmcli", *(["--wait", "0"] if static else []),
+                             "connection", "up", *connection])
+        if rc != 0 and not (static and rc in (3, 124)):
+            return {"ok": False, "error": f"connect failed: {out.strip()[:200]}"}
+        expected = str(IPv4Interface(f"{settings['address']}/{settings['netmask']}")) if static else None
+        ip = self._wait_for_ip(iface=iface, expected=expected,
+                               connection_uuid=connection[-1] if static else None)
+        if not ip:
+            return {"ok": False, "error": "static IP not applied" if static else "dhcp timeout"}
+        return {"ok": True, "ip": ip}
+
+    def _wait_for_ip(self, timeout: int = 20, iface: Optional[str] = None, expected: Optional[str] = None,
+                     connection_uuid: Optional[str] = None) -> Optional[str]:
+        iface = iface or self.iface
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if connection_uuid:
+                rc, active = self._run(["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", iface])
+                if rc != 0 or active.strip() != connection_uuid:
+                    time.sleep(1)
+                    continue
+            rc, out = self._run(["nmcli", "-g", "IP4.ADDRESS", "device", "show", iface])
+            ip = _extract_ip4_addr(out, expected) if rc == 0 else None
+            if ip:
                 return ip
+            if expected:
+                # NM 仍处在 activating / IP 配置阶段时，其地址快照可能滞后。
+                # ip addr 是本地内核状态，不需要网关、DNS、外网或手机到设备的路由。
+                rc, out = self._run(["ip", "-4", "-o", "addr", "show", "dev", iface])
+                ip = _extract_ip4_addr(out, expected) if rc == 0 else None
+                if ip:
+                    return ip
             time.sleep(1)
         return None
 
@@ -321,12 +352,9 @@ class NetworkApplier:
             if rc != 0:
                 return {"ok": False, "error": f"ethernet setup failed: {out.strip()[:200]}"}
             added = True
-            rc, out = self._run(["nmcli", "connection", "up", "uuid", candidate])
-            if rc != 0:
-                return {"ok": False, "error": f"ethernet connect failed: {out.strip()[:200]}"}
-            ip = self._wait_for_ip(iface=ETHERNET_IFACE, expected=settings.get("address"))
-            if not ip:
-                return {"ok": False, "error": "static IP not applied" if settings["mode"] == "static" else "dhcp timeout"}
+            result = self._activate_ipv4(["uuid", candidate], settings, ETHERNET_IFACE)
+            if not result["ok"]:
+                return result
             success = True
             # 只清理本功能创建的旧连接，保留系统预置和用户自定义的 profile。
             rc, out = self._run(["nmcli", "-t", "-f", "NAME,UUID", "connection", "show"])
@@ -335,7 +363,7 @@ class NetworkApplier:
                     name, _, old_uuid = line.partition(":")
                     if name == ETHERNET_CONN and old_uuid and old_uuid != candidate:
                         self._run(["nmcli", "connection", "delete", "uuid", old_uuid])
-            return {"ok": True, "ip": ip}
+            return result
         finally:
             if added and not success:
                 self._run(["nmcli", "connection", "delete", "uuid", candidate])
