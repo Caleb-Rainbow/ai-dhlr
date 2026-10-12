@@ -5,7 +5,7 @@
 #       在 git pull 之后以 root 调用本脚本，完成 BLE 运行所需的系统层配置。
 #
 # 以 root 运行（调用方：sudo bash deploy/bootstrap-ble.sh），脚本内部命令不再各自 sudo。
-# 幂等：bluez 已装 / unit 已注册且最新 / 已 enable 均跳过；可反复执行，也可单独 SSH 调试。
+# 幂等：依赖、unit 和 BlueZ 配置已就绪则跳过；每次部署重新启动 BLE，使升级代码生效。
 # 退出码：0 = 成功，或可容忍降级（如 bluez 因网络装失败但继续，仅告警）；
 #         1 = 硬错误（仓库内 unit 文件缺失等，无法继续）。
 
@@ -15,7 +15,8 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_UNIT="$PROJECT_ROOT/deploy/ai-dhlr-ble.service"
-DST_UNIT="/etc/systemd/system/ai-dhlr-ble.service"
+DST_UNIT="${BLE_SYSTEMD_DIR:-/etc/systemd/system}/ai-dhlr-ble.service"
+BLUEZ_CONFIG="${BLUEZ_CONFIG_PATH:-/etc/bluetooth/main.conf}"
 BLE_UNIT_NAME="ai-dhlr-ble.service"
 
 echo "==== BLE 部署开始 $(date '+%F %T') ===="
@@ -45,17 +46,17 @@ fi
 NEED_RELOAD=0
 if [ ! -f "$DST_UNIT" ]; then
     echo "[INFO ] 首次注册 unit -> $DST_UNIT"
-    cp "$SRC_UNIT" "$DST_UNIT"
+    cp "$SRC_UNIT" "$DST_UNIT" || exit 1
     NEED_RELOAD=1
 elif ! cmp -s "$SRC_UNIT" "$DST_UNIT"; then
     echo "[INFO ] unit 文件有更新，覆盖 -> $DST_UNIT"
-    cp "$SRC_UNIT" "$DST_UNIT"
+    cp "$SRC_UNIT" "$DST_UNIT" || exit 1
     NEED_RELOAD=1
 else
     echo "[SKIP] unit 文件已是最新"
 fi
 if [ "$NEED_RELOAD" -eq 1 ]; then
-    systemctl daemon-reload
+    systemctl daemon-reload || exit 1
     echo "[OK]   systemctl daemon-reload 完成"
 fi
 
@@ -69,6 +70,24 @@ else
         echo "[WARN] $BLE_UNIT_NAME enable 失败"
     fi
 fi
+
+# ---------- 5. 迁移旧设备 BlueZ 配置 ----------
+# 现场 iOS 持续查询超时，经关闭反向发现并重新注册服务后恢复。
+# 旧版系统更新进程也会在拉取代码后调用本脚本，因此无需先升级更新器。
+# 只改 General 中的单项；首次修改备份并重启 bluetooth，已配置时不重启。
+if ! python3 "$SCRIPT_DIR/configure_bluez.py" --config "$BLUEZ_CONFIG" --restart-if-changed; then
+    echo "[FAIL] BlueZ 配置迁移失败，BLE 部署未完成"
+    exit 1
+fi
+
+# ---------- 6. 启动 / 重启 BLE 服务 ----------
+# bluetooth 重启可能停止 Requires=bluetooth.service 的 BLE unit。
+# 在这里恢复 BLE；旧更新器稍后重启主服务时可能退出，不能依赖其后续重启语句。
+if ! systemctl restart "$BLE_UNIT_NAME"; then
+    echo "[FAIL] $BLE_UNIT_NAME 启动失败，请检查 journalctl -u $BLE_UNIT_NAME"
+    exit 1
+fi
+echo "[OK]   $BLE_UNIT_NAME 已启动，新代码生效"
 
 echo "==== BLE 部署完成 ===="
 exit 0

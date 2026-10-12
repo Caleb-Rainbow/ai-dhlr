@@ -219,3 +219,59 @@ IDLE ──scan_wifi──▶ SCANNING ──scan_results──▶ SCANNING(结�
 
 - 当前**无鉴权**：BLE 明文承载 WiFi 密码与 token，任意蓝牙范围内设备可发起配网。**上线前必须启用 AUTH**（见 §2、§9）。
 - dhlr 内部 `/internal/apply-provisioning` 接口仅监听 `127.0.0.1`，防 LAN 越权。
+
+## 11. iOS 与 BlueZ 反向服务发现
+
+本服务的角色是 BLE 外设。BlueZ 默认会在手机连接后反向发现手机的 GATT 服务；
+在 BlueZ 5.66 的入站连接中，`ReverseServiceDiscovery=false` 会跳过自动 GATT 客户端初始化，
+外设 GATT 服务继续工作。参见 [官方配置](https://github.com/bluez/bluez/blob/5.66/src/main.conf)
+及 [device.c 的 gatt_client_init](https://github.com/bluez/bluez/blob/5.66/src/device.c)。
+
+2026-10-12 在 `192.168.0.236` 的 BlueZ 5.66 / Linux 6.1.118 设备上，经用户授权，
+备份 `/etc/bluetooth/main.conf` 后，在现有 `[General]` 段中添加：
+
+```ini
+ReverseServiceDiscovery = false
+```
+
+随后重启 `bluetooth.service` 与 `ai-dhlr-ble.service`，重新注册 GATT 和广播。
+AI 主应用保持原进程。现场备份是 `/etc/bluetooth/main.conf.codex-backup-20261012-ios`，
+恢复时使用备份并再次重启这两个服务。需要读取入站对端 GATT 服务的设备应单独评估该配置。
+
+验收设备为 iPad8,9 / iOS 26.5 / 微信 8.0.79 / SDK 3.17.4，主项目蓝牙网关分包
+`ble-20261012-5`。用户反复测试确认持续读取、子页切换、返回列表后重新进入详情均正常。
+客户端应答序号 192–206 与设备日志匹配，包含三轮参数、音量增益、状态、系统信息和日志列表。
+这次现场有效措施是配置修改加服务重新注册；尚未独立分离两者影响，也未验证其他 iOS 型号。
+已保存抓包中没有设备向手机发起的反向 Read Request，空口 Write Response 与手机回调仍应分别检查。
+
+### 安装与旧设备升级自动迁移
+
+`deploy/bootstrap-ble.sh` 调用标准库脚本 `deploy/configure_bluez.py`，在现有
+`/etc/bluetooth/main.conf` 的 `[General]` 中设置 `ReverseServiceDiscovery=false`。
+其他选项、注释、换行格式和文件权限保留；修改前保存同目录的
+`main.conf.dhlr-backup-<随机标识>`，原文件不存在时创建配置。重复部署不再修改已正确的
+配置，也不会因此重复重启 Bluetooth。配置格式错误会报错并保留原文件。
+
+配置变化时先重启 `bluetooth.service`，再由部署脚本启动或重启 `ai-dhlr-ble.service`，
+重新注册 GATT 并加载新代码。Bluetooth 重启失败时恢复原配置，尝试恢复原服务并报错，
+后续可以重新执行部署。若 BLE 启动失败，查看部署输出及对应的 systemd 日志。
+
+旧版“系统更新”进程在拉取代码后执行磁盘上的新版 `bootstrap-ble.sh`，因此即使更新器
+尚未升级，本次更新也能迁移配置。命令行 `update.sh` 同样在重启主服务前调用此入口。
+单独补齐配置可执行 `sudo bash deploy/bootstrap-ble.sh`；该操作会重启 BLE 服务。
+
+### 分帧设备信息（仅蓝牙模式也可读取）
+
+`current_config` 增加可选顶层 `device_info`，字段与 `DEVICE_INFO` 的裸 JSON 相同：
+`type/model/fw/hwid/name/proto/network`。原配置字段和 `network_config_version` 保持不变，
+旧客户端可忽略新增字段。`GattServer.device_info()` 复用后台网络缓存，
+通过 `ProvisioningService.device_info_provider` 注入，不在 BLE 写回调中查询网络或修改连接。
+这样 iOS 可通过已协商 MTU 的分帧通知读取信息，避免长特征读取。
+
+2026-10-12 在用户提供的当前地址 `192.168.0.235` 上，备份后仅补充三个 BLE 文件的上述接口，
+保留设备其他代码和 `ReverseServiceDiscovery=false`，只重启 `ai-dhlr-ble`。
+AI 主应用 PID=2606 保持不变。原文件备份为
+`/home/linaro/codex-backups/ble-info-20261012-6e51d3986d`。
+直接运行只读 `get_config` 应答路径，确认 fw=`1.0.9`、model=`ai-dhlr`、IP=`192.168.0.235`；
+MTU=185 时六个分片均不超过 182B，协议往返解码一致。此核对未经过手机蓝牙空口，
+需主项目小程序 `ble-20261012-7` 进行显示验收。

@@ -85,6 +85,19 @@ def _new_gatt():
     )
 
 
+def test_framed_device_info_matches_read_characteristic_and_uses_cached_network(monkeypatch):
+    gatt = _new_gatt()
+    gatt._network = {'uplink': 'ethernet', 'ethernet': {'ip': '192.168.0.235'}}
+    def forbidden_query():
+        raise AssertionError('设备信息必须使用网络缓存')
+    monkeypatch.setattr(G, 'current_network_status', forbidden_query)
+    info = gatt.device_info()
+    assert info == json.loads(gatt._read(SimpleNamespace(uuid=P.DEVICE_INFO_UUID)))
+    assert info['model'] == 'ai-dhlr' and info['fw'] == '1.0.6'
+    info['network']['ethernet']['ip'] = 'changed'
+    assert gatt._network['ethernet']['ip'] == '192.168.0.235'
+
+
 def test_notify_chunks_from_concurrent_messages_never_interleave(monkeypatch):
     gatt = _new_gatt()
     characteristic = SimpleNamespace(value=bytearray())

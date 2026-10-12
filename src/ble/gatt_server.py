@@ -10,6 +10,7 @@ run as root（ai-dhlr-ble.service）。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Optional
@@ -100,6 +101,10 @@ class GattServer:
         return min((self._peer_mtus.get(peer, 23) for peer in peers), default=23)
 
     # ---------------------------- bless 回调 ---------------------------- #
+    def device_info(self) -> dict:
+        """供分帧应答复用 DEVICE_INFO 快照，网络状态取后台缓存，不阻塞 BLE 回调。"""
+        return json.loads(P.build_device_info(**self._identity, network=self._network))
+
     def _read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
         if str(characteristic.uuid) == P.DEVICE_INFO_UUID:
             # 读回调必须瞬间返回且永不抛异常：bless 在事件循环里同步调用本函数，若在此现查

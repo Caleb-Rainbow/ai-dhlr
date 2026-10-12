@@ -103,7 +103,8 @@ async def main() -> None:
             await gatt.notify(_ensure_patrol_frame_safe(_patrol_notify(msg.get("data") or {})))
 
     bridge = DhlrBridge(on_broadcast=on_broadcast)
-    service = ProvisioningService(network, dhlr, gatt.notify, bridge=bridge)
+    service = ProvisioningService(network, dhlr, gatt.notify, bridge=bridge,
+                                  device_info_provider=gatt.device_info)
     gatt.bind_service(service)
 
     bridge.start()

@@ -64,6 +64,14 @@ if [ -f deploy/usb-otg-persist.sh ]; then
     sudo bash deploy/usb-otg-persist.sh
 fi
 
+# 8. BLE 部署：同步 unit、迁移 BlueZ 配置并启动新版 BLE 服务。
+# 放在主服务重启前，兼容由旧更新进程发起的升级。
+if [ -f deploy/bootstrap-ble.sh ]; then
+    if ! sudo bash deploy/bootstrap-ble.sh; then
+        echo "[WARN] BLE 部署失败，主服务仍继续更新；可单独重试 deploy/bootstrap-ble.sh"
+    fi
+fi
+
 echo "正在重启服务..."
 # 重启 Python 服务
 sudo systemctl restart ai-dhlr.service

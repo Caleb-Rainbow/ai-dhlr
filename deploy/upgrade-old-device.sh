@@ -123,7 +123,7 @@ if [ "$ERRN" -gt 0 ]; then
     echo "  [WARN] 启动后 2 分钟内有 $ERRN 条 [ERROR]（摄像头/串口类需人工确认）："
     journalctl -u ai-dhlr.service --since '-2 min' --no-pager | grep '\[ERROR\]' | sort | uniq -c | sort -rn | head -5 | sed 's/^/    /'
 fi
-systemctl is-active --quiet ai-dhlr-ble.service 2>/dev/null && echo "  BLE 服务: active" || echo "  BLE 服务: 未运行（首次部署后需一次手动重启，属已知限制）"
+systemctl is-active --quiet ai-dhlr-ble.service 2>/dev/null && echo "  BLE 服务: active" || echo "  BLE 服务: 未运行，请查看部署输出及 journalctl -u ai-dhlr-ble.service"
 echo
 echo "==== 升级完成 ===="
 REMOTE

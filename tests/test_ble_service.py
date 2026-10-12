@@ -57,6 +57,45 @@ def _svc(net=None, dhlr=None, networks=None, connect_result=None, dhlr_result=No
     return svc, nf, net, dhlr
 
 
+async def test_get_config_returns_device_info_in_framed_reply_without_network_writes(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from src.ble import protocol
+    cfg = SimpleNamespace(remote=SimpleNamespace(enabled=False, server_url='', token=''),
+                          system=SimpleNamespace(name='设备', device_id='device-id'))
+    monkeypatch.setitem(sys.modules, 'src.utils.config', SimpleNamespace(config_manager=SimpleNamespace(config=cfg)))
+    info = {'type': 'dhlr', 'model': 'ai-dhlr', 'fw': '1.0.9', 'hwid': 'hardware-id', 'name': '设备',
+            'network': {'uplink': 'ethernet', 'ethernet': {'ip': '192.168.0.235'}, 'wifi': None}}
+    nf, net, dhlr = FakeNotify(), FakeNetwork(), FakeDhlr()
+    net.current_config = lambda: {'ethernet': {'ipv4': {'mode': 'dhcp'}}}
+    svc = ProvisioningService(net, dhlr, nf, device_info_provider=lambda: info)
+    await svc.handle(1, {'cmd': 'get_config', 'id': 42})
+    reply = nf.objs[-1]
+    assert reply['event'] == 'current_config' and reply['id'] == 42
+    assert reply['device_info'] == info and reply['network_config_version'] == 1
+    chunks = protocol.encode_message(7, reply, mtu=185)
+    assert len(chunks) > 1 and all(len(chunk) <= 182 for chunk in chunks)
+    assert protocol.MessageDecoder().feed(b''.join(chunks)) == [(7, reply)]
+    assert not net.connect_calls and not dhlr.calls
+
+
+async def test_device_info_failure_preserves_config_handshake_and_does_not_log_values(monkeypatch, caplog):
+    import sys
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(remote=SimpleNamespace(enabled=False, server_url='', token=''),
+                          system=SimpleNamespace(name='设备', device_id='device-id'))
+    monkeypatch.setitem(sys.modules, 'src.utils.config', SimpleNamespace(config_manager=SimpleNamespace(config=cfg)))
+    nf, net = FakeNotify(), FakeNetwork()
+    net.current_config = lambda: {}
+    def unavailable():
+        raise RuntimeError('secret-token')
+    svc = ProvisioningService(net, FakeDhlr(), nf, device_info_provider=unavailable)
+    await svc.handle(1, {'cmd': 'get_config'})
+    assert nf.objs[-1]['event'] == 'current_config'
+    assert 'device_info' not in nf.objs[-1]
+    assert 'secret-token' not in caplog.text
+
+
 # --------------------------------------------------------------------------- #
 async def test_scan_flow():
     svc, nf, net, _ = _svc(networks=[{"ssid": "A", "rssi": -50, "security": "wpa2"}])

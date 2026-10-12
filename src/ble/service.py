@@ -84,11 +84,13 @@ class ProvisioningService:
         dhlr: DhlrClient,
         notify: Notify,
         bridge=None,
+        device_info_provider: Optional[Callable[[], dict]] = None,
     ) -> None:
         self._network = network
         self._dhlr = dhlr
         self._notify = notify
         self._bridge = bridge  # DhlrBridge，可选：未注入时 rpc 返回 unsupported
+        self._device_info_provider = device_info_provider
         self._state = IDLE
         self._pending_config: Optional[dict] = None
         self._lock = asyncio.Lock()
@@ -377,5 +379,14 @@ class ProvisioningService:
         except Exception as e:
             logger.warning("读取网络配置失败: %s", e)
         # 经分帧通知发布能力：iOS 不依赖 DEVICE_INFO 长特征读取。
-        await self._notify({"event": "current_config", "id": cid, "config": config,
-                            "network_config_version": 1})
+        response = {"event": "current_config", "id": cid, "config": config,
+                    "network_config_version": 1}
+        if self._device_info_provider is not None:
+            try:
+                info = self._device_info_provider()
+                if isinstance(info, dict):
+                    response["device_info"] = info
+            except Exception as exc:
+                # 元数据读取失败不影响原有配置握手；不记录配置或报文原文。
+                logger.warning("读取分帧设备信息失败: %s", type(exc).__name__)
+        await self._notify(response)

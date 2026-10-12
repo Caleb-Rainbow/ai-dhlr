@@ -1813,7 +1813,7 @@ class WSHandler:
 
         使用 git fetch + reset --hard 无条件更新到远程最新版本；随后在后台依次：
         1) pip install -r requirements.txt（含蓝牙 bless 依赖）
-        2) sudo bash deploy/bootstrap-ble.sh（bluez 检测兜底 + 注册/更新 ai-dhlr-ble 服务 + enable）
+        2) sudo bash deploy/bootstrap-ble.sh（依赖检测、服务注册、BlueZ 配置迁移及 BLE 启动）
         3) 重启 ai-dhlr 与 ai-dhlr-ble 两个服务
 
         BLE 部署失败不阻断主服务（火灾监测）重启。响应立即返回，部署在后台进行，
@@ -1868,7 +1868,7 @@ class WSHandler:
         """
         更新代码后的后台部署任务（不阻断、失败可见）。
 
-        顺序：pip 依赖 → bootstrap-ble.sh（bluez + 服务注册 + enable）
+        顺序：pip 依赖 → bootstrap-ble.sh（bluez + 服务注册 + 配置迁移 + BLE 启动）
               → bootstrap-hotspot.sh（热点脚本安装 + 清理 Hotspot-N 残留）→ 重启两服务。
         各步相互隔离：BLE 相关失败仅记日志，绝不阻止主服务 ai-dhlr 重启
         （火灾监测可用性优先）。全部输出追加到 logs/bootstrap-ble.log，
@@ -1915,7 +1915,7 @@ class WSHandler:
         except Exception as e:
             _log(f"[WARN] pip install 异常: {e}")
 
-        # 2) bootstrap-ble.sh（bluez 检测 + 服务注册 + enable）——失败仅告警，不阻断
+        # 2) bootstrap-ble.sh（依赖 + 服务注册 + 配置迁移 + BLE 启动）——失败仅告警，不阻断
         try:
             _log("[2/4] deploy/bootstrap-ble.sh ...")
             proc = await asyncio.create_subprocess_exec(
