@@ -510,14 +510,15 @@ class ConfigManager:
 
         迁移规则：
         - 旧版本 serial_index 从 0 开始，新版本从 1 开始
-        - serial_index = 0 自动迁移为 1
+        - 存在 serial_index = 0 时，整组索引加 1，保持原有物理地址
+          （旧协议 address = 1 + index，新协议 address = index）
         """
-        migrated = False
-        for zone in config.zones:
-            if zone.serial_index == 0:
-                zone.serial_index = 1
-                print(f"Zone {zone.id} serial_index migrated: 0 -> 1")
-                migrated = True
+        migrated = any(zone.serial_index == 0 for zone in config.zones)
+        if migrated:
+            for zone in config.zones:
+                old_index = zone.serial_index
+                zone.serial_index += 1
+                print(f"Zone {zone.id} serial_index migrated: {old_index} -> {zone.serial_index}")
 
         # 如果有迁移，自动保存
         if migrated:

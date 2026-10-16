@@ -26,6 +26,40 @@ from src.utils.config import (
 )
 
 
+@pytest.mark.parametrize("old_indexes", [[0, 1, 2], [0, 2, 5], [0, 0, 1]])
+def test_legacy_serial_migration_preserves_all_physical_addresses(old_indexes):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from src.utils.config import ConfigManager
+
+    manager = object.__new__(ConfigManager)
+    manager.save = Mock()
+    config = SimpleNamespace(zones=[
+        SimpleNamespace(id=f"zone_{i}", serial_index=index)
+        for i, index in enumerate(old_indexes)
+    ])
+    migrated = manager._migrate_config(config)
+    assert [zone.serial_index for zone in migrated.zones] == [index + 1 for index in old_indexes]
+    manager.save.assert_called_once()
+    # 再次加载不得继续递增，也不应再写配置。
+    manager._migrate_config(migrated)
+    assert [zone.serial_index for zone in migrated.zones] == [index + 1 for index in old_indexes]
+    manager.save.assert_called_once()
+
+
+def test_one_based_serial_config_is_not_migrated():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from src.utils.config import ConfigManager
+
+    manager = object.__new__(ConfigManager)
+    manager.save = Mock()
+    config = SimpleNamespace(zones=[SimpleNamespace(id="zone", serial_index=4)])
+    manager._migrate_config(config)
+    assert config.zones[0].serial_index == 4
+    manager.save.assert_not_called()
+
+
 class TestCameraConfig:
     """测试 CameraConfig 数据类"""
     

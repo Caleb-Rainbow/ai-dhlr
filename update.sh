@@ -1,18 +1,23 @@
 #!/bin/bash
-
-# 进入项目目录
-cd /home/linaro/ai-dhlr
+# 设备侧部署入口：默认先 git pull；手动升级入口已锁定提交时传 --skip-pull。
+# 本脚本不安装 Python 依赖，也不执行持续运行/接口验收；完整流程由
+# deploy/upgrade-old-device.sh 调度，验收标准见其文件头与 README。
+# BLE 在主服务之前部署并启动，兼容旧更新进程可能随主服务重启被终止的场景。
+# 退出码：0 部署成功；1 硬错误；2 配套部署失败，但仍尝试重启主服务。
+set -euo pipefail
+die() { echo "[FAIL] $*" >&2; exit 1; }
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+cd "$SCRIPT_DIR" || exit 1
+SKIP_PULL=0
+case "${1:-}" in
+    '') ;;
+    --skip-pull) SKIP_PULL=1 ;;
+    *) die "用法: bash update.sh [--skip-pull]" ;;
+esac
+[ "$#" -le 1 ] || die "参数过多"
 
 echo "开始执行更新程序..."
-
-# 1. 记录 update.sh 自身指纹（用于自更新保护）
-SELF_HASH_BEFORE=$(sha256sum update.sh 2>/dev/null | cut -d' ' -f1)
-
-# 2. 拉取最新代码
-#    git 一律以仓库属主 linaro 执行：sudo/远程 root 跑 update.sh 时若以 root 拉取，
-#    写入的 .git/objects 与工作区文件会变 root 属主，主服务（linaro）之后 git fetch
-#    写不进对象库，报 exit 128（2026-08-16 实际踩过）。runuser 同时把 HOME 指回
-#    /home/linaro，SSH 部署密钥/known_hosts 走 linaro 默认路径，无需 GIT_SSH_COMMAND。
+# Git 始终以仓库运行账号执行，防止 root 污染对象库属主。
 run_git() {
     if [ "$(id -u)" -eq 0 ]; then
         runuser -u linaro -- env HOME=/home/linaro git "$@"
@@ -20,60 +25,37 @@ run_git() {
         git "$@"
     fi
 }
-run_git pull
-if [ $? -ne 0 ]; then
-    echo "代码更新失败，请检查网络或 Git 配置。"
-    exit 1
-fi
-
-# 3. 自更新保护：若 update.sh 在本次 pull 中被改动，重新执行新版
-#    原因：bash 一次性把脚本读入内存逐行执行，运行中 git pull 更新了磁盘上的
-#    update.sh，但当前进程仍跑旧版，新增逻辑这次不会执行。必须显式 exec 切到新版。
-SELF_HASH_AFTER=$(sha256sum update.sh 2>/dev/null | cut -d' ' -f1)
-if [ "$SELF_HASH_BEFORE" != "$SELF_HASH_AFTER" ]; then
-    echo "update.sh 自身已更新，重新执行新版..."
-    exec ./update.sh
-fi
-
-echo "代码拉取成功，正在同步配置..."
-
-# 4. 幂等同步主服务配置：仓库 deploy/ai-dhlr.service 与设备不一致时才更新
-#    用于随 git 下发 systemd 配置变更（如 MALLOC_ARENA_MAX=2）
-#    注意：这会让仓库成为 service 的唯一来源，覆盖设备本地的手动修改
-if [ -f deploy/ai-dhlr.service ] && ! sudo cmp -s deploy/ai-dhlr.service /etc/systemd/system/ai-dhlr.service; then
-    sudo cp deploy/ai-dhlr.service /etc/systemd/system/ai-dhlr.service
-    sudo systemctl daemon-reload
-    echo "主服务配置已更新（daemon-reload）"
-fi
-
-# 5. 日志防膨胀：logrotate 定时 + journald 上限 + rsyslog 垃圾过滤（幂等）
-#    曾有设备运行一年日志撑满根分区导致写配置 Errno 28 故障
-if [ -f deploy/log-hygiene.sh ]; then
-    sudo bash deploy/log-hygiene.sh
-fi
-
-# 6. 时间同步：chrony（或 ntpdate 退路），镜像自带的时间服务全是坏的，
-#    RTC 无电池断电丢时间，时钟可偏差一年以上
-if [ -f deploy/time-sync.sh ]; then
-    sudo bash deploy/time-sync.sh
-fi
-
-# 7. USB OTG 模式持久化：注册开机回放服务（幂等）
-#    界面切换 OTG 只写 sysfs，重启即回出厂 peripheral；此服务开机回放用户上次选择
-if [ -f deploy/usb-otg-persist.sh ]; then
-    sudo bash deploy/usb-otg-persist.sh
-fi
-
-# 8. BLE 部署：同步 unit、迁移 BlueZ 配置并启动新版 BLE 服务。
-# 放在主服务重启前，兼容由旧更新进程发起的升级。
-if [ -f deploy/bootstrap-ble.sh ]; then
-    if ! sudo bash deploy/bootstrap-ble.sh; then
-        echo "[WARN] BLE 部署失败，主服务仍继续更新；可单独重试 deploy/bootstrap-ble.sh"
+if [ "$SKIP_PULL" -eq 0 ]; then
+    SELF_HASH_BEFORE=$(sha256sum update.sh | cut -d' ' -f1)
+    run_git pull || die "代码更新失败，请检查网络或 Git 配置"
+    SELF_HASH_AFTER=$(sha256sum update.sh | cut -d' ' -f1)
+    if [ "$SELF_HASH_BEFORE" != "$SELF_HASH_AFTER" ]; then
+        echo "update.sh 自身已更新，重新执行新版..."
+        exec bash "$SCRIPT_DIR/update.sh" "$@"
     fi
 fi
 
-echo "正在重启服务..."
-# 重启 Python 服务
-sudo systemctl restart ai-dhlr.service
-# 重启蓝牙配网服务（未安装/未启用时忽略）
-sudo systemctl try-restart ai-dhlr-ble.service 2>/dev/null || true
+echo "正在同步部署配置..."
+[ -f deploy/ai-dhlr.service ] || die "缺少 deploy/ai-dhlr.service"
+if ! sudo cmp -s deploy/ai-dhlr.service /etc/systemd/system/ai-dhlr.service; then
+    sudo cp deploy/ai-dhlr.service /etc/systemd/system/ai-dhlr.service || die "同步主服务 unit 失败"
+    sudo systemctl daemon-reload || die "systemd daemon-reload 失败"
+    echo "主服务配置已更新"
+fi
+
+# 辅助步骤失败后仍恢复主服务，但最终必须报告部分失败，不能被末尾命令覆盖。
+DEPLOY_RC=0
+for script in log-hygiene.sh time-sync.sh usb-otg-persist.sh bootstrap-hotspot.sh bootstrap-ble.sh; do
+    if [ ! -f "deploy/$script" ] || ! sudo bash "deploy/$script"; then
+        echo "[WARN] deploy/$script 部署失败，继续恢复主服务"
+        DEPLOY_RC=2
+    fi
+done
+
+echo "正在重启主服务..."
+sudo systemctl restart ai-dhlr.service || die "主服务重启失败"
+# bootstrap-ble.sh 已重启 BLE；其 unit 不依赖主服务的运行状态，无需重复重启。
+if [ "$DEPLOY_RC" -ne 0 ]; then
+    echo "[WARN] 部署部分失败，请修复上述步骤后重试"
+fi
+exit "$DEPLOY_RC"

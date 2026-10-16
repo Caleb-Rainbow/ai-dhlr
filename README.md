@@ -235,6 +235,52 @@ python scripts/release.py major --commit -m "feat!: 破坏性变更说明"
 
 脚本只提交已暂存代码和自动更新的 `VERSION`，不会自动执行 tag 或 push。
 
+### 旧设备升级与验收
+
+旧设备更新按钮无响应时，在具备 Bash、`sshpass`、`ssh` 的开发机执行
+[旧设备升级脚本](deploy/upgrade-old-device.sh)。Windows 可使用已安装上述工具的 Linux/WSL 环境。
+默认账号、密码均为 `linaro`，目标项目路径为 `/home/linaro/ai-dhlr`。
+
+执行前确认设备当前分支及其 `origin` 同名分支；脚本会强制对齐该远端分支，覆盖跟踪文件和冲突音频。
+**必须先提交并推送整套升级代码**：开发机未提交的文件不会自动上传。
+升级前另行保存设备配置、原提交、systemd unit、依赖清单及摄像头/串口状态。
+脚本不自动备份音频或回滚；已完成的依赖和系统配置修改不会因后续失败自动恢复。
+
+```bash
+# 开发机运行；日志位于本机 logs/，保留脚本退出码，避免 tee 掩盖失败。
+# 将下面的示例 IP 替换为本次目标设备地址。
+mkdir -p logs
+set -o pipefail
+bash deploy/upgrade-old-device.sh 192.168.0.244 2>&1 | tee "logs/upgrade-$(date +%Y%m%d-%H%M%S).log"
+upgrade_rc=${PIPESTATUS[0]}
+echo "升级退出码: $upgrade_rc"
+```
+
+| 验收层级 | 通过标准 |
+| --- | --- |
+| 自动部署与启动检查 | 各部署步骤成功；90 秒观察窗口内，两服务及设备识别接口连续正常至少 15 秒；进程 PID 不变、自动重启次数不增加；接口版本与设备 `VERSION` 一致。 |
+| 配置与协议核对 | 原摄像头、区域、ROI、串口物理地址正确；WebSocket 只读请求成功。旧索引包含 `0` 时整组加一，例如 `0/1/2 → 1/2/3`。已错误迁移或不含 `0` 的旧配置须对照备份核实。 |
+| 现场硬件与业务检查 | 摄像头有实时画面、推理持续采样；真实 BLE 客户端完成扫描、连接、信息读取；在现场测试窗口验证电流采集、人员识别、语音报警、对应区域切电与复位。需要开机持久化时另测重启后的相关功能。 |
+
+设备流程返回 `0` 表示自动部署与启动检查通过；`1` 表示主要步骤或启动检查失败；
+`2` 表示服务通过启动检查但配套部署存在失败。SSH/本机工具也可能产生非零退出码，应结合日志处理。
+**返回 `0` 不等于现场全功能验收通过**：USB 节点不存在或 RTSP 不可达时，服务和接口仍可能正常。
+
+升级后可在设备项目目录复查（以下 Python 路径应与部署的主服务 unit 一致）：
+
+```bash
+cd /home/linaro/ai-dhlr
+cat VERSION
+git rev-parse --short HEAD
+systemctl show ai-dhlr.service ai-dhlr-ble.service -p Id -p ActiveState -p SubState -p MainPID -p NRestarts
+/home/linaro/miniforge3/envs/dhlr_env/bin/python deploy/upgrade_check.py
+sudo journalctl -u ai-dhlr.service -u ai-dhlr-ble.service -b -n 100 --no-pager
+```
+
+记录“自动部署结果”和“现场业务验收结果”两项，并附版本、提交、日志及未通过的硬件项目。
+失败时先根据日志处理缺包、模型、service、摄像头或串口问题，再重试或依据备份制定回退方案；
+仅把 Git 回退到旧提交不能同时恢复依赖、设备配置和系统服务。
+
 ### 关键配置项说明
 
 #### 摄像头配置

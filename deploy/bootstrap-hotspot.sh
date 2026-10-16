@@ -7,7 +7,7 @@
 # 2. 一次性清理历史残留的 Hotspot / Hotspot-N 连接——新脚本改用固定连接名
 #    dhlr-hotspot，不再产生 Hotspot-N；旧连接清掉避免堆积。
 #
-# 幂等：可反复执行；cmp 一致则跳过拷贝；无残留则跳过清理。退出码 0。
+# 幂等：可反复执行；cmp 一致则跳过拷贝；无残留则跳过清理。失败返回非零。
 # 调用方：src/api/ws_handler.py::_deploy_and_restart（紧跟 bootstrap-ble.sh 之后）。
 
 set -u
@@ -32,8 +32,8 @@ elif ! cmp -s "$SRC_SCRIPT" "$DST_SCRIPT"; then
     NEED_INSTALL=1
 fi
 if [ "$NEED_INSTALL" -eq 1 ]; then
-    cp "$SRC_SCRIPT" "$DST_SCRIPT"
-    chmod 755 "$DST_SCRIPT"
+    cp "$SRC_SCRIPT" "$DST_SCRIPT" || exit 1
+    chmod 755 "$DST_SCRIPT" || exit 1
     echo "[OK]   已安装/更新 $DST_SCRIPT"
 else
     echo "[SKIP] $DST_SCRIPT 已是最新"
@@ -44,6 +44,8 @@ fi
 # 仅删 "Hotspot" / "Hotspot-<数字>" 且非活动的连接——新脚本固定用
 # dhlr-hotspot，绝不误删；活动中的连接跳过避免误伤提供网络的连接。
 CLEANED=0
+FAILED=0
+CONNECTIONS=$(nmcli -t -f NAME,DEVICE connection show) || exit 1
 while IFS=: read -r name dev; do
     case "$name" in
         Hotspot|Hotspot-[0-9]*) ;;
@@ -53,8 +55,13 @@ while IFS=: read -r name dev; do
         echo "[SKIP] $name 正活动于 $dev，跳过删除"
         continue
     fi
-    nmcli connection delete "$name" >/dev/null 2>&1 && CLEANED=$((CLEANED + 1))
-done < <(nmcli -t -f NAME,DEVICE connection show 2>/dev/null)
+    if nmcli connection delete "$name" >/dev/null 2>&1; then
+        CLEANED=$((CLEANED + 1))
+    else
+        echo "[WARN] 清理 $name 失败"
+        FAILED=1
+    fi
+done <<< "$CONNECTIONS"
 
 if [ "$CLEANED" -gt 0 ]; then
     echo "[OK]   清理 $CLEANED 个历史 Hotspot 残留连接"
@@ -62,5 +69,9 @@ else
     echo "[SKIP] 无历史 Hotspot 残留连接"
 fi
 
+if [ "$FAILED" -ne 0 ]; then
+    echo "[FAIL] 热点脚本已安装，但历史连接清理未完成"
+    exit 1
+fi
 echo "==== 热点脚本部署完成 ===="
 exit 0
