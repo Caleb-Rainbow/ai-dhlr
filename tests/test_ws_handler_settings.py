@@ -237,6 +237,86 @@ def test_restore_without_amixer_returns_false(monkeypatch):
     assert audio_gain.restore_configured(retries=1, interval=0) is False
 
 
+def test_restore_detects_override_after_initial_success(env, monkeypatch):
+    _, cfg, _ = env
+    cfg.voice.hw_dac = 252
+    state = {"DAC Playback Volume": 252, "HP Output Gain": 3}
+    sleeps = []
+    writes = []
+    monkeypatch.setattr(audio_gain, "_has_amixer", lambda: True)
+    monkeypatch.setattr(audio_gain, "read_control", state.get)
+
+    def write(name, value):
+        state[name] = value
+        writes.append((name, value))
+        return True
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            state["DAC Playback Volume"] = 0
+
+    monkeypatch.setattr(audio_gain, "write_control", write)
+    monkeypatch.setattr(audio_gain.time, "sleep", sleep)
+    assert audio_gain.restore_configured(retries=5, interval=10)
+    assert sleeps == [10] * 4
+    assert writes == [("DAC Playback Volume", 252)]
+    assert state["DAC Playback Volume"] == 252
+
+
+def test_restore_uses_new_user_setting_during_window(env, monkeypatch):
+    _, cfg, _ = env
+    cfg.voice.hw_dac = 252
+    state = {"DAC Playback Volume": 252, "HP Output Gain": 3}
+    monkeypatch.setattr(audio_gain, "_has_amixer", lambda: True)
+    monkeypatch.setattr(audio_gain, "read_control", state.get)
+    writes = []
+    monkeypatch.setattr(audio_gain, "write_control",
+                        lambda name, value: writes.append((name, value)))
+
+    def user_changes_volume(_):
+        cfg.voice.hw_dac = 200
+        state["DAC Playback Volume"] = 200
+
+    monkeypatch.setattr(audio_gain.time, "sleep", user_changes_volume)
+    assert audio_gain.restore_configured(retries=2, interval=10)
+    assert writes == []
+
+
+def test_restore_monitor_rechecks_and_stops(monkeypatch):
+    import threading
+    stop = threading.Event()
+    calls = []
+
+    def restore(**kwargs):
+        calls.append(kwargs["retries"])
+        assert kwargs["stop_event"] is stop
+        if len(calls) == 2:
+            stop.set()
+        return True
+
+    monkeypatch.setattr(audio_gain, "restore_configured", restore)
+    worker = audio_gain.start_restore_thread(stop_event=stop, monitor_interval=0)
+    worker.join(1)
+    assert not worker.is_alive()
+    assert calls == [5, 1]
+
+
+def test_restore_window_can_be_cancelled(env, monkeypatch):
+    import threading
+    _, cfg, _ = env
+    cfg.voice.hw_dac = 252
+    stop = threading.Event()
+    monkeypatch.setattr(audio_gain, "_has_amixer", lambda: True)
+
+    def read():
+        stop.set()
+        return {"dac": 252, "hp_gain": 3}
+
+    monkeypatch.setattr(audio_gain, "read_gain", read)
+    assert not audio_gain.restore_configured(retries=5, interval=60, stop_event=stop)
+
+
 # ------------------------------ 原有 settings 行为回归 ------------------------------ #
 async def test_get_settings_all_only_legacy_categories(env):
     """get_settings(all) 只含 alarm/system/voice。"""

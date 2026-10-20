@@ -415,6 +415,7 @@ class ZoneManager:
         self._zones: Dict[str, ZoneStateMachine] = {}
         self._fire_states: Dict[str, bool] = {}  # 模拟GPIO开火状态
         self._logger = get_logger()
+        self._callbacks: dict = {}
     
     def add_zone(self, config: ZoneConfig, 
                  on_warning: Callable = None,
@@ -424,7 +425,17 @@ class ZoneManager:
                  on_temp_alarm: Callable = None) -> ZoneStateMachine:
         """添加灶台"""
         sm = ZoneStateMachine(config)
-        sm.set_callbacks(on_warning, on_alarm, on_cutoff, on_state_change, on_temp_alarm)
+        callbacks = {
+            "on_warning": on_warning,
+            "on_alarm": on_alarm,
+            "on_cutoff": on_cutoff,
+            "on_state_change": on_state_change,
+            "on_temp_alarm": on_temp_alarm,
+        }
+        sm.set_callbacks(**{
+            name: callback if callback is not None else self._callbacks.get(name)
+            for name, callback in callbacks.items()
+        })
         self._zones[config.id] = sm
         self._fire_states[config.id] = False  # 默认关火
         self._logger.info(f"添加灶台: {config.id} ({config.name})")
@@ -433,6 +444,10 @@ class ZoneManager:
     def get_zone(self, zone_id: str) -> Optional[ZoneStateMachine]:
         """获取灶台状态机"""
         return self._zones.get(zone_id)
+
+    def get_callbacks(self) -> dict:
+        """当前系统注册的回调，与入口模块的导入名称无关。"""
+        return dict(self._callbacks)
     
     def get_all_zones(self) -> List[ZoneStateMachine]:
         """获取所有灶台"""
@@ -504,8 +519,16 @@ class ZoneManager:
                               on_state_change: Callable = None,
                               on_temp_alarm: Callable = None):
         """从配置初始化"""
+        # 即使启动时没有灶台，之后由 API 新增的灶台也必须继承这些回调。
+        self._callbacks = {
+            "on_warning": on_warning,
+            "on_alarm": on_alarm,
+            "on_cutoff": on_cutoff,
+            "on_state_change": on_state_change,
+            "on_temp_alarm": on_temp_alarm,
+        }
         for config in zones:
-            self.add_zone(config, on_warning, on_alarm, on_cutoff, on_state_change, on_temp_alarm)
+            self.add_zone(config)
         self._logger.info(f"从配置加载了 {len(zones)} 个灶台")
 
 

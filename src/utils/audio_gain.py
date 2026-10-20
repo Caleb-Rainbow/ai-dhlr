@@ -26,6 +26,7 @@ HP_GAIN_MAX = 3
 _CARD = "0"
 _DAC_CONTROL = "DAC Playback Volume"
 _HP_CONTROL = "HP Output Gain"
+settings_lock = threading.RLock()
 
 
 def _has_amixer() -> bool:
@@ -110,55 +111,73 @@ def write_gain(dac=None, hp_gain=None) -> dict:
     return read_gain()
 
 
-def restore_configured(retries: int = 5, interval: float = 10.0) -> bool:
+def restore_configured(retries: int = 5, interval: float = 10.0,
+                       stop_event: Optional[threading.Event] = None) -> bool:
     """把 config.voice.hw_dac/hw_hp_gain 重放到 codec（开机恢复入口）。
 
     - 用户从未设置过（两者皆 None）→ 不干预，保持 WirePlumber/系统默认
     - 带 retries 重试：应用与 WirePlumber 的启动顺序不保证，WirePlumber 晚启动会
-      覆盖我们的写入，重试窗口内反复校验直至目标值稳定
+      覆盖我们的写入，因此必须完成整个复核窗口，不能首次匹配就提前退出。
+    - 每轮读取最新配置，并与用户设置互斥，避免重放过期设置。
     返回最终是否与配置一致。
     """
     if not _has_amixer():
         return False
     from .config import config_manager
-    voice = config_manager.config.voice
-    dac, hp = voice.hw_dac, voice.hw_hp_gain
-    if dac is None and hp is None:
-        return True
-
+    matched = False
+    changed = False
     for attempt in range(retries):
-        current = read_gain()
-        if dac is not None and current["dac"] != dac:
-            write_control(_DAC_CONTROL, dac)
-        if hp is not None and current["hp_gain"] != hp:
-            write_control(_HP_CONTROL, hp)
-        # 写后复核：任何一级没到位都进入下一轮
-        after = read_gain()
-        dac_ok = dac is None or after["dac"] == dac
-        hp_ok = hp is None or after["hp_gain"] == hp
-        if dac_ok and hp_ok:
-            if attempt > 0:
-                logger.info(f"硬件音量增益已恢复（第 {attempt + 1} 次尝试）：DAC={after['dac']} HP={after['hp_gain']}")
-            else:
-                logger.info(f"硬件音量增益已恢复：DAC={after['dac']} HP={after['hp_gain']}")
-            return True
-        logger.warning(
-            f"硬件音量增益恢复未就绪（第 {attempt + 1}/{retries} 次，"
-            f"当前 DAC={after['dac']} HP={after['hp_gain']}，目标 DAC={dac} HP={hp}），{interval}s 后重试"
-        )
-        time.sleep(interval)
-    logger.error("硬件音量增益恢复失败：重试耗尽（WirePlumber 可能仍在覆盖，检查音频服务状态）")
+        if stop_event is not None and stop_event.is_set():
+            return False
+        with settings_lock:
+            voice = config_manager.config.voice
+            dac, hp = voice.hw_dac, voice.hw_hp_gain
+            if dac is None and hp is None:
+                return True
+            current = read_gain()
+            if dac is not None and current["dac"] != dac:
+                changed = True
+                write_control(_DAC_CONTROL, dac)
+            if hp is not None and current["hp_gain"] != hp:
+                changed = True
+                write_control(_HP_CONTROL, hp)
+            after = read_gain()
+            matched = ((dac is None or after["dac"] == dac)
+                       and (hp is None or after["hp_gain"] == hp))
+        if not matched:
+            logger.warning(
+                f"硬件音量增益恢复未就绪（第 {attempt + 1}/{retries} 次，"
+                f"当前 DAC={after['dac']} HP={after['hp_gain']}，目标 DAC={dac} HP={hp}）"
+            )
+        if attempt + 1 < retries:
+            if stop_event is None:
+                time.sleep(interval)
+            elif stop_event.wait(interval):
+                return False
+    if matched:
+        if changed or retries > 1:
+            logger.info(f"硬件音量增益复核完成：DAC={after['dac']} HP={after['hp_gain']}")
+        return True
+    logger.error("硬件音量增益恢复失败：重试耗尽（检查音频服务状态）")
     return False
 
 
-def start_restore_thread() -> threading.Thread:
-    """后台线程执行开机恢复（daemon：不阻塞主程序退出，失败只记日志）。"""
+def start_restore_thread(stop_event: Optional[threading.Event] = None,
+                         monitor_interval: float = 60.0) -> threading.Thread:
+    """开机完整复核，之后定期恢复已保存的用户设置；主服务退出时停止。"""
+    if stop_event is None:
+        stop_event = threading.Event()
 
     def _worker():
-        try:
-            restore_configured()
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"硬件音量增益恢复线程异常: {e}")
+        first = True
+        while not stop_event.is_set():
+            try:
+                restore_configured(retries=5 if first else 1, stop_event=stop_event)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"硬件音量增益恢复线程异常: {e}")
+            first = False
+            if stop_event.wait(monitor_interval):
+                return
 
     t = threading.Thread(target=_worker, daemon=True, name="audio-gain-restore")
     t.start()

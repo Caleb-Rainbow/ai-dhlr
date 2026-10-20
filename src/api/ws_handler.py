@@ -407,14 +407,8 @@ class WSHandler:
         # 添加到配置
         config_manager.config.zones.append(config)
         
-        # 获取回调
-        try:
-            from ..main import get_zone_callbacks
-            callbacks = get_zone_callbacks()
-        except ImportError:
-            callbacks = {}
-        
-        zone_manager.add_zone(config, **callbacks)
+        # 继承运行中的管理器回调，避免脚本入口与 src.main 产生两份系统实例。
+        zone_manager.add_zone(config)
         config_manager.save()
         
         # 注册到串口管理器
@@ -1127,16 +1121,20 @@ class WSHandler:
 
         params: {"dac": 0-252, "hp_gain": 0-3}（可只传其一）
         """
-        result = audio_gain.write_gain(params.get("dac"), params.get("hp_gain"))
+        def apply():
+            # 设置及持久化与后台恢复互斥，防止后台把用户刚设置的值改回去。
+            with audio_gain.settings_lock:
+                result = audio_gain.write_gain(params.get("dac"), params.get("hp_gain"))
+                config = config_manager.config
+                if "dac" in params:
+                    config.voice.hw_dac = int(params["dac"])
+                if "hp_gain" in params:
+                    config.voice.hw_hp_gain = int(params["hp_gain"])
+                config_manager.save()
+                return result
 
-        # 持久化用户设置供开机恢复（只记实际写入的项）
-        config = config_manager.config
-        if "dac" in params:
-            config.voice.hw_dac = int(params["dac"])
-        if "hp_gain" in params:
-            config.voice.hw_hp_gain = int(params["hp_gain"])
-        config_manager.save()
-        return result
+        # amixer 或恢复锁等待不能阻塞 WebSocket 事件循环。
+        return await asyncio.to_thread(apply)
     
     async def _set_device_id(self, params: dict) -> dict:
         """设置设备ID"""

@@ -52,6 +52,7 @@ class FireSafetySystem:
 
         # 磁盘空间看门狗
         self._disk_guard = None
+        self._audio_gain_stop = threading.Event()
 
     
     def initialize(self) -> bool:
@@ -116,7 +117,7 @@ class FireSafetySystem:
             # WirePlumber 启动会把 DAC 拉回 ~86%（sink 1.0 映射）覆盖上次设置，
             # 应用侧重放 config.voice.hw_dac/hw_hp_gain；未设置过则不干预
             from src.utils.audio_gain import start_restore_thread
-            start_restore_thread()
+            start_restore_thread(stop_event=self._audio_gain_stop)
             
             # 生成或获取设备ID
             try:
@@ -645,6 +646,7 @@ class FireSafetySystem:
     def stop(self):
         """停止系统"""
         self._running = False
+        self._audio_gain_stop.set()
 
         if self._disk_guard:
             self._disk_guard.stop()
@@ -693,15 +695,7 @@ _system: FireSafetySystem = None
 
 def get_zone_callbacks():
     """获取灶台回调函数（供API使用）"""
-    if _system:
-        return {
-            "on_warning": _system._on_warning,
-            "on_alarm": _system._on_alarm,
-            "on_cutoff": _system._on_cutoff,
-            "on_state_change": _system._on_state_change,
-            "on_temp_alarm": _system._on_temp_alarm
-        }
-    return {}
+    return zone_manager.get_callbacks()
 
 
 def main():
